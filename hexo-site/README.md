@@ -44,6 +44,6 @@ npx hexo server
 
 ## 图片
 
-文章里若写 `![](/notes/imgs/xxx.png)`，请把 **`xxx.png` 放在本目录下的 `source/imgs/`** 并 **提交进 Git**。构建后线上地址为 `https://llx-08.github.io/notes/imgs/xxx.png`。
+文章里图片请写 **`![](/imgs/xxx.png)`**（不要用 `/notes/imgs/`，否则生成结果会变成 `/notes/notes/imgs/` 导致 404）。把 **`xxx.png` 放在 `source/imgs/`** 并提交。线上实际地址仍是 `https://llx-08.github.io/notes/imgs/xxx.png`。
 
-若你只在仓库根目录的 `imgs/` 里放了图、没有拷到 `hexo-site/source/imgs/`，本地预览和 GitHub Pages 都会 **404**（之前 KL 散度两篇图就是这种情况）。更新根目录笔记里的图时，记得同步一份到 `hexo-site/source/imgs/`（或以后只维护 `source/imgs/` 一处）。
+若只在仓库根目录的 `imgs/` 里有图、没有拷到 `hexo-site/source/imgs/`，站点上会 **404**。根目录 Markdown 里可继续用相对路径 `imgs/xxx.png` 方便本地/GitHub 预览；同步到 `_posts` 时请改成上面的 `/imgs/` 写法。

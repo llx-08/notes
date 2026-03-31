@@ -16,14 +16,14 @@ $D_{KL}(P||Q) = \sum^N_{i=1}[p(x_i)logp(x_i)-p(x_i)logq(x_i)] $
 
 那么现在，小明和小红谁预测的概率分布离真实分布比较近？这时候就可以用KL散度来衡量P1与Q的相似性、P2与Q的相似性，然后对比可得谁更相似。
 
-![KL 散度示意](/notes/imgs/kl_example.png)
+![KL 散度示意](/imgs/kl_example.png)
 
 $KL1$比$KL2$更小，说明P1与Q更相近。
 
 # PPO中的应用
 为了防止Reward Model带来的权重修改过大，在loss函数中添加了一个约束项，也可以理解为KL散度。
 
-![PPO loss 示意](/notes/imgs/ppo_loss.png)
+![PPO loss 示意](/imgs/ppo_loss.png)
 
 这里的$\pi^{RL}_{\phi}$代表最终经过RL的模型权重概率分布，$\pi^{SFT}$代表SFT后得到的模型权重概率分布
 
