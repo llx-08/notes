@@ -8,6 +8,10 @@
 
 源码在 `hexo-site/`，仓库根目录下的 `*.md` 为原始笔记副本，已同步到 `source/_posts/`。
 
+**首页摘要**：未写 `<!-- more -->` 时，脚本会按纯文本约 **420 字**截断（`_config.yml` 里 `auto_excerpt_length`）。单篇若要自定截断位置，在正文插入一行 `<!-- more -->` 即可。
+
+**侧栏头像**：在 `_config.icarus.yml` 的 `widgets` → `profile` → `avatar` 填图片 **URL**，或把图放到 `source/imgs/` 后写 **`/imgs/文件名`**（与文章图片路径规则相同）。
+
 ## 本地预览
 
 ```bash

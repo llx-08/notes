@@ -5,7 +5,7 @@
 # Site
 title: Notes
 subtitle: ''
-description: 'Study notes — vLLM, RL, and related topics'
+description: '学习笔记'
 keywords:
 author: llx-08
 language: zh-CN
@@ -31,6 +31,9 @@ category_dir: categories
 code_dir: downloads/code
 i18n_dir: :lang
 skip_render:
+
+# 首页摘要：无 <!-- more --> 时按纯文本截断（scripts/auto-excerpt.js）
+auto_excerpt_length: 420
 
 # Writing
 new_post_name: :title.md # File name of new posts

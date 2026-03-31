@@ -179,13 +179,13 @@ widgets:
         # Author name
         author: llx-08
         # Author title
-        author_title: vLLM / RL 学习笔记
+        author_title: 学习笔记
         # Author's current location
         location: ''
-        # URL or path to the avatar image
-        avatar: 
+        # 头像：可改为本站图片路径，例如 /imgs/avatar.png（文件放在 source/imgs/）
+        avatar: https://github.com/llx-08.png
         # Whether show the rounded avatar image
-        avatar_rounded: false
+        avatar_rounded: true
         # Email address for the Gravatar
         gravatar: 
         # URL or path for the follow button
