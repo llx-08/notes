@@ -1,6 +1,10 @@
 # Hexo 站点（Notes）
 
-源码在 `hexo-site/`，根目录下的 `*.md` 为原始笔记副本已同步到 `source/_posts/`。
+使用主题 **[hexo-theme-icarus](https://github.com/ppoffice/hexo-theme-icarus)**（npm 包 `hexo-theme-icarus`）。主题配置在 **`_config.icarus.yml`**；升级主题后若配置版本过旧，可按终端提示迁移或对照[官方文档](https://ppoffice.github.io/hexo-theme-icarus/)。
+
+数学公式仍由根目录 **`_config.yml`** 中的 **`hexo-filter-mathjax`**（服务端）渲染；Icarus 自带 `plugins.mathjax` / `katex` 保持关闭，避免重复加载。
+
+源码在 `hexo-site/`，仓库根目录下的 `*.md` 为原始笔记副本，已同步到 `source/_posts/`。
 
 ## 本地预览
 

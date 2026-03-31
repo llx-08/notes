@@ -98,7 +98,7 @@ ignore:
 # Extensions
 ## Plugins: https://hexo.io/plugins/
 ## Themes: https://hexo.io/themes/
-theme: landscape
+theme: icarus
 
 # MathJax (hexo-filter-mathjax) — server-side; enable for posts with $...$
 mathjax:
