@@ -1,0 +1,11 @@
+# Hexo
+hexo-site/node_modules/
+hexo-site/public/
+hexo-site/db.json
+hexo-site/.deploy_git/
+hexo-site/debug.log
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
