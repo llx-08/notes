@@ -2,6 +2,8 @@
 
 使用主题 **[hexo-theme-icarus](https://github.com/ppoffice/hexo-theme-icarus)**（npm 包 `hexo-theme-icarus`）。主题配置在 **`_config.icarus.yml`**；升级主题后若配置版本过旧，可按终端提示迁移或对照[官方文档](https://ppoffice.github.io/hexo-theme-icarus/)。
 
+评论（Disqus 等）、分享（ShareThis 等）、打赏（PayPal 等）均为可选：未在 `_config.icarus.yml` 中配置时，默认已关闭对应区块，**不必**向任何人提供 shortname、install_url 等；若以后需要，再按官方文档填写即可。
+
 数学公式仍由根目录 **`_config.yml`** 中的 **`hexo-filter-mathjax`**（服务端）渲染；Icarus 自带 `plugins.mathjax` / `katex` 保持关闭，避免重复加载。
 
 源码在 `hexo-site/`，仓库根目录下的 `*.md` 为原始笔记副本，已同步到 `source/_posts/`。

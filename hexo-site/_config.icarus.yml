@@ -155,53 +155,8 @@ search:
     type: insight
     # Whether to include pages in the search results
     index_pages: true
-# Comment plugin configurations
-# https://ppoffice.github.io/hexo-theme-icarus/categories/Plugins/Comment/
-comment:
-    type: disqus
-    # Disqus shortname
-    shortname: ''
-# Donate plugin configurations
-# https://ppoffice.github.io/hexo-theme-icarus/categories/Plugins/Donation/
-donates:
-    # "Afdian.net" donate button configurations
-    -
-        type: afdian
-        # URL to the "Afdian.net" personal page
-        url: ''
-    # Alipay donate button configurations
-    -
-        type: alipay
-        # Alipay qrcode image URL
-        qrcode: ''
-    # "Buy me a coffee" donate button configurations
-    -
-        type: buymeacoffee
-        # URL to the "Buy me a coffee" page
-        url: ''
-    # Patreon donate button configurations
-    -
-        type: patreon
-        # URL to the Patreon page
-        url: ''
-    # Paypal donate button configurations
-    -
-        type: paypal
-        # Paypal business ID or email address
-        business: ''
-        # Currency code
-        currency_code: USD
-    # Wechat donate button configurations
-    -
-        type: wechat
-        # Wechat qrcode image URL
-        qrcode: ''
-# Share plugin configurations
-# https://ppoffice.github.io/hexo-theme-icarus/categories/Plugins/Share/
-share:
-    type: sharethis
-    # URL to the ShareThis share plugin script
-    install_url: ''
+# 未配置 comment / share / donates 时，主题不显示评论、分享条与打赏（无需 Disqus、ShareThis、PayPal 等账号）
+# 需要时再在本文档按官方文档添加：https://ppoffice.github.io/hexo-theme-icarus/categories/Plugins/
 # Sidebar configurations.
 # Please be noted that a sidebar is only visible when it has at least one widget
 sidebar:
