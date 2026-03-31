@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  
+  <title>GDN (GatedDeltaNet) 在 vLLM 中的计算流程 | Notes</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="description" content="GDN (GatedDeltaNet) 在 vLLM 中的计算流程1. 整体架构概览GDN（Gated Delta Net）是 Qwen3-Next 模型中的一种线性注意力机制，与传统的 full attention 交替使用。模型的每一层由 config.layer_types 决定是 &quot;linear_attention&quot;（GDN）还是 &quot;full_attention&quot;（标准 Attention">
+<meta property="og:type" content="article">
+<meta property="og:title" content="GDN (GatedDeltaNet) 在 vLLM 中的计算流程">
+<meta property="og:url" content="https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-gdn-computation/index.html">
+<meta property="og:site_name" content="Notes">
+<meta property="og:description" content="GDN (GatedDeltaNet) 在 vLLM 中的计算流程1. 整体架构概览GDN（Gated Delta Net）是 Qwen3-Next 模型中的一种线性注意力机制，与传统的 full attention 交替使用。模型的每一层由 config.layer_types 决定是 &quot;linear_attention&quot;（GDN）还是 &quot;full_attention&quot;（标准 Attention">
+<meta property="og:locale" content="zh_CN">
+<meta property="article:published_time" content="2026-03-31T00:00:00.000Z">
+<meta property="article:modified_time" content="2026-03-31T07:09:38.077Z">
+<meta property="article:author" content="llx-08">
+<meta property="article:tag" content="vLLM">
+<meta name="twitter:card" content="summary">
+  
+    <link rel="alternate" href="/notes/atom.xml" title="Notes" type="application/atom+xml">
+  
+  
+    <link rel="shortcut icon" href="/notes/favicon.png">
+  
+  
+  
+<link rel="stylesheet" href="/notes/css/style.css">
+
+  
+    
+<link rel="stylesheet" href="/notes/fancybox/jquery.fancybox.min.css">
+
+  
+  
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fork-awesome@1.2.0/css/fork-awesome.min.css">
+
+<meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/notes/" id="logo">Notes</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"><span class="fa fa-bars"></span></a>
+        
+          <a class="main-nav-link" href="/notes/">Home</a>
+        
+          <a class="main-nav-link" href="/notes/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+        
+          <a class="nav-icon" href="/notes/atom.xml" title="RSS 订阅"><span class="fa fa-rss"></span></a>
+        
+        <a class="nav-icon nav-search-btn" title="搜索"><span class="fa fa-search"></span></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="搜索"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="https://llx-08.github.io/notes"></form>
+      </div>
+    </div>
+  </div>
+</header>
+
+      <div class="outer">
+        <section id="main"><article id="post-2026-03-31-vllm-gdn-computation" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/notes/2026/03/31/2026-03-31-vllm-gdn-computation/" class="article-date">
+  <time class="dt-published" datetime="2026-03-31T00:00:00.000Z" itemprop="datePublished">2026-03-31</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="p-name article-title" itemprop="headline name">
+      GDN (GatedDeltaNet) 在 vLLM 中的计算流程
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <h1 id="GDN-GatedDeltaNet-在-vLLM-中的计算流程"><a href="#GDN-GatedDeltaNet-在-vLLM-中的计算流程" class="headerlink" title="GDN (GatedDeltaNet) 在 vLLM 中的计算流程"></a>GDN (GatedDeltaNet) 在 vLLM 中的计算流程</h1><h2 id="1-整体架构概览"><a href="#1-整体架构概览" class="headerlink" title="1. 整体架构概览"></a>1. 整体架构概览</h2><p>GDN（Gated Delta Net）是 Qwen3-Next 模型中的一种<strong>线性注意力</strong>机制，与传统的 full attention 交替使用。模型的每一层由 <code>config.layer_types</code> 决定是 <code>"linear_attention"</code>（GDN）还是 <code>"full_attention"</code>（标准 Attention）。</p>
+<p>核心代码位于：</p>
+<ul>
+<li><strong>GDN 模型层</strong>：<code>vllm/model_executor/models/qwen3_next.py</code> → <code>Qwen3NextGatedDeltaNet</code></li>
+<li><strong>GDN Attention Metadata</strong>：<code>vllm/v1/attention/backends/gdn_attn.py</code> → <code>GDNAttentionMetadataBuilder</code></li>
+<li><strong>递归核心 Kernel</strong>：<code>vllm/model_executor/layers/fla/ops/fused_recurrent.py</code></li>
+<li><strong>分块核心 Kernel</strong>：<code>vllm/model_executor/layers/fla/ops/chunk.py</code></li>
+</ul>
+<p><strong>关键点：QSA（Query-Side Aggregation）只在 full_attention 层中使用，不影响 GDN 层的计算。</strong></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/model_executor/models/qwen3_next.py : Qwen3NextDecoderLayer.__init__</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.layer_type == <span class="string">"linear_attention"</span>:</span><br><span class="line">    topk_indices_buffer = <span class="literal">None</span>  <span class="comment"># only use qsa in full-attn</span></span><br><span class="line">    <span class="variable language_">self</span>.linear_attn = Qwen3NextGatedDeltaNet(...)</span><br><span class="line"><span class="keyword">elif</span> <span class="variable language_">self</span>.layer_type == <span class="string">"full_attention"</span>:</span><br><span class="line">    <span class="variable language_">self</span>.self_attn = Qwen3NextAttention(..., topk_indices_buffer=topk_indices_buffer)</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="2-GDN-层的三阶段计算流程"><a href="#2-GDN-层的三阶段计算流程" class="headerlink" title="2. GDN 层的三阶段计算流程"></a>2. GDN 层的三阶段计算流程</h2><p>GDN 的 <code>forward</code> 分为三个阶段。</p>
+<h3 id="阶段-1：输入投影-Input-Projection"><a href="#阶段-1：输入投影-Input-Projection" class="headerlink" title="阶段 1：输入投影 (Input Projection)"></a>阶段 1：输入投影 (Input Projection)</h3><p>从 <code>hidden_states</code> 通过两个投影矩阵得到 6 个张量：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/model_executor/models/qwen3_next.py : Qwen3NextGatedDeltaNet.forward</span></span><br><span class="line">projected_states_qkvz, _ = <span class="variable language_">self</span>.in_proj_qkvz(hidden_states)  <span class="comment"># → q, k, v, z</span></span><br><span class="line">projected_states_ba, _ = <span class="variable language_">self</span>.in_proj_ba(hidden_states)        <span class="comment"># → b, a</span></span><br></pre></td></tr></table></figure>
+
+<p>有两种 split 方式：</p>
+<ul>
+<li><strong>Fused Triton kernel</strong>（<code>fused_qkvzba_split_reshape_cat</code>）：在满足条件时使用融合 kernel</li>
+<li><strong>PyTorch 原生</strong>（<code>fix_query_key_value_ordering</code>）：fallback 路径</li>
+</ul>
+<p>输出的 6 个张量的作用：</p>
+<table>
+<thead>
+<tr>
+<th>张量</th>
+<th>形状</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>q</td>
+<td><code>[tokens, num_k_heads/tp, head_k_dim]</code></td>
+<td>查询向量</td>
+</tr>
+<tr>
+<td>k</td>
+<td><code>[tokens, num_k_heads/tp, head_k_dim]</code></td>
+<td>键向量</td>
+</tr>
+<tr>
+<td>v</td>
+<td><code>[tokens, num_v_heads/tp, head_v_dim]</code></td>
+<td>值向量</td>
+</tr>
+<tr>
+<td>z</td>
+<td><code>[tokens, num_v_heads/tp, head_v_dim]</code></td>
+<td>输出门控</td>
+</tr>
+<tr>
+<td>b</td>
+<td><code>[tokens, num_v_heads/tp]</code></td>
+<td>计算 beta（更新门控）</td>
+</tr>
+<tr>
+<td>a</td>
+<td><code>[tokens, num_v_heads/tp]</code></td>
+<td>计算 g（衰减因子）</td>
+</tr>
+</tbody></table>
+<p>最终 q, k, v 被拼接为 <code>mixed_qkv = cat(q, k, v)</code>。</p>
+<h3 id="阶段-2：核心注意力计算-Core-Attention"><a href="#阶段-2：核心注意力计算-Core-Attention" class="headerlink" title="阶段 2：核心注意力计算 (Core Attention)"></a>阶段 2：核心注意力计算 (Core Attention)</h3><p>核心计算通过 <code>_forward_core</code> 完成，分为三个子步骤。</p>
+<h4 id="2-1-因果卷积-Causal-Conv1d"><a href="#2-1-因果卷积-Causal-Conv1d" class="headerlink" title="2.1 因果卷积 (Causal Conv1d)"></a>2.1 因果卷积 (Causal Conv1d)</h4><p>对 <code>mixed_qkv</code> 进行 1D 因果卷积，更新 conv_state 缓存。根据是否有 spec decode，分为 spec 部分和 non-spec 部分分别处理：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/model_executor/models/qwen3_next.py : _forward_core</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># Spec decode 部分：单步更新</span></span><br><span class="line"><span class="keyword">if</span> spec_sequence_masks <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>:</span><br><span class="line">    mixed_qkv_spec = causal_conv1d_update(</span><br><span class="line">        mixed_qkv_spec, conv_state, conv_weights, ...,</span><br><span class="line">        conv_state_indices=spec_state_indices_tensor[:, <span class="number">0</span>],</span><br><span class="line">        num_accepted_tokens=num_accepted_tokens,</span><br><span class="line">        query_start_loc=spec_query_start_loc,</span><br><span class="line">    )</span><br><span class="line"></span><br><span class="line"><span class="comment"># Non-spec Prefill 部分：整序列卷积</span></span><br><span class="line"><span class="keyword">if</span> attn_metadata.num_prefills &gt; <span class="number">0</span>:</span><br><span class="line">    mixed_qkv_non_spec = causal_conv1d_fn(</span><br><span class="line">        mixed_qkv_non_spec_T, conv_weights, ...,</span><br><span class="line">        conv_states=conv_state,</span><br><span class="line">        has_initial_state=has_initial_state,</span><br><span class="line">        cache_indices=non_spec_state_indices_tensor,</span><br><span class="line">        query_start_loc=non_spec_query_start_loc,</span><br><span class="line">    ).transpose(<span class="number">0</span>, <span class="number">1</span>)</span><br><span class="line"></span><br><span class="line"><span class="comment"># Non-spec Decode 部分：单步更新</span></span><br><span class="line"><span class="keyword">elif</span> attn_metadata.num_decodes &gt; <span class="number">0</span>:</span><br><span class="line">    mixed_qkv_non_spec = causal_conv1d_update(</span><br><span class="line">        mixed_qkv_non_spec, conv_state, conv_weights, ...,</span><br><span class="line">        conv_state_indices=non_spec_state_indices_tensor,</span><br><span class="line">    )</span><br></pre></td></tr></table></figure>
+
+<h4 id="2-2-门控计算-Gating"><a href="#2-2-门控计算-Gating" class="headerlink" title="2.2 门控计算 (Gating)"></a>2.2 门控计算 (Gating)</h4><p>通过 fused triton kernel 计算衰减因子 g 和更新门控 beta：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/model_executor/models/qwen3_next.py</span></span><br><span class="line">g, beta = fused_gdn_gating(<span class="variable language_">self</span>.A_log, a.contiguous(), b, <span class="variable language_">self</span>.dt_bias)</span><br></pre></td></tr></table></figure>
+
+<p>数学公式：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">g = -exp(A_log) * softplus(a + dt_bias)</span><br><span class="line">beta = sigmoid(b)</span><br></pre></td></tr></table></figure>
+
+<p>其中 <code>softplus(x) = (1/β) * log(1 + exp(β*x))</code>，当 <code>β*x &gt; threshold</code> 时退化为 <code>x</code>。</p>
+<p>Triton kernel 实现：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># fused_gdn_gating_kernel</span></span><br><span class="line">x = a.<span class="built_in">float</span>() + dt_bias.<span class="built_in">float</span>()</span><br><span class="line">softplus_x = where(beta * x &lt;= threshold, (<span class="number">1</span>/beta) * log(<span class="number">1</span> + exp(beta * x)), x)</span><br><span class="line">g = -exp(A_log.<span class="built_in">float</span>()) * softplus_x</span><br><span class="line">beta_output = sigmoid(b.<span class="built_in">float</span>())</span><br></pre></td></tr></table></figure>
+
+<h4 id="2-3-递归注意力-Recurrent-Attention"><a href="#2-3-递归注意力-Recurrent-Attention" class="headerlink" title="2.3 递归注意力 (Recurrent Attention)"></a>2.3 递归注意力 (Recurrent Attention)</h4><p>这是 GDN 的核心数学计算，根据 prefill/decode 使用不同的算法。</p>
+<p><strong>Decode 路径</strong>使用 <code>fused_recurrent_gated_delta_rule</code>（逐步递推，复杂度 O(1)/step）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Triton kernel: fused_recurrent_gated_delta_rule_fwd_kernel</span></span><br><span class="line"><span class="comment"># 文件: vllm/model_executor/layers/fla/ops/fused_recurrent.py</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">for</span> i_t <span class="keyword">in</span> <span class="built_in">range</span>(<span class="number">0</span>, T):</span><br><span class="line">    b_q = load(p_q)    <span class="comment"># query</span></span><br><span class="line">    b_k = load(p_k)    <span class="comment"># key</span></span><br><span class="line">    b_v = load(p_v)    <span class="comment"># value</span></span><br><span class="line"></span><br><span class="line">    <span class="comment"># L2 normalization</span></span><br><span class="line">    b_q = b_q / sqrt(<span class="built_in">sum</span>(b_q * b_q) + <span class="number">1e-6</span>)</span><br><span class="line">    b_k = b_k / sqrt(<span class="built_in">sum</span>(b_k * b_k) + <span class="number">1e-6</span>)</span><br><span class="line">    b_q = b_q * scale</span><br><span class="line"></span><br><span class="line">    <span class="comment"># State decay</span></span><br><span class="line">    b_h *= exp(b_g)                       <span class="comment"># h = h * exp(g)</span></span><br><span class="line"></span><br><span class="line">    <span class="comment"># Delta rule</span></span><br><span class="line">    b_v -= <span class="built_in">sum</span>(b_h * b_k[:, <span class="literal">None</span>], <span class="number">0</span>)    <span class="comment"># v' = v - h^T @ k</span></span><br><span class="line">    b_v *= b_beta                         <span class="comment"># v' = beta * v'</span></span><br><span class="line"></span><br><span class="line">    <span class="comment"># State update</span></span><br><span class="line">    b_h += b_k[:, <span class="literal">None</span>] * b_v[<span class="literal">None</span>, :]   <span class="comment"># h = h + k ⊗ v'</span></span><br><span class="line"></span><br><span class="line">    <span class="comment"># Output</span></span><br><span class="line">    b_o = <span class="built_in">sum</span>(b_h * b_q[:, <span class="literal">None</span>], <span class="number">0</span>)     <span class="comment"># o = h^T @ q</span></span><br></pre></td></tr></table></figure>
+
+<p><strong>Prefill 路径</strong>使用 <code>chunk_gated_delta_rule</code>（分块并行，更高效地处理长序列）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/model_executor/models/qwen3_next.py : _forward_core</span></span><br><span class="line"><span class="keyword">if</span> attn_metadata.num_prefills &gt; <span class="number">0</span>:</span><br><span class="line">    initial_state = ssm_state[non_spec_state_indices_tensor].contiguous()</span><br><span class="line">    initial_state[~has_initial_state, ...] = <span class="number">0</span></span><br><span class="line">    core_attn_out_non_spec, last_recurrent_state = chunk_gated_delta_rule(</span><br><span class="line">        q=query_non_spec, k=key_non_spec, v=value_non_spec,</span><br><span class="line">        g=g_non_spec, beta=beta_non_spec,</span><br><span class="line">        initial_state=initial_state,</span><br><span class="line">        output_final_state=<span class="literal">True</span>,</span><br><span class="line">        cu_seqlens=non_spec_query_start_loc,</span><br><span class="line">        head_first=<span class="literal">False</span>,</span><br><span class="line">        use_qk_l2norm_in_kernel=<span class="literal">True</span>,</span><br><span class="line">    )</span><br><span class="line">    <span class="comment"># 将最终状态写回 cache</span></span><br><span class="line">    ssm_state[non_spec_state_indices_tensor] = last_recurrent_state.to(ssm_state.dtype)</span><br></pre></td></tr></table></figure>
+
+<p><strong>数学公式总结（每个 time step t）：</strong></p>
+<p><mjx-container class="MathJax" jax="SVG" display="true"><svg style="vertical-align: -2.17ex;" xmlns="http://www.w3.org/2000/svg" width="29.517ex" height="5.269ex" role="img" focusable="false" viewBox="0 -1370 13046.4 2329"><g stroke="currentColor" fill="currentColor" stroke-width="0" transform="scale(1,-1)"><g data-mml-node="math"><g data-mml-node="msub"><g data-mml-node="TeXAtom" data-mjx-texclass="ORD"><g data-mml-node="mover"><g data-mml-node="mi"><path data-c="1D45E" d="M33 157Q33 258 109 349T280 441Q340 441 372 389Q373 390 377 395T388 406T404 418Q438 442 450 442Q454 442 457 439T460 434Q460 425 391 149Q320 -135 320 -139Q320 -147 365 -148H390Q396 -156 396 -157T393 -175Q389 -188 383 -194H370Q339 -192 262 -192Q234 -192 211 -192T174 -192T157 -193Q143 -193 143 -185Q143 -182 145 -170Q149 -154 152 -151T172 -148Q220 -148 230 -141Q238 -136 258 -53T279 32Q279 33 272 29Q224 -10 172 -10Q117 -10 75 30T33 157ZM352 326Q329 405 277 405Q242 405 210 374T160 293Q131 214 119 129Q119 126 119 118T118 106Q118 61 136 44T179 26Q233 26 290 98L298 109L352 326Z"></path></g><g data-mml-node="mo" transform="translate(316.8,16) translate(-250 0)"><path data-c="5E" d="M112 560L249 694L257 686Q387 562 387 560L361 531Q359 532 303 581L250 627L195 580Q182 569 169 557T148 538L140 532Q138 530 125 546L112 560Z"></path></g></g></g><g data-mml-node="mi" transform="translate(479,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="mo" transform="translate(1062,0)"><path data-c="3D" d="M56 347Q56 360 70 367H707Q722 359 722 347Q722 336 708 328L390 327H72Q56 332 56 347ZM56 153Q56 168 72 173H708Q722 163 722 153Q722 140 707 133H70Q56 140 56 153Z"></path></g><g data-mml-node="mfrac" transform="translate(2117.8,0)"><g data-mml-node="msub" transform="translate(716.3,676)"><g data-mml-node="mi"><path data-c="1D45E" d="M33 157Q33 258 109 349T280 441Q340 441 372 389Q373 390 377 395T388 406T404 418Q438 442 450 442Q454 442 457 439T460 434Q460 425 391 149Q320 -135 320 -139Q320 -147 365 -148H390Q396 -156 396 -157T393 -175Q389 -188 383 -194H370Q339 -192 262 -192Q234 -192 211 -192T174 -192T157 -193Q143 -193 143 -185Q143 -182 145 -170Q149 -154 152 -151T172 -148Q220 -148 230 -141Q238 -136 258 -53T279 32Q279 33 272 29Q224 -10 172 -10Q117 -10 75 30T33 157ZM352 326Q329 405 277 405Q242 405 210 374T160 293Q131 214 119 129Q119 126 119 118T118 106Q118 61 136 44T179 26Q233 26 290 98L298 109L352 326Z"></path></g><g data-mml-node="mi" transform="translate(479,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="mrow" transform="translate(220,-709.5)"><g data-mml-node="mo" transform="translate(0 -0.5)"><path data-c="7C" d="M139 -249H137Q125 -249 119 -235V251L120 737Q130 750 139 750Q152 750 159 735V-235Q151 -249 141 -249H139Z"></path></g><g data-mml-node="msub" transform="translate(278,0)"><g data-mml-node="mi"><path data-c="1D45E" d="M33 157Q33 258 109 349T280 441Q340 441 372 389Q373 390 377 395T388 406T404 418Q438 442 450 442Q454 442 457 439T460 434Q460 425 391 149Q320 -135 320 -139Q320 -147 365 -148H390Q396 -156 396 -157T393 -175Q389 -188 383 -194H370Q339 -192 262 -192Q234 -192 211 -192T174 -192T157 -193Q143 -193 143 -185Q143 -182 145 -170Q149 -154 152 -151T172 -148Q220 -148 230 -141Q238 -136 258 -53T279 32Q279 33 272 29Q224 -10 172 -10Q117 -10 75 30T33 157ZM352 326Q329 405 277 405Q242 405 210 374T160 293Q131 214 119 129Q119 126 119 118T118 106Q118 61 136 44T179 26Q233 26 290 98L298 109L352 326Z"></path></g><g data-mml-node="mi" transform="translate(479,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="msub" transform="translate(1062.3,0)"><g data-mml-node="mo" transform="translate(0 -0.5)"><path data-c="7C" d="M139 -249H137Q125 -249 119 -235V251L120 737Q130 750 139 750Q152 750 159 735V-235Q151 -249 141 -249H139Z"></path></g><g data-mml-node="mn" transform="translate(311,-150) scale(0.707)"><path data-c="32" d="M109 429Q82 429 66 447T50 491Q50 562 103 614T235 666Q326 666 387 610T449 465Q449 422 429 383T381 315T301 241Q265 210 201 149L142 93L218 92Q375 92 385 97Q392 99 409 186V189H449V186Q448 183 436 95T421 3V0H50V19V31Q50 38 56 46T86 81Q115 113 136 137Q145 147 170 174T204 211T233 244T261 278T284 308T305 340T320 369T333 401T340 431T343 464Q343 527 309 573T212 619Q179 619 154 602T119 569T109 550Q109 549 114 549Q132 549 151 535T170 489Q170 464 154 447T109 429Z"></path></g></g></g><rect width="1976.8" height="60" x="120" y="220"></rect></g><g data-mml-node="mo" transform="translate(4556.9,0)"><path data-c="22C5" d="M78 250Q78 274 95 292T138 310Q162 310 180 294T199 251Q199 226 182 208T139 190T96 207T78 250Z"></path></g><g data-mml-node="mtext" transform="translate(5057.1,0)"><path data-c="73" d="M295 316Q295 356 268 385T190 414Q154 414 128 401Q98 382 98 349Q97 344 98 336T114 312T157 287Q175 282 201 278T245 269T277 256Q294 248 310 236T342 195T359 133Q359 71 321 31T198 -10H190Q138 -10 94 26L86 19L77 10Q71 4 65 -1L54 -11H46H42Q39 -11 33 -5V74V132Q33 153 35 157T45 162H54Q66 162 70 158T75 146T82 119T101 77Q136 26 198 26Q295 26 295 104Q295 133 277 151Q257 175 194 187T111 210Q75 227 54 256T33 318Q33 357 50 384T93 424T143 442T187 447H198Q238 447 268 432L283 424L292 431Q302 440 314 448H322H326Q329 448 335 442V310L329 304H301Q295 310 295 316Z"></path><path data-c="63" d="M370 305T349 305T313 320T297 358Q297 381 312 396Q317 401 317 402T307 404Q281 408 258 408Q209 408 178 376Q131 329 131 219Q131 137 162 90Q203 29 272 29Q313 29 338 55T374 117Q376 125 379 127T395 129H409Q415 123 415 120Q415 116 411 104T395 71T366 33T318 2T249 -11Q163 -11 99 53T34 214Q34 318 99 383T250 448T370 421T404 357Q404 334 387 320Z" transform="translate(394,0)"></path><path data-c="61" d="M137 305T115 305T78 320T63 359Q63 394 97 421T218 448Q291 448 336 416T396 340Q401 326 401 309T402 194V124Q402 76 407 58T428 40Q443 40 448 56T453 109V145H493V106Q492 66 490 59Q481 29 455 12T400 -6T353 12T329 54V58L327 55Q325 52 322 49T314 40T302 29T287 17T269 6T247 -2T221 -8T190 -11Q130 -11 82 20T34 107Q34 128 41 147T68 188T116 225T194 253T304 268H318V290Q318 324 312 340Q290 411 215 411Q197 411 181 410T156 406T148 403Q170 388 170 359Q170 334 154 320ZM126 106Q126 75 150 51T209 26Q247 26 276 49T315 109Q317 116 318 175Q318 233 317 233Q309 233 296 232T251 223T193 203T147 166T126 106Z" transform="translate(838,0)"></path><path data-c="6C" d="M42 46H56Q95 46 103 60V68Q103 77 103 91T103 124T104 167T104 217T104 272T104 329Q104 366 104 407T104 482T104 542T103 586T103 603Q100 622 89 628T44 637H26V660Q26 683 28 683L38 684Q48 685 67 686T104 688Q121 689 141 690T171 693T182 694H185V379Q185 62 186 60Q190 52 198 49Q219 46 247 46H263V0H255L232 1Q209 2 183 2T145 3T107 3T57 1L34 0H26V46H42Z" transform="translate(1338,0)"></path><path data-c="65" d="M28 218Q28 273 48 318T98 391T163 433T229 448Q282 448 320 430T378 380T406 316T415 245Q415 238 408 231H126V216Q126 68 226 36Q246 30 270 30Q312 30 342 62Q359 79 369 104L379 128Q382 131 395 131H398Q415 131 415 121Q415 117 412 108Q393 53 349 21T250 -11Q155 -11 92 58T28 218ZM333 275Q322 403 238 411H236Q228 411 220 410T195 402T166 381T143 340T127 274V267H333V275Z" transform="translate(1616,0)"></path></g><g data-mml-node="mo" transform="translate(7117.1,0)"><path data-c="2C" d="M78 35T78 60T94 103T137 121Q165 121 187 96T210 8Q210 -27 201 -60T180 -117T154 -158T130 -185T117 -194Q113 -194 104 -185T95 -172Q95 -168 106 -156T131 -126T157 -76T173 -3V9L172 8Q170 7 167 6T161 3T152 1T140 0Q113 0 96 17Z"></path></g><g data-mml-node="mstyle" transform="translate(7395.1,0)"><g data-mml-node="mspace"></g></g><g data-mml-node="msub" transform="translate(8561.8,0)"><g data-mml-node="TeXAtom" data-mjx-texclass="ORD"><g data-mml-node="mover"><g data-mml-node="mi"><path data-c="1D458" d="M121 647Q121 657 125 670T137 683Q138 683 209 688T282 694Q294 694 294 686Q294 679 244 477Q194 279 194 272Q213 282 223 291Q247 309 292 354T362 415Q402 442 438 442Q468 442 485 423T503 369Q503 344 496 327T477 302T456 291T438 288Q418 288 406 299T394 328Q394 353 410 369T442 390L458 393Q446 405 434 405H430Q398 402 367 380T294 316T228 255Q230 254 243 252T267 246T293 238T320 224T342 206T359 180T365 147Q365 130 360 106T354 66Q354 26 381 26Q429 26 459 145Q461 153 479 153H483Q499 153 499 144Q499 139 496 130Q455 -11 378 -11Q333 -11 305 15T277 90Q277 108 280 121T283 145Q283 167 269 183T234 206T200 217T182 220H180Q168 178 159 139T145 81T136 44T129 20T122 7T111 -2Q98 -11 83 -11Q66 -11 57 -1T48 16Q48 26 85 176T158 471L195 616Q196 629 188 632T149 637H144Q134 637 131 637T124 640T121 647Z"></path></g><g data-mml-node="mo" transform="translate(260.5,268) translate(-250 0)"><path data-c="5E" d="M112 560L249 694L257 686Q387 562 387 560L361 531Q359 532 303 581L250 627L195 580Q182 569 169 557T148 538L140 532Q138 530 125 546L112 560Z"></path></g></g></g><g data-mml-node="mi" transform="translate(554,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="mo" transform="translate(9698.8,0)"><path data-c="3D" d="M56 347Q56 360 70 367H707Q722 359 722 347Q722 336 708 328L390 327H72Q56 332 56 347ZM56 153Q56 168 72 173H708Q722 163 722 153Q722 140 707 133H70Q56 140 56 153Z"></path></g><g data-mml-node="mfrac" transform="translate(10754.6,0)"><g data-mml-node="msub" transform="translate(716.3,676)"><g data-mml-node="mi"><path data-c="1D458" d="M121 647Q121 657 125 670T137 683Q138 683 209 688T282 694Q294 694 294 686Q294 679 244 477Q194 279 194 272Q213 282 223 291Q247 309 292 354T362 415Q402 442 438 442Q468 442 485 423T503 369Q503 344 496 327T477 302T456 291T438 288Q418 288 406 299T394 328Q394 353 410 369T442 390L458 393Q446 405 434 405H430Q398 402 367 380T294 316T228 255Q230 254 243 252T267 246T293 238T320 224T342 206T359 180T365 147Q365 130 360 106T354 66Q354 26 381 26Q429 26 459 145Q461 153 479 153H483Q499 153 499 144Q499 139 496 130Q455 -11 378 -11Q333 -11 305 15T277 90Q277 108 280 121T283 145Q283 167 269 183T234 206T200 217T182 220H180Q168 178 159 139T145 81T136 44T129 20T122 7T111 -2Q98 -11 83 -11Q66 -11 57 -1T48 16Q48 26 85 176T158 471L195 616Q196 629 188 632T149 637H144Q134 637 131 637T124 640T121 647Z"></path></g><g data-mml-node="mi" transform="translate(554,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="mrow" transform="translate(220,-709.5)"><g data-mml-node="mo" transform="translate(0 -0.5)"><path data-c="7C" d="M139 -249H137Q125 -249 119 -235V251L120 737Q130 750 139 750Q152 750 159 735V-235Q151 -249 141 -249H139Z"></path></g><g data-mml-node="msub" transform="translate(278,0)"><g data-mml-node="mi"><path data-c="1D458" d="M121 647Q121 657 125 670T137 683Q138 683 209 688T282 694Q294 694 294 686Q294 679 244 477Q194 279 194 272Q213 282 223 291Q247 309 292 354T362 415Q402 442 438 442Q468 442 485 423T503 369Q503 344 496 327T477 302T456 291T438 288Q418 288 406 299T394 328Q394 353 410 369T442 390L458 393Q446 405 434 405H430Q398 402 367 380T294 316T228 255Q230 254 243 252T267 246T293 238T320 224T342 206T359 180T365 147Q365 130 360 106T354 66Q354 26 381 26Q429 26 459 145Q461 153 479 153H483Q499 153 499 144Q499 139 496 130Q455 -11 378 -11Q333 -11 305 15T277 90Q277 108 280 121T283 145Q283 167 269 183T234 206T200 217T182 220H180Q168 178 159 139T145 81T136 44T129 20T122 7T111 -2Q98 -11 83 -11Q66 -11 57 -1T48 16Q48 26 85 176T158 471L195 616Q196 629 188 632T149 637H144Q134 637 131 637T124 640T121 647Z"></path></g><g data-mml-node="mi" transform="translate(554,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="msub" transform="translate(1137.3,0)"><g data-mml-node="mo" transform="translate(0 -0.5)"><path data-c="7C" d="M139 -249H137Q125 -249 119 -235V251L120 737Q130 750 139 750Q152 750 159 735V-235Q151 -249 141 -249H139Z"></path></g><g data-mml-node="mn" transform="translate(311,-150) scale(0.707)"><path data-c="32" d="M109 429Q82 429 66 447T50 491Q50 562 103 614T235 666Q326 666 387 610T449 465Q449 422 429 383T381 315T301 241Q265 210 201 149L142 93L218 92Q375 92 385 97Q392 99 409 186V189H449V186Q448 183 436 95T421 3V0H50V19V31Q50 38 56 46T86 81Q115 113 136 137Q145 147 170 174T204 211T233 244T261 278T284 308T305 340T320 369T333 401T340 431T343 464Q343 527 309 573T212 619Q179 619 154 602T119 569T109 550Q109 549 114 549Q132 549 151 535T170 489Q170 464 154 447T109 429Z"></path></g></g></g><rect width="2051.8" height="60" x="120" y="220"></rect></g></g></g></svg></mjx-container></p>
+<p>$$h_t = e^{g_t} \cdot h_{t-1} + \hat{k}<em>t \otimes \left[\sigma(b_t) \cdot (v_t - h</em>{t-1}^T \hat{k}_t)\right]$$</p>
+<p><mjx-container class="MathJax" jax="SVG" display="true"><svg style="vertical-align: -0.576ex;" xmlns="http://www.w3.org/2000/svg" width="9.271ex" height="2.594ex" role="img" focusable="false" viewBox="0 -891.7 4097.9 1146.5"><g stroke="currentColor" fill="currentColor" stroke-width="0" transform="scale(1,-1)"><g data-mml-node="math"><g data-mml-node="msub"><g data-mml-node="mi"><path data-c="1D45C" d="M201 -11Q126 -11 80 38T34 156Q34 221 64 279T146 380Q222 441 301 441Q333 441 341 440Q354 437 367 433T402 417T438 387T464 338T476 268Q476 161 390 75T201 -11ZM121 120Q121 70 147 48T206 26Q250 26 289 58T351 142Q360 163 374 216T388 308Q388 352 370 375Q346 405 306 405Q243 405 195 347Q158 303 140 230T121 120Z"></path></g><g data-mml-node="mi" transform="translate(518,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="mo" transform="translate(1101,0)"><path data-c="3D" d="M56 347Q56 360 70 367H707Q722 359 722 347Q722 336 708 328L390 327H72Q56 332 56 347ZM56 153Q56 168 72 173H708Q722 163 722 153Q722 140 707 133H70Q56 140 56 153Z"></path></g><g data-mml-node="msubsup" transform="translate(2156.8,0)"><g data-mml-node="mi"><path data-c="210E" d="M137 683Q138 683 209 688T282 694Q294 694 294 685Q294 674 258 534Q220 386 220 383Q220 381 227 388Q288 442 357 442Q411 442 444 415T478 336Q478 285 440 178T402 50Q403 36 407 31T422 26Q450 26 474 56T513 138Q516 149 519 151T535 153Q555 153 555 145Q555 144 551 130Q535 71 500 33Q466 -10 419 -10H414Q367 -10 346 17T325 74Q325 90 361 192T398 345Q398 404 354 404H349Q266 404 205 306L198 293L164 158Q132 28 127 16Q114 -11 83 -11Q69 -11 59 -2T48 16Q48 30 121 320L195 616Q195 629 188 632T149 637H128Q122 643 122 645T124 664Q129 683 137 683Z"></path></g><g data-mml-node="mi" transform="translate(609,413) scale(0.707)"><path data-c="1D447" d="M40 437Q21 437 21 445Q21 450 37 501T71 602L88 651Q93 669 101 677H569H659Q691 677 697 676T704 667Q704 661 687 553T668 444Q668 437 649 437Q640 437 637 437T631 442L629 445Q629 451 635 490T641 551Q641 586 628 604T573 629Q568 630 515 631Q469 631 457 630T439 622Q438 621 368 343T298 60Q298 48 386 46Q418 46 427 45T436 36Q436 31 433 22Q429 4 424 1L422 0Q419 0 415 0Q410 0 363 1T228 2Q99 2 64 0H49Q43 6 43 9T45 27Q49 40 55 46H83H94Q174 46 189 55Q190 56 191 56Q196 59 201 76T241 233Q258 301 269 344Q339 619 339 625Q339 630 310 630H279Q212 630 191 624Q146 614 121 583T67 467Q60 445 57 441T43 437H40Z"></path></g><g data-mml-node="mi" transform="translate(609,-247) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="msub" transform="translate(3313.6,0)"><g data-mml-node="TeXAtom" data-mjx-texclass="ORD"><g data-mml-node="mover"><g data-mml-node="mi"><path data-c="1D45E" d="M33 157Q33 258 109 349T280 441Q340 441 372 389Q373 390 377 395T388 406T404 418Q438 442 450 442Q454 442 457 439T460 434Q460 425 391 149Q320 -135 320 -139Q320 -147 365 -148H390Q396 -156 396 -157T393 -175Q389 -188 383 -194H370Q339 -192 262 -192Q234 -192 211 -192T174 -192T157 -193Q143 -193 143 -185Q143 -182 145 -170Q149 -154 152 -151T172 -148Q220 -148 230 -141Q238 -136 258 -53T279 32Q279 33 272 29Q224 -10 172 -10Q117 -10 75 30T33 157ZM352 326Q329 405 277 405Q242 405 210 374T160 293Q131 214 119 129Q119 126 119 118T118 106Q118 61 136 44T179 26Q233 26 290 98L298 109L352 326Z"></path></g><g data-mml-node="mo" transform="translate(316.8,16) translate(-250 0)"><path data-c="5E" d="M112 560L249 694L257 686Q387 562 387 560L361 531Q359 532 303 581L250 627L195 580Q182 569 169 557T148 538L140 532Q138 530 125 546L112 560Z"></path></g></g></g><g data-mml-node="mi" transform="translate(479,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g></g></g></svg></mjx-container></p>
+<p>其中：</p>
+<ul>
+<li><mjx-container class="MathJax" jax="SVG"><svg style="vertical-align: -0.357ex;" xmlns="http://www.w3.org/2000/svg" width="10.968ex" height="2.288ex" role="img" focusable="false" viewBox="0 -853.7 4847.7 1011.5"><g stroke="currentColor" fill="currentColor" stroke-width="0" transform="scale(1,-1)"><g data-mml-node="math"><g data-mml-node="msub"><g data-mml-node="mi"><path data-c="210E" d="M137 683Q138 683 209 688T282 694Q294 694 294 685Q294 674 258 534Q220 386 220 383Q220 381 227 388Q288 442 357 442Q411 442 444 415T478 336Q478 285 440 178T402 50Q403 36 407 31T422 26Q450 26 474 56T513 138Q516 149 519 151T535 153Q555 153 555 145Q555 144 551 130Q535 71 500 33Q466 -10 419 -10H414Q367 -10 346 17T325 74Q325 90 361 192T398 345Q398 404 354 404H349Q266 404 205 306L198 293L164 158Q132 28 127 16Q114 -11 83 -11Q69 -11 59 -2T48 16Q48 30 121 320L195 616Q195 629 188 632T149 637H128Q122 643 122 645T124 664Q129 683 137 683Z"></path></g><g data-mml-node="mi" transform="translate(609,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="mo" transform="translate(1192,0)"><path data-c="2208" d="M84 250Q84 372 166 450T360 539Q361 539 377 539T419 540T469 540H568Q583 532 583 520Q583 511 570 501L466 500Q355 499 329 494Q280 482 242 458T183 409T147 354T129 306T124 272V270H568Q583 262 583 250T568 230H124V228Q124 207 134 177T167 112T231 48T328 7Q355 1 466 0H570Q583 -10 583 -20Q583 -32 568 -40H471Q464 -40 446 -40T417 -41Q262 -41 172 45Q84 127 84 250Z"></path></g><g data-mml-node="msup" transform="translate(2136.8,0)"><g data-mml-node="TeXAtom" data-mjx-texclass="ORD"><g data-mml-node="mi"><path data-c="211D" d="M17 665Q17 672 28 683H221Q415 681 439 677Q461 673 481 667T516 654T544 639T566 623T584 607T597 592T607 578T614 565T618 554L621 548Q626 530 626 497Q626 447 613 419Q578 348 473 326L455 321Q462 310 473 292T517 226T578 141T637 72T686 35Q705 30 705 16Q705 7 693 -1H510Q503 6 404 159L306 310H268V183Q270 67 271 59Q274 42 291 38Q295 37 319 35Q344 35 353 28Q362 17 353 3L346 -1H28Q16 5 16 16Q16 35 55 35Q96 38 101 52Q106 60 106 341T101 632Q95 645 55 648Q17 648 17 665ZM241 35Q238 42 237 45T235 78T233 163T233 337V621L237 635L244 648H133Q136 641 137 638T139 603T141 517T141 341Q141 131 140 89T134 37Q133 36 133 35H241ZM457 496Q457 540 449 570T425 615T400 634T377 643Q374 643 339 648Q300 648 281 635Q271 628 270 610T268 481V346H284Q327 346 375 352Q421 364 439 392T457 496ZM492 537T492 496T488 427T478 389T469 371T464 361Q464 360 465 360Q469 360 497 370Q593 400 593 495Q593 592 477 630L457 637L461 626Q474 611 488 561Q492 537 492 496ZM464 243Q411 317 410 317Q404 317 401 315Q384 315 370 312H346L526 35H619L606 50Q553 109 464 243Z"></path></g></g><g data-mml-node="TeXAtom" transform="translate(755,363) scale(0.707)" data-mjx-texclass="ORD"><g data-mml-node="msub"><g data-mml-node="mi"><path data-c="1D451" d="M366 683Q367 683 438 688T511 694Q523 694 523 686Q523 679 450 384T375 83T374 68Q374 26 402 26Q411 27 422 35Q443 55 463 131Q469 151 473 152Q475 153 483 153H487H491Q506 153 506 145Q506 140 503 129Q490 79 473 48T445 8T417 -8Q409 -10 393 -10Q359 -10 336 5T306 36L300 51Q299 52 296 50Q294 48 292 46Q233 -10 172 -10Q117 -10 75 30T33 157Q33 205 53 255T101 341Q148 398 195 420T280 442Q336 442 364 400Q369 394 369 396Q370 400 396 505T424 616Q424 629 417 632T378 637H357Q351 643 351 645T353 664Q358 683 366 683ZM352 326Q329 405 277 405Q242 405 210 374T160 293Q131 214 119 129Q119 126 119 118T118 106Q118 61 136 44T179 26Q233 26 290 98L298 109L352 326Z"></path></g><g data-mml-node="mi" transform="translate(553,-150) scale(0.707)"><path data-c="1D458" d="M121 647Q121 657 125 670T137 683Q138 683 209 688T282 694Q294 694 294 686Q294 679 244 477Q194 279 194 272Q213 282 223 291Q247 309 292 354T362 415Q402 442 438 442Q468 442 485 423T503 369Q503 344 496 327T477 302T456 291T438 288Q418 288 406 299T394 328Q394 353 410 369T442 390L458 393Q446 405 434 405H430Q398 402 367 380T294 316T228 255Q230 254 243 252T267 246T293 238T320 224T342 206T359 180T365 147Q365 130 360 106T354 66Q354 26 381 26Q429 26 459 145Q461 153 479 153H483Q499 153 499 144Q499 139 496 130Q455 -11 378 -11Q333 -11 305 15T277 90Q277 108 280 121T283 145Q283 167 269 183T234 206T200 217T182 220H180Q168 178 159 139T145 81T136 44T129 20T122 7T111 -2Q98 -11 83 -11Q66 -11 57 -1T48 16Q48 26 85 176T158 471L195 616Q196 629 188 632T149 637H144Q134 637 131 637T124 640T121 647Z"></path></g></g><g data-mml-node="mo" transform="translate(971.4,0)"><path data-c="D7" d="M630 29Q630 9 609 9Q604 9 587 25T493 118L389 222L284 117Q178 13 175 11Q171 9 168 9Q160 9 154 15T147 29Q147 36 161 51T255 146L359 250L255 354Q174 435 161 449T147 471Q147 480 153 485T168 490Q173 490 175 489Q178 487 284 383L389 278L493 382Q570 459 587 475T609 491Q630 491 630 471Q630 464 620 453T522 355L418 250L522 145Q606 61 618 48T630 29Z"></path></g><g data-mml-node="msub" transform="translate(1749.4,0)"><g data-mml-node="mi"><path data-c="1D451" d="M366 683Q367 683 438 688T511 694Q523 694 523 686Q523 679 450 384T375 83T374 68Q374 26 402 26Q411 27 422 35Q443 55 463 131Q469 151 473 152Q475 153 483 153H487H491Q506 153 506 145Q506 140 503 129Q490 79 473 48T445 8T417 -8Q409 -10 393 -10Q359 -10 336 5T306 36L300 51Q299 52 296 50Q294 48 292 46Q233 -10 172 -10Q117 -10 75 30T33 157Q33 205 53 255T101 341Q148 398 195 420T280 442Q336 442 364 400Q369 394 369 396Q370 400 396 505T424 616Q424 629 417 632T378 637H357Q351 643 351 645T353 664Q358 683 366 683ZM352 326Q329 405 277 405Q242 405 210 374T160 293Q131 214 119 129Q119 126 119 118T118 106Q118 61 136 44T179 26Q233 26 290 98L298 109L352 326Z"></path></g><g data-mml-node="mi" transform="translate(553,-150) scale(0.707)"><path data-c="1D463" d="M173 380Q173 405 154 405Q130 405 104 376T61 287Q60 286 59 284T58 281T56 279T53 278T49 278T41 278H27Q21 284 21 287Q21 294 29 316T53 368T97 419T160 441Q202 441 225 417T249 361Q249 344 246 335Q246 329 231 291T200 202T182 113Q182 86 187 69Q200 26 250 26Q287 26 319 60T369 139T398 222T409 277Q409 300 401 317T383 343T365 361T357 383Q357 405 376 424T417 443Q436 443 451 425T467 367Q467 340 455 284T418 159T347 40T241 -11Q177 -11 139 22Q102 54 102 117Q102 148 110 181T151 298Q173 362 173 380Z"></path></g></g></g></g></g></g></svg></mjx-container> 为递归状态矩阵</li>
+<li><mjx-container class="MathJax" jax="SVG"><svg style="vertical-align: -0.025ex;" xmlns="http://www.w3.org/2000/svg" width="2.546ex" height="1.553ex" role="img" focusable="false" viewBox="0 -675.5 1125.5 686.5"><g stroke="currentColor" fill="currentColor" stroke-width="0" transform="scale(1,-1)"><g data-mml-node="math"><g data-mml-node="msup"><g data-mml-node="mi"><path data-c="1D452" d="M39 168Q39 225 58 272T107 350T174 402T244 433T307 442H310Q355 442 388 420T421 355Q421 265 310 237Q261 224 176 223Q139 223 138 221Q138 219 132 186T125 128Q125 81 146 54T209 26T302 45T394 111Q403 121 406 121Q410 121 419 112T429 98T420 82T390 55T344 24T281 -1T205 -11Q126 -11 83 42T39 168ZM373 353Q367 405 305 405Q272 405 244 391T199 357T170 316T154 280T149 261Q149 260 169 260Q282 260 327 284T373 353Z"></path></g><g data-mml-node="TeXAtom" transform="translate(499,363) scale(0.707)" data-mjx-texclass="ORD"><g data-mml-node="msub"><g data-mml-node="mi"><path data-c="1D454" d="M311 43Q296 30 267 15T206 0Q143 0 105 45T66 160Q66 265 143 353T314 442Q361 442 401 394L404 398Q406 401 409 404T418 412T431 419T447 422Q461 422 470 413T480 394Q480 379 423 152T363 -80Q345 -134 286 -169T151 -205Q10 -205 10 -137Q10 -111 28 -91T74 -71Q89 -71 102 -80T116 -111Q116 -121 114 -130T107 -144T99 -154T92 -162L90 -164H91Q101 -167 151 -167Q189 -167 211 -155Q234 -144 254 -122T282 -75Q288 -56 298 -13Q311 35 311 43ZM384 328L380 339Q377 350 375 354T369 368T359 382T346 393T328 402T306 405Q262 405 221 352Q191 313 171 233T151 117Q151 38 213 38Q269 38 323 108L331 118L384 328Z"></path></g><g data-mml-node="mi" transform="translate(510,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g></g></g></g></g></svg></mjx-container> 为指数衰减因子，控制历史信息的遗忘</li>
+<li><mjx-container class="MathJax" jax="SVG"><svg style="vertical-align: -0.566ex;" xmlns="http://www.w3.org/2000/svg" width="4.788ex" height="2.262ex" role="img" focusable="false" viewBox="0 -750 2116.3 1000"><g stroke="currentColor" fill="currentColor" stroke-width="0" transform="scale(1,-1)"><g data-mml-node="math"><g data-mml-node="mi"><path data-c="1D70E" d="M184 -11Q116 -11 74 34T31 147Q31 247 104 333T274 430Q275 431 414 431H552Q553 430 555 429T559 427T562 425T565 422T567 420T569 416T570 412T571 407T572 401Q572 357 507 357Q500 357 490 357T476 358H416L421 348Q439 310 439 263Q439 153 359 71T184 -11ZM361 278Q361 358 276 358Q152 358 115 184Q114 180 114 178Q106 141 106 117Q106 67 131 47T188 26Q242 26 287 73Q316 103 334 153T356 233T361 278Z"></path></g><g data-mml-node="mo" transform="translate(571,0)"><path data-c="28" d="M94 250Q94 319 104 381T127 488T164 576T202 643T244 695T277 729T302 750H315H319Q333 750 333 741Q333 738 316 720T275 667T226 581T184 443T167 250T184 58T225 -81T274 -167T316 -220T333 -241Q333 -250 318 -250H315H302L274 -226Q180 -141 137 -14T94 250Z"></path></g><g data-mml-node="msub" transform="translate(960,0)"><g data-mml-node="mi"><path data-c="1D44F" d="M73 647Q73 657 77 670T89 683Q90 683 161 688T234 694Q246 694 246 685T212 542Q204 508 195 472T180 418L176 399Q176 396 182 402Q231 442 283 442Q345 442 383 396T422 280Q422 169 343 79T173 -11Q123 -11 82 27T40 150V159Q40 180 48 217T97 414Q147 611 147 623T109 637Q104 637 101 637H96Q86 637 83 637T76 640T73 647ZM336 325V331Q336 405 275 405Q258 405 240 397T207 376T181 352T163 330L157 322L136 236Q114 150 114 114Q114 66 138 42Q154 26 178 26Q211 26 245 58Q270 81 285 114T318 219Q336 291 336 325Z"></path></g><g data-mml-node="mi" transform="translate(462,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="mo" transform="translate(1727.3,0)"><path data-c="29" d="M60 749L64 750Q69 750 74 750H86L114 726Q208 641 251 514T294 250Q294 182 284 119T261 12T224 -76T186 -143T145 -194T113 -227T90 -246Q87 -249 86 -250H74Q66 -250 63 -250T58 -247T55 -238Q56 -237 66 -225Q221 -64 221 250T66 725Q56 737 55 738Q55 746 60 749Z"></path></g></g></g></svg></mjx-container> 为 sigmoid 门控，控制新信息的写入强度</li>
+<li><mjx-container class="MathJax" jax="SVG"><svg style="vertical-align: -0.783ex;" xmlns="http://www.w3.org/2000/svg" width="10.685ex" height="3.185ex" role="img" focusable="false" viewBox="0 -1062 4722.9 1407.9"><g stroke="currentColor" fill="currentColor" stroke-width="0" transform="scale(1,-1)"><g data-mml-node="math"><g data-mml-node="msub"><g data-mml-node="mi"><path data-c="1D463" d="M173 380Q173 405 154 405Q130 405 104 376T61 287Q60 286 59 284T58 281T56 279T53 278T49 278T41 278H27Q21 284 21 287Q21 294 29 316T53 368T97 419T160 441Q202 441 225 417T249 361Q249 344 246 335Q246 329 231 291T200 202T182 113Q182 86 187 69Q200 26 250 26Q287 26 319 60T369 139T398 222T409 277Q409 300 401 317T383 343T365 361T357 383Q357 405 376 424T417 443Q436 443 451 425T467 367Q467 340 455 284T418 159T347 40T241 -11Q177 -11 139 22Q102 54 102 117Q102 148 110 181T151 298Q173 362 173 380Z"></path></g><g data-mml-node="mi" transform="translate(518,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g><g data-mml-node="mo" transform="translate(1045.5,0)"><path data-c="2212" d="M84 237T84 250T98 270H679Q694 262 694 250T679 230H98Q84 237 84 250Z"></path></g><g data-mml-node="msubsup" transform="translate(2045.7,0)"><g data-mml-node="mi"><path data-c="210E" d="M137 683Q138 683 209 688T282 694Q294 694 294 685Q294 674 258 534Q220 386 220 383Q220 381 227 388Q288 442 357 442Q411 442 444 415T478 336Q478 285 440 178T402 50Q403 36 407 31T422 26Q450 26 474 56T513 138Q516 149 519 151T535 153Q555 153 555 145Q555 144 551 130Q535 71 500 33Q466 -10 419 -10H414Q367 -10 346 17T325 74Q325 90 361 192T398 345Q398 404 354 404H349Q266 404 205 306L198 293L164 158Q132 28 127 16Q114 -11 83 -11Q69 -11 59 -2T48 16Q48 30 121 320L195 616Q195 629 188 632T149 637H128Q122 643 122 645T124 664Q129 683 137 683Z"></path></g><g data-mml-node="mi" transform="translate(609,363) scale(0.707)"><path data-c="1D447" d="M40 437Q21 437 21 445Q21 450 37 501T71 602L88 651Q93 669 101 677H569H659Q691 677 697 676T704 667Q704 661 687 553T668 444Q668 437 649 437Q640 437 637 437T631 442L629 445Q629 451 635 490T641 551Q641 586 628 604T573 629Q568 630 515 631Q469 631 457 630T439 622Q438 621 368 343T298 60Q298 48 386 46Q418 46 427 45T436 36Q436 31 433 22Q429 4 424 1L422 0Q419 0 415 0Q410 0 363 1T228 2Q99 2 64 0H49Q43 6 43 9T45 27Q49 40 55 46H83H94Q174 46 189 55Q190 56 191 56Q196 59 201 76T241 233Q258 301 269 344Q339 619 339 625Q339 630 310 630H279Q212 630 191 624Q146 614 121 583T67 467Q60 445 57 441T43 437H40Z"></path></g><g data-mml-node="TeXAtom" transform="translate(609,-287.9) scale(0.707)" data-mjx-texclass="ORD"><g data-mml-node="mi"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g><g data-mml-node="mo" transform="translate(361,0)"><path data-c="2212" d="M84 237T84 250T98 270H679Q694 262 694 250T679 230H98Q84 237 84 250Z"></path></g><g data-mml-node="mn" transform="translate(1139,0)"><path data-c="31" d="M213 578L200 573Q186 568 160 563T102 556H83V602H102Q149 604 189 617T245 641T273 663Q275 666 285 666Q294 666 302 660V361L303 61Q310 54 315 52T339 48T401 46H427V0H416Q395 3 257 3Q121 3 100 0H88V46H114Q136 46 152 46T177 47T193 50T201 52T207 57T213 61V578Z"></path></g></g></g><g data-mml-node="msub" transform="translate(3863.7,0)"><g data-mml-node="TeXAtom" data-mjx-texclass="ORD"><g data-mml-node="mover"><g data-mml-node="mi"><path data-c="1D458" d="M121 647Q121 657 125 670T137 683Q138 683 209 688T282 694Q294 694 294 686Q294 679 244 477Q194 279 194 272Q213 282 223 291Q247 309 292 354T362 415Q402 442 438 442Q468 442 485 423T503 369Q503 344 496 327T477 302T456 291T438 288Q418 288 406 299T394 328Q394 353 410 369T442 390L458 393Q446 405 434 405H430Q398 402 367 380T294 316T228 255Q230 254 243 252T267 246T293 238T320 224T342 206T359 180T365 147Q365 130 360 106T354 66Q354 26 381 26Q429 26 459 145Q461 153 479 153H483Q499 153 499 144Q499 139 496 130Q455 -11 378 -11Q333 -11 305 15T277 90Q277 108 280 121T283 145Q283 167 269 183T234 206T200 217T182 220H180Q168 178 159 139T145 81T136 44T129 20T122 7T111 -2Q98 -11 83 -11Q66 -11 57 -1T48 16Q48 26 85 176T158 471L195 616Q196 629 188 632T149 637H144Q134 637 131 637T124 640T121 647Z"></path></g><g data-mml-node="mo" transform="translate(260.5,268) translate(-250 0)"><path data-c="5E" d="M112 560L249 694L257 686Q387 562 387 560L361 531Q359 532 303 581L250 627L195 580Q182 569 169 557T148 538L140 532Q138 530 125 546L112 560Z"></path></g></g></g><g data-mml-node="mi" transform="translate(554,-150) scale(0.707)"><path data-c="1D461" d="M26 385Q19 392 19 395Q19 399 22 411T27 425Q29 430 36 430T87 431H140L159 511Q162 522 166 540T173 566T179 586T187 603T197 615T211 624T229 626Q247 625 254 615T261 596Q261 589 252 549T232 470L222 433Q222 431 272 431H323Q330 424 330 420Q330 398 317 385H210L174 240Q135 80 135 68Q135 26 162 26Q197 26 230 60T283 144Q285 150 288 151T303 153H307Q322 153 322 145Q322 142 319 133Q314 117 301 95T267 48T216 6T155 -11Q125 -11 98 4T59 56Q57 64 57 83V101L92 241Q127 382 128 383Q128 385 77 385H26Z"></path></g></g></g></g></svg></mjx-container> 为”delta rule”，只写入与当前状态差异的部分</li>
+</ul>
+<h3 id="阶段-3：输出投影-Output-Projection"><a href="#阶段-3：输出投影-Output-Projection" class="headerlink" title="阶段 3：输出投影 (Output Projection)"></a>阶段 3：输出投影 (Output Projection)</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/model_executor/models/qwen3_next.py : Qwen3NextGatedDeltaNet.forward</span></span><br><span class="line">core_attn_out = core_attn_out.reshape(-<span class="number">1</span>, core_attn_out.shape[-<span class="number">1</span>])</span><br><span class="line">z = z.reshape(-<span class="number">1</span>, z.shape[-<span class="number">1</span>])</span><br><span class="line">core_attn_out = <span class="variable language_">self</span>.norm(core_attn_out, z)     <span class="comment"># RMSNormGated: silu(z) * norm(out)</span></span><br><span class="line">core_attn_out = rearrange(core_attn_out, <span class="string">"... h d -&gt; ... (h d)"</span>)</span><br><span class="line">output[:num_tokens], _ = <span class="variable language_">self</span>.out_proj(core_attn_out)  <span class="comment"># 线性投影回 hidden_size</span></span><br></pre></td></tr></table></figure>
+
+<p>输出经过 RMSNormGated（使用 z 作为 gate，silu 激活）后通过 <code>out_proj</code> 映射回 hidden_size。</p>
+<hr>
+<h2 id="3-Prefill-vs-Decode-路径对比"><a href="#3-Prefill-vs-Decode-路径对比" class="headerlink" title="3. Prefill vs Decode 路径对比"></a>3. Prefill vs Decode 路径对比</h2><table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>Prefill</th>
+<th>Decode</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Conv1d</td>
+<td><code>causal_conv1d_fn</code>（整序列卷积）</td>
+<td><code>causal_conv1d_update</code>（单步更新）</td>
+</tr>
+<tr>
+<td>递归注意力</td>
+<td><code>chunk_gated_delta_rule</code>（分块并行）</td>
+<td><code>fused_recurrent_gated_delta_rule</code>（逐步递推）</td>
+</tr>
+<tr>
+<td>State 初始化</td>
+<td>从 ssm_state 加载，若无历史则置零</td>
+<td>直接使用 ssm_state 中的已有状态</td>
+</tr>
+<tr>
+<td>State 写回</td>
+<td>计算完成后整体写回 ssm_state</td>
+<td>原地更新 ssm_state（inplace）</td>
+</tr>
+<tr>
+<td>复杂度</td>
+<td>O(n) 总计，分块并行加速</td>
+<td>O(d_k × d_v) per head per step</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="4-GDN-Attention-Metadata-构建"><a href="#4-GDN-Attention-Metadata-构建" class="headerlink" title="4. GDN Attention Metadata 构建"></a>4. GDN Attention Metadata 构建</h2><p><code>GDNAttentionMetadataBuilder</code>（位于 <code>vllm/v1/attention/backends/gdn_attn.py</code>）负责为每次 forward 构建 metadata。</p>
+<h3 id="核心字段"><a href="#核心字段" class="headerlink" title="核心字段"></a>核心字段</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@dataclass</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">GDNAttentionMetadata</span>:</span><br><span class="line">    num_prefills: <span class="built_in">int</span></span><br><span class="line">    num_prefill_tokens: <span class="built_in">int</span></span><br><span class="line">    num_decodes: <span class="built_in">int</span></span><br><span class="line">    num_decode_tokens: <span class="built_in">int</span></span><br><span class="line">    num_spec_decodes: <span class="built_in">int</span></span><br><span class="line">    num_spec_decode_tokens: <span class="built_in">int</span></span><br><span class="line">    num_actual_tokens: <span class="built_in">int</span></span><br><span class="line"></span><br><span class="line">    has_initial_state: torch.Tensor | <span class="literal">None</span>          <span class="comment"># prefill 时标记是否有历史状态</span></span><br><span class="line">    spec_query_start_loc: torch.Tensor | <span class="literal">None</span>       <span class="comment"># spec decode 的 query 位置</span></span><br><span class="line">    non_spec_query_start_loc: torch.Tensor | <span class="literal">None</span>   <span class="comment"># non-spec 的 query 位置</span></span><br><span class="line">    spec_state_indices_tensor: torch.Tensor | <span class="literal">None</span>  <span class="comment"># spec decode 的 state 索引</span></span><br><span class="line">    non_spec_state_indices_tensor: torch.Tensor | <span class="literal">None</span>  <span class="comment"># non-spec 的 state 索引</span></span><br><span class="line">    spec_sequence_masks: torch.Tensor | <span class="literal">None</span>        <span class="comment"># 标记哪些序列是 spec decode</span></span><br><span class="line">    spec_token_indx: torch.Tensor | <span class="literal">None</span>            <span class="comment"># spec token 的全局索引</span></span><br><span class="line">    non_spec_token_indx: torch.Tensor | <span class="literal">None</span>        <span class="comment"># non-spec token 的全局索引</span></span><br><span class="line">    num_accepted_tokens: torch.Tensor | <span class="literal">None</span>        <span class="comment"># 每个序列接受的 token 数</span></span><br><span class="line">    retrieve_parent_token: torch.Tensor | <span class="literal">None</span>      <span class="comment"># tree attention 的父节点索引</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="构建逻辑（build-方法）"><a href="#构建逻辑（build-方法）" class="headerlink" title="构建逻辑（build 方法）"></a>构建逻辑（<code>build</code> 方法）</h3><ol>
+<li><strong>判断是否有 spec decode</strong>：通过 <code>num_decode_draft_tokens_cpu</code> 判断</li>
+<li><strong>无 spec decode 时</strong>：直接按 prefill/decode 切分，state 索引取 <code>block_table[:, 0]</code></li>
+<li><strong>有 spec decode 时</strong>：<ul>
+<li>将 batch 分为 spec 部分（前 <code>num_spec_decodes</code> 个）和 non-spec 部分</li>
+<li>spec 部分的 state 索引取 <code>block_table[:, :num_spec+1]</code>（多步 state）</li>
+<li>通过 <code>spec_token_indx</code> / <code>non_spec_token_indx</code> 索引来分离和合并 token</li>
+</ul>
+</li>
+<li><strong>CUDAGraph 支持</strong>：对 decode-only 场景进行 padding 以适配 CUDAGraph 捕获</li>
+</ol>
+<hr>
+<h2 id="5-QSA（Query-Side-Aggregation）对-Full-Attention-层的影响"><a href="#5-QSA（Query-Side-Aggregation）对-Full-Attention-层的影响" class="headerlink" title="5. QSA（Query-Side Aggregation）对 Full Attention 层的影响"></a>5. QSA（Query-Side Aggregation）对 Full Attention 层的影响</h2><p>QSA <strong>只影响 full_attention 层</strong>，不影响 GDN 层。当 config 中 <code>index_topk &gt; 0</code> 时启用。</p>
+<h3 id="5-1-无-QSA-的-Full-Attention-流程"><a href="#5-1-无-QSA-的-Full-Attention-流程" class="headerlink" title="5.1 无 QSA 的 Full Attention 流程"></a>5.1 无 QSA 的 Full Attention 流程</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">hidden_states → QKV Proj → Q/K Norm → RoPE → Standard Flash Attention（全 KV）→ [Gate ×] O Proj</span><br></pre></td></tr></table></figure>
+
+<h3 id="5-2-有-QSA-的-Full-Attention-流程"><a href="#5-2-有-QSA-的-Full-Attention-流程" class="headerlink" title="5.2 有 QSA 的 Full Attention 流程"></a>5.2 有 QSA 的 Full Attention 流程</h3><p>有 QSA 时，在标准 attention 之前增加了一个 <strong>Indexer</strong> 模块用于稀疏化：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">hidden_states → QKV Proj → Q/K Norm → RoPE</span><br><span class="line">                                         ↓</span><br><span class="line">                              ┌── Indexer（稀疏索引计算）──┐</span><br><span class="line">                              │                             │</span><br><span class="line">                              │  hidden → QKW Proj          │</span><br><span class="line">                              │  Q/K LayerNorm              │</span><br><span class="line">                              │  RoPE                       │</span><br><span class="line">                              │  Write K to indexer cache   │</span><br><span class="line">                              │  Score = Q @ K_cache * W    │</span><br><span class="line">                              │  TopK indices               │</span><br><span class="line">                              └─────────────────────────────┘</span><br><span class="line">                                         ↓</span><br><span class="line">                              Sparse Flash Attention（仅 TopK 个 token 的 KV）</span><br><span class="line">                                         ↓</span><br><span class="line">                              [Gate ×] O Proj → output</span><br></pre></td></tr></table></figure>
+
+<h3 id="5-3-Indexer-组件详解"><a href="#5-3-Indexer-组件详解" class="headerlink" title="5.3 Indexer 组件详解"></a>5.3 Indexer 组件详解</h3><p>Indexer 类（<code>vllm/model_executor/models/qwen3_next.py</code>）核心组件：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="title class_">Indexer</span>(nn.Module):</span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">__init__</span>(<span class="params">self, ...</span>):</span><br><span class="line">        <span class="variable language_">self</span>.index_topk = config.index_topk           <span class="comment"># TopK 数量</span></span><br><span class="line">        <span class="variable language_">self</span>.index_n_heads = config.index_n_heads     <span class="comment"># indexer query heads 数量</span></span><br><span class="line">        <span class="variable language_">self</span>.index_kv_heads = config.index_kv_heads   <span class="comment"># indexer kv heads 数量</span></span><br><span class="line">        <span class="variable language_">self</span>.index_head_dim = config.index_head_dim   <span class="comment"># indexer head 维度</span></span><br><span class="line"></span><br><span class="line">        <span class="comment"># QKW 联合投影（replicated，不做 TP）</span></span><br><span class="line">        <span class="variable language_">self</span>.index_qkw_proj = ReplicatedLinear(hidden_size, q_dim + k_dim + w_dim)</span><br><span class="line"></span><br><span class="line">        <span class="comment"># Q/K LayerNorm（稳定不同层的 score scale）</span></span><br><span class="line">        <span class="variable language_">self</span>.index_q_layernorm = RMSNorm(index_head_dim)</span><br><span class="line">        <span class="variable language_">self</span>.index_k_layernorm = RMSNorm(index_head_dim)</span><br><span class="line"></span><br><span class="line">        <span class="comment"># 独立的 K cache</span></span><br><span class="line">        <span class="variable language_">self</span>.k_cache = Qwen3NextIndexerCache(...)</span><br><span class="line"></span><br><span class="line">        <span class="variable language_">self</span>.score_scale = index_head_dim ** <span class="number">0.5</span></span><br></pre></td></tr></table></figure>
+
+<p>Indexer 的 forward 计算过程：</p>
+<ol>
+<li><strong>QKW 投影</strong>：<code>qkw = index_qkw_proj(hidden_states)</code> → 拆分为 q, k, w</li>
+<li><strong>LayerNorm</strong>：对 q, k 分别做 RMSNorm</li>
+<li><strong>RoPE</strong>：施加旋转位置编码（使用 <code>partial_rotary_factor=0.5</code>）</li>
+<li><strong>写入 K Cache</strong>：将当前 k 写入 indexer 独立的 block KV cache</li>
+<li><strong>计算相关性分数</strong>：<ul>
+<li>bf16 模式：<code>score = (Q @ K_cache) * W / score_scale</code></li>
+<li>fp8 模式：先对 Q 做 per-token-group FP8 量化，再计算</li>
+</ul>
+</li>
+<li><strong>TopK 选择</strong>：对每个 token 选出 TopK 个最相关的历史 token 索引</li>
+<li><strong>输出</strong>：<code>topk_indices_buffer</code> 供后续 sparse attention 使用</li>
+</ol>
+<h3 id="5-4-Sparse-Attention-的-Prefill-和-Decode"><a href="#5-4-Sparse-Attention-的-Prefill-和-Decode" class="headerlink" title="5.4 Sparse Attention 的 Prefill 和 Decode"></a>5.4 Sparse Attention 的 Prefill 和 Decode</h3><p><strong>Prefill 时</strong>（<code>flash_attn_sparse_prefill</code>）：</p>
+<ul>
+<li>从 K cache 中按 block 收集完整的 K</li>
+<li>计算 <code>logits = Q @ K_cache * W</code></li>
+<li>选 TopK 得到稀疏索引</li>
+<li>用稀疏索引从 KV cache 中提取对应的 K、V，做 sparse attention</li>
+<li>支持 Context Parallel (CP) 加速长序列</li>
+</ul>
+<p><strong>Decode 时</strong>：</p>
+<ul>
+<li>使用 paged MQA logits 计算分数</li>
+<li>TopK 选择后，提取稀疏 KV</li>
+<li>支持 pai-fa3 或 triton 两种 sparse attention backend</li>
+</ul>
+<hr>
+<h2 id="6-完整流程图"><a href="#6-完整流程图" class="headerlink" title="6. 完整流程图"></a>6. 完整流程图</h2><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br></pre></td><td class="code"><pre><span class="line">┌──────────────────────────────────────────────────────────────────────────────┐</span><br><span class="line">│                        Qwen3-Next Decoder Layer                             │</span><br><span class="line">│                                                                             │</span><br><span class="line">│  input: hidden_states                                                       │</span><br><span class="line">│         ↓                                                                   │</span><br><span class="line">│  ┌─────────────┐                                                            │</span><br><span class="line">│  │ InputLayerNorm│                                                           │</span><br><span class="line">│  └──────┬──────┘                                                            │</span><br><span class="line">│         │                                                                   │</span><br><span class="line">│   ┌─────┴──────────────────────────────────┐                                │</span><br><span class="line">│   │         layer_type?                      │                               │</span><br><span class="line">│   │                                          │                               │</span><br><span class="line">│   ▼                                          ▼                               │</span><br><span class="line">│ "linear_attention" (GDN)          "full_attention"                          │</span><br><span class="line">│   │                                          │                               │</span><br><span class="line">│   │ ┌───────────────────────┐      ┌────────┴──────────────────────────┐    │</span><br><span class="line">│   │ │ 1. in_proj_qkvz(h)   │      │  qkv_proj(h) → q, k, v [, gate] │    │</span><br><span class="line">│   │ │    in_proj_ba(h)      │      │  q_norm, k_norm                  │    │</span><br><span class="line">│   │ │    → q,k,v,z,b,a     │      │  rotary_emb(pos, q, k)          │    │</span><br><span class="line">│   │ └───────┬───────────────┘      └────────┬──────────────────────────┘    │</span><br><span class="line">│   │         │                                │                               │</span><br><span class="line">│   │ ┌───────┴───────────────┐      ┌────────┴─────────┐                    │</span><br><span class="line">│   │ │ 2. causal_conv1d      │      │  QSA enabled?     │                    │</span><br><span class="line">│   │ │    (prefill: conv1d_fn│      │                   │                    │</span><br><span class="line">│   │ │     decode: conv1d_upd│      │   YES      NO     │                    │</span><br><span class="line">│   │ └───────┬───────────────┘      │    │        │     │                    │</span><br><span class="line">│   │         │                      │    ▼        │     │                    │</span><br><span class="line">│   │ ┌───────┴───────────────┐      │ Indexer:    │     │                    │</span><br><span class="line">│   │ │ 3. fused_gdn_gating   │      │ QKW proj    │     │                    │</span><br><span class="line">│   │ │  g = -exp(A) *        │      │ LayerNorm   │     │                    │</span><br><span class="line">│   │ │     softplus(a+bias)  │      │ RoPE        │     │                    │</span><br><span class="line">│   │ │  β = sigmoid(b)       │      │ Write K$    │     │                    │</span><br><span class="line">│   │ └───────┬───────────────┘      │ Score calc  │     │                    │</span><br><span class="line">│   │         │                      │ TopK select │     │                    │</span><br><span class="line">│   │ ┌───────┴───────────────┐      │    │        │     │                    │</span><br><span class="line">│   │ │ 4. Recurrent Attn     │      └────┤────────┤─────┘                    │</span><br><span class="line">│   │ │ (prefill: chunk_gdr)  │           ▼        ▼                          │</span><br><span class="line">│   │ │ (decode: fused_rec)   │      ┌────────────────────┐                   │</span><br><span class="line">│   │ │                       │      │  Flash Attention    │                   │</span><br><span class="line">│   │ │ For each step t:      │      │  (sparse if QSA)   │                   │</span><br><span class="line">│   │ │  q̂=q/‖q‖₂ * scale   │      │  (dense  if no QSA)│                   │</span><br><span class="line">│   │ │  k̂=k/‖k‖₂           │      └────────┬───────────┘                   │</span><br><span class="line">│   │ │  h *= exp(g)          │               │                               │</span><br><span class="line">│   │ │  v' = β(v - hᵀk̂)    │      ┌────────┴───────────┐                   │</span><br><span class="line">│   │ │  h += k̂ ⊗ v'         │      │ [gate * ] o_proj   │                   │</span><br><span class="line">│   │ │  o = hᵀq̂             │      └────────┬───────────┘                   │</span><br><span class="line">│   │ └───────┬───────────────┘               │                               │</span><br><span class="line">│   │ ┌───────┴───────────────┐               │                               │</span><br><span class="line">│   │ │ 5. norm(out, z) +     │               │                               │</span><br><span class="line">│   │ │    out_proj           │               │                               │</span><br><span class="line">│   │ └───────┬───────────────┘               │                               │</span><br><span class="line">│   │         │                               │                               │</span><br><span class="line">│   └─────────┴───────────────────────────────┘                               │</span><br><span class="line">│             │                                                               │</span><br><span class="line">│         attention_output                                                    │</span><br><span class="line">│             │                                                               │</span><br><span class="line">│    + residual + [layer_scale]                                               │</span><br><span class="line">│             │                                                               │</span><br><span class="line">│    PostAttentionLayerNorm                                                   │</span><br><span class="line">│             │                                                               │</span><br><span class="line">│    MLP (Dense or MoE)                                                       │</span><br><span class="line">│             │                                                               │</span><br><span class="line">│    + residual + [layer_scale]                                               │</span><br><span class="line">│             │                                                               │</span><br><span class="line">│         output                                                              │</span><br><span class="line">└──────────────────────────────────────────────────────────────────────────────┘</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="7-KV-Cache-结构对比"><a href="#7-KV-Cache-结构对比" class="headerlink" title="7. KV Cache 结构对比"></a>7. KV Cache 结构对比</h2><h3 id="GDN-层的-Cache"><a href="#GDN-层的-Cache" class="headerlink" title="GDN 层的 Cache"></a>GDN 层的 Cache</h3><p>GDN 使用 Mamba 风格的 state cache，每个序列维护两个状态：</p>
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>形状</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>conv_state</td>
+<td><code>[num_slots, conv_dim, conv_kernel_size]</code></td>
+<td>因果卷积的滑动窗口状态</td>
+</tr>
+<tr>
+<td>ssm_state</td>
+<td><code>[num_slots, num_v_heads, head_k_dim, head_v_dim]</code></td>
+<td>递归注意力的状态矩阵 h</td>
+</tr>
+</tbody></table>
+<p>其中 <code>conv_dim = key_dim * 2 + value_dim</code>。</p>
+<p>Spec decode 时，每个序列需要 <code>num_spec + 1</code> 个 slot 来存储多步状态。</p>
+<h3 id="Full-Attention-层的-Cache"><a href="#Full-Attention-层的-Cache" class="headerlink" title="Full Attention 层的 Cache"></a>Full Attention 层的 Cache</h3><p>标准的 block KV cache：<code>[2, num_blocks, block_size, num_kv_heads, head_dim]</code></p>
+<p>QSA 时额外有 Indexer K cache：<code>[num_blocks, block_size, index_kv_heads, index_head_dim]</code></p>
+<hr>
+<h2 id="8-关键对比总结"><a href="#8-关键对比总结" class="headerlink" title="8. 关键对比总结"></a>8. 关键对比总结</h2><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>GDN (linear_attention)</th>
+<th>Full Attention (无 QSA)</th>
+<th>Full Attention (有 QSA)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>KV Cache</strong></td>
+<td>conv_state + ssm_state</td>
+<td>block KV cache</td>
+<td>block KV cache + indexer K cache</td>
+</tr>
+<tr>
+<td><strong>Prefill 算法</strong></td>
+<td>chunk_gated_delta_rule</td>
+<td>Flash Attention</td>
+<td>Indexer + Sparse Flash Attention</td>
+</tr>
+<tr>
+<td><strong>Decode 算法</strong></td>
+<td>fused_recurrent</td>
+<td>Flash Attention</td>
+<td>Indexer + Sparse Flash Attention</td>
+</tr>
+<tr>
+<td><strong>Decode 复杂度</strong></td>
+<td>O(d_k × d_v) per head</td>
+<td>O(seq_len × d)</td>
+<td>O(TopK × d)</td>
+</tr>
+<tr>
+<td><strong>位置编码</strong></td>
+<td>无 RoPE</td>
+<td>RoPE</td>
+<td>RoPE + Indexer RoPE</td>
+</tr>
+<tr>
+<td><strong>QSA 影响</strong></td>
+<td>无</td>
+<td>-</td>
+<td>Indexer 选 TopK，稀疏 attention</td>
+</tr>
+<tr>
+<td><strong>状态数学</strong></td>
+<td>h = exp(g)·h + k⊗[β(v-hᵀk)]</td>
+<td>softmax(QKᵀ/√d)V</td>
+<td>softmax(QK_topk^T/√d)V_topk</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="9-相关环境变量"><a href="#9-相关环境变量" class="headerlink" title="9. 相关环境变量"></a>9. 相关环境变量</h2><table>
+<thead>
+<tr>
+<th>环境变量</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>VLLM_GDN_USE_BLADNN</code></td>
+<td>是否使用 bladnn 加速 GDN 递归计算</td>
+</tr>
+<tr>
+<td><code>VLLM_QSA_USE_FP8_INDEXER</code></td>
+<td>Indexer 是否使用 FP8 量化</td>
+</tr>
+<tr>
+<td><code>VLLM_QSA_PREFILL_USE_TL_INDEXER</code></td>
+<td>Prefill 时 Indexer 是否使用 tilelang kernel</td>
+</tr>
+<tr>
+<td><code>VLLM_QSA_DECODE_USE_TL_INDEXER</code></td>
+<td>Decode 时 Indexer 是否使用 tilelang kernel</td>
+</tr>
+<tr>
+<td><code>VLLM_QSA_PREFILL_ATTN_BACKEND</code></td>
+<td>QSA prefill 的 attention backend（triton / pai-fa3）</td>
+</tr>
+<tr>
+<td><code>VLLM_QSA_DECODE_ATTN_BACKEND</code></td>
+<td>QSA decode 的 attention backend（pai-fa3 等）</td>
+</tr>
+<tr>
+<td><code>VLLM_QSA_PREFILL_USE_CP</code></td>
+<td>QSA prefill 是否使用 Context Parallel</td>
+</tr>
+<tr>
+<td><code>VLLM_DSA_USE_CONTEXT_PARALLEL_THRESHOLD</code></td>
+<td>启用 CP 的 token 数阈值</td>
+</tr>
+<tr>
+<td><code>VLLM_DSA_USE_DENSE_PREFILL_THRESHOLD</code></td>
+<td>使用 dense prefill 的阈值</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="10-源码文件索引"><a href="#10-源码文件索引" class="headerlink" title="10. 源码文件索引"></a>10. 源码文件索引</h2><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>主要内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vllm/model_executor/models/qwen3_next.py</code></td>
+<td>GDN 层 (<code>Qwen3NextGatedDeltaNet</code>)、Attention 层 (<code>Qwen3NextAttention</code>)、Indexer、融合 gating kernel</td>
+</tr>
+<tr>
+<td><code>vllm/v1/attention/backends/gdn_attn.py</code></td>
+<td>GDN Attention Metadata 构建器</td>
+</tr>
+<tr>
+<td><code>vllm/model_executor/layers/fla/ops/fused_recurrent.py</code></td>
+<td>递归 GDN Triton kernel（decode 路径）</td>
+</tr>
+<tr>
+<td><code>vllm/model_executor/layers/fla/ops/chunk.py</code></td>
+<td>分块 GDN kernel（prefill 路径）</td>
+</tr>
+<tr>
+<td><code>vllm/v1/attention/backends/flash_attn.py</code></td>
+<td>Flash Attention + QSA 稀疏 attention 实现</td>
+</tr>
+<tr>
+<td><code>vllm/v1/attention/backends/flash_attn_qsautils.py</code></td>
+<td>QSA 辅助工具函数</td>
+</tr>
+<tr>
+<td><code>vllm/model_executor/models/qsa_indexer_utils.py</code></td>
+<td>QSA Indexer 的 MQA logits 计算工具</td>
+</tr>
+<tr>
+<td><code>vllm/model_executor/layers/mamba/ops/causal_conv1d.py</code></td>
+<td>因果卷积实现</td>
+</tr>
+<tr>
+<td><code>vllm/v1/worker/gpu_model_runner.py</code></td>
+<td>GDN metadata 与 model runner 的集成</td>
+</tr>
+</tbody></table>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-gdn-computation/" data-id="cmnea1ca50003pt3888uo1z9w" data-title="GDN (GatedDeltaNet) 在 vLLM 中的计算流程" class="article-share-link"><span class="fa fa-share">分享</span></a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/notes/tags/vLLM/" rel="tag">vLLM</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+    <a href="/notes/2026/03/31/2026-03-31-ppo/" id="article-nav-newer" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">前一篇</strong>
+      <div class="article-nav-title">
+        
+          PPO（Proximal Policy Optimization）学习笔记
+        
+      </div>
+    </a>
+  
+  
+    <a href="/notes/2026/03/31/2026-03-31-vllm-qsa-computation/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">后一篇</strong>
+      <div class="article-nav-title">QSA (Query-Side Aggregation) 在 vLLM 中的计算流程</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签</h3>
+    <div class="widget">
+      <ul class="tag-list" itemprop="keywords"><li class="tag-list-item"><a class="tag-list-link" href="/notes/tags/RL/" rel="tag">RL</a></li><li class="tag-list-item"><a class="tag-list-link" href="/notes/tags/vLLM/" rel="tag">vLLM</a></li><li class="tag-list-item"><a class="tag-list-link" href="/notes/tags/%E6%95%B0%E5%AD%A6/" rel="tag">数学</a></li><li class="tag-list-item"><a class="tag-list-link" href="/notes/tags/%E9%87%8F%E5%8C%96/" rel="tag">量化</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签云</h3>
+    <div class="widget tagcloud">
+      <a href="/notes/tags/RL/" style="font-size: 15px;">RL</a> <a href="/notes/tags/vLLM/" style="font-size: 20px;">vLLM</a> <a href="/notes/tags/%E6%95%B0%E5%AD%A6/" style="font-size: 10px;">数学</a> <a href="/notes/tags/%E9%87%8F%E5%8C%96/" style="font-size: 10px;">量化</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">归档</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/notes/archives/2026/03/">三月 2026</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">最新文章</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/notes/2026/03/31/2026-03-31-kl-divergence/">KL 散度简介与 PPO 中的应用</a>
+          </li>
+        
+          <li>
+            <a href="/notes/2026/03/31/2026-03-31-ppo/">PPO（Proximal Policy Optimization）学习笔记</a>
+          </li>
+        
+          <li>
+            <a href="/notes/2026/03/31/2026-03-31-vllm-gdn-computation/">GDN (GatedDeltaNet) 在 vLLM 中的计算流程</a>
+          </li>
+        
+          <li>
+            <a href="/notes/2026/03/31/2026-03-31-vllm-qsa-computation/">QSA (Query-Side Aggregation) 在 vLLM 中的计算流程</a>
+          </li>
+        
+          <li>
+            <a href="/notes/2026/03/31/2026-03-31-vllm-quantization-rotate/">量化中的 Rotate（旋转变换）技术及 vLLM 实现</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      
+      &copy; 2026 llx-08<br>
+      Powered by <a href="https://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/notes/" class="mobile-nav-link">Home</a>
+  
+    <a href="/notes/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+
+<script src="/notes/js/jquery-3.6.4.min.js"></script>
+
+
+
+  
+<script src="/notes/fancybox/jquery.fancybox.min.js"></script>
+
+
+
+
+<script src="/notes/js/script.js"></script>
+
+
+
+
+
+  </div>
+</body>
+</html>

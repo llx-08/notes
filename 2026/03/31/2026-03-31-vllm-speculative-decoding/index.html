@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  
+  <title>vLLM 投机解码（Eagle / MTP）实现与运行流程 | Notes</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="description" content="vLLM 投机解码（Eagle &#x2F; MTP）实现与运行流程目录 一、概述 二、关键文件清单 三、配置与初始化流程 四、Eagle 模型架构详解 五、MTP 模型架构详解 六、Eagle vs MTP 关键设计对比 七、EagleProposer 核心逻辑 八、拒绝采样（Rejection Sampling） 九、调度器集成 十、完整运行流程总结 附录：Pre-Norm Transformer 中的">
+<meta property="og:type" content="article">
+<meta property="og:title" content="vLLM 投机解码（Eagle &#x2F; MTP）实现与运行流程">
+<meta property="og:url" content="https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/index.html">
+<meta property="og:site_name" content="Notes">
+<meta property="og:description" content="vLLM 投机解码（Eagle &#x2F; MTP）实现与运行流程目录 一、概述 二、关键文件清单 三、配置与初始化流程 四、Eagle 模型架构详解 五、MTP 模型架构详解 六、Eagle vs MTP 关键设计对比 七、EagleProposer 核心逻辑 八、拒绝采样（Rejection Sampling） 九、调度器集成 十、完整运行流程总结 附录：Pre-Norm Transformer 中的">
+<meta property="og:locale" content="zh_CN">
+<meta property="article:published_time" content="2026-03-31T00:00:00.000Z">
+<meta property="article:modified_time" content="2026-03-31T07:09:38.077Z">
+<meta property="article:author" content="llx-08">
+<meta property="article:tag" content="vLLM">
+<meta name="twitter:card" content="summary">
+  
+    <link rel="alternate" href="/notes/atom.xml" title="Notes" type="application/atom+xml">
+  
+  
+    <link rel="shortcut icon" href="/notes/favicon.png">
+  
+  
+  
+<link rel="stylesheet" href="/notes/css/style.css">
+
+  
+    
+<link rel="stylesheet" href="/notes/fancybox/jquery.fancybox.min.css">
+
+  
+  
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fork-awesome@1.2.0/css/fork-awesome.min.css">
+
+<meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/notes/" id="logo">Notes</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"><span class="fa fa-bars"></span></a>
+        
+          <a class="main-nav-link" href="/notes/">Home</a>
+        
+          <a class="main-nav-link" href="/notes/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+        
+          <a class="nav-icon" href="/notes/atom.xml" title="RSS 订阅"><span class="fa fa-rss"></span></a>
+        
+        <a class="nav-icon nav-search-btn" title="搜索"><span class="fa fa-search"></span></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="搜索"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="https://llx-08.github.io/notes"></form>
+      </div>
+    </div>
+  </div>
+</header>
+
+      <div class="outer">
+        <section id="main"><article id="post-2026-03-31-vllm-speculative-decoding" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/" class="article-date">
+  <time class="dt-published" datetime="2026-03-31T00:00:00.000Z" itemprop="datePublished">2026-03-31</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="p-name article-title" itemprop="headline name">
+      vLLM 投机解码（Eagle / MTP）实现与运行流程
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <h1 id="vLLM-投机解码（Eagle-MTP）实现与运行流程"><a href="#vLLM-投机解码（Eagle-MTP）实现与运行流程" class="headerlink" title="vLLM 投机解码（Eagle / MTP）实现与运行流程"></a>vLLM 投机解码（Eagle / MTP）实现与运行流程</h1><h2 id="目录"><a href="#目录" class="headerlink" title="目录"></a>目录</h2><ul>
+<li><a href="#%E4%B8%80%E6%A6%82%E8%BF%B0">一、概述</a></li>
+<li><a href="#%E4%BA%8C%E5%85%B3%E9%94%AE%E6%96%87%E4%BB%B6%E6%B8%85%E5%8D%95">二、关键文件清单</a></li>
+<li><a href="#%E4%B8%89%E9%85%8D%E7%BD%AE%E4%B8%8E%E5%88%9D%E5%A7%8B%E5%8C%96%E6%B5%81%E7%A8%8B">三、配置与初始化流程</a></li>
+<li><a href="#%E5%9B%9Beagle-%E6%A8%A1%E5%9E%8B%E6%9E%B6%E6%9E%84%E8%AF%A6%E8%A7%A3">四、Eagle 模型架构详解</a></li>
+<li><a href="#%E4%BA%94mtp-%E6%A8%A1%E5%9E%8B%E6%9E%B6%E6%9E%84%E8%AF%A6%E8%A7%A3">五、MTP 模型架构详解</a></li>
+<li><a href="#%E5%85%ADeagle-vs-mtp-%E5%85%B3%E9%94%AE%E8%AE%BE%E8%AE%A1%E5%AF%B9%E6%AF%94">六、Eagle vs MTP 关键设计对比</a></li>
+<li><a href="#%E4%B8%83eagleproposer-%E6%A0%B8%E5%BF%83%E9%80%BB%E8%BE%91">七、EagleProposer 核心逻辑</a></li>
+<li><a href="#%E5%85%AB%E6%8B%92%E7%BB%9D%E9%87%87%E6%A0%B7rejection-sampling">八、拒绝采样（Rejection Sampling）</a></li>
+<li><a href="#%E4%B9%9D%E8%B0%83%E5%BA%A6%E5%99%A8%E9%9B%86%E6%88%90">九、调度器集成</a></li>
+<li><a href="#%E5%8D%81%E5%AE%8C%E6%95%B4%E8%BF%90%E8%A1%8C%E6%B5%81%E7%A8%8B%E6%80%BB%E7%BB%93">十、完整运行流程总结</a></li>
+<li><a href="#%E9%99%84%E5%BD%95pre-norm-transformer-%E4%B8%AD%E7%9A%84%E6%AE%8B%E5%B7%AE%E4%BC%A0%E9%80%92">附录：Pre-Norm Transformer 中的残差传递</a></li>
+</ul>
+<hr>
+<h2 id="一、概述"><a href="#一、概述" class="headerlink" title="一、概述"></a>一、概述</h2><p>投机解码（Speculative Decoding）的核心思想：用一个<strong>轻量的 draft 模型</strong>快速生成多个候选 token，再用<strong>完整的 target 模型</strong>一次性验证，接受正确的、拒绝错误的。理想情况下，多个 token 可在一次 target forward 中全部通过验证，从而提升吞吐。</p>
+<p>vLLM v1 实现了两种主要的投机解码方案：</p>
+<ul>
+<li><strong>Eagle</strong>：独立的小型 draft 模型，接收 target 的 hidden states 和 token embeddings 作为输入</li>
+<li><strong>MTP（Multi-Token Prediction）</strong>：模型自带的多 token 预测头，通常与 target 共享权重</li>
+</ul>
+<p>两者在 vLLM 中<strong>共用同一个 Proposer 类</strong> —— <code>EagleProposer</code>，通过 <code>self.method</code> 区分行为。</p>
+<hr>
+<h2 id="二、关键文件清单"><a href="#二、关键文件清单" class="headerlink" title="二、关键文件清单"></a>二、关键文件清单</h2><h3 id="配置"><a href="#配置" class="headerlink" title="配置"></a>配置</h3><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vllm/config/speculative.py</code></td>
+<td><code>SpeculativeConfig</code>：用户配置入口，自动检测 method，构建 draft <code>ModelConfig</code></td>
+</tr>
+<tr>
+<td><code>vllm/config/vllm.py</code></td>
+<td><code>VllmConfig</code>：持有 <code>speculative_config</code>，传递给 worker</td>
+</tr>
+<tr>
+<td><code>vllm/transformers_utils/configs/eagle.py</code></td>
+<td><code>EAGLEConfig</code>：重写 HF config 的 <code>architectures</code> 字段</td>
+</tr>
+</tbody></table>
+<h3 id="Proposer（草案生成）"><a href="#Proposer（草案生成）" class="headerlink" title="Proposer（草案生成）"></a>Proposer（草案生成）</h3><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vllm/v1/spec_decode/eagle.py</code></td>
+<td>**<code>EagleProposer</code>**：Eagle 和 MTP 共用的 draft 提议器</td>
+</tr>
+<tr>
+<td><code>vllm/v1/spec_decode/utils.py</code></td>
+<td>Triton 辅助 kernel（padded batch 处理）</td>
+</tr>
+<tr>
+<td><code>vllm/v1/spec_decode/metadata.py</code></td>
+<td>投机解码元数据</td>
+</tr>
+</tbody></table>
+<h3 id="Eagle-模型实现"><a href="#Eagle-模型实现" class="headerlink" title="Eagle 模型实现"></a>Eagle 模型实现</h3><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vllm/model_executor/models/llama_eagle.py</code></td>
+<td>Llama Eagle draft 模型</td>
+</tr>
+<tr>
+<td><code>vllm/model_executor/models/qwen3_moe_eagle.py</code></td>
+<td>Qwen3-MoE Eagle draft 模型</td>
+</tr>
+<tr>
+<td><code>vllm/model_executor/models/llama_eagle3.py</code></td>
+<td>Eagle3 变体</td>
+</tr>
+</tbody></table>
+<h3 id="MTP-模型实现"><a href="#MTP-模型实现" class="headerlink" title="MTP 模型实现"></a>MTP 模型实现</h3><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vllm/model_executor/models/deepseek_mtp.py</code></td>
+<td>DeepSeek MTP</td>
+</tr>
+<tr>
+<td><code>vllm/model_executor/models/qwen3_next_mtp.py</code></td>
+<td>Qwen3-Next MTP</td>
+</tr>
+<tr>
+<td><code>vllm/model_executor/models/qwen_mtp.py</code></td>
+<td>Qwen MTP</td>
+</tr>
+<tr>
+<td><code>vllm/model_executor/models/ernie_mtp.py</code></td>
+<td>Ernie MTP</td>
+</tr>
+</tbody></table>
+<h3 id="Worker-与-Runner"><a href="#Worker-与-Runner" class="headerlink" title="Worker 与 Runner"></a>Worker 与 Runner</h3><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vllm/v1/worker/gpu_model_runner.py</code></td>
+<td>实例化 <code>EagleProposer</code>，调度 draft 和 target 的 forward</td>
+</tr>
+<tr>
+<td><code>vllm/v1/worker/gpu_worker.py</code></td>
+<td>选择 V1/V2 model runner</td>
+</tr>
+</tbody></table>
+<h3 id="验证（拒绝采样）"><a href="#验证（拒绝采样）" class="headerlink" title="验证（拒绝采样）"></a>验证（拒绝采样）</h3><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vllm/v1/sample/rejection_sampler.py</code></td>
+<td><code>RejectionSampler</code>：验证 draft tokens</td>
+</tr>
+<tr>
+<td><code>vllm/v1/sample/tree_rejection_sampler.py</code></td>
+<td>树状投机解码的验证器</td>
+</tr>
+</tbody></table>
+<h3 id="调度器"><a href="#调度器" class="headerlink" title="调度器"></a>调度器</h3><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vllm/v1/core/sched/scheduler.py</code></td>
+<td>统一调度，管理 <code>spec_token_ids</code></td>
+</tr>
+<tr>
+<td><code>vllm/v1/engine/core.py</code></td>
+<td>Engine 层面的 draft 结果回传</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="三、配置与初始化流程"><a href="#三、配置与初始化流程" class="headerlink" title="三、配置与初始化流程"></a>三、配置与初始化流程</h2><h3 id="3-1-配置解析"><a href="#3-1-配置解析" class="headerlink" title="3.1 配置解析"></a>3.1 配置解析</h3><p>用户传入 <code>speculative_config</code>（指定 method、draft model、<code>num_speculative_tokens</code> 等）后：</p>
+<ol>
+<li><code>SpeculativeConfig.__post_init__</code> 构建 <code>draft_model_config</code></li>
+<li>自动检测 method 类型（<code>eagle</code> / <code>eagle3</code> / <code>mtp</code>）</li>
+<li><strong>Eagle</strong>：用 <code>EAGLEConfig</code> 重写 HF config 的 <code>architectures</code>，映射到 vLLM 的 <code>Eagle*</code> 模型类</li>
+<li><strong>MTP</strong>：重写 <code>model_type</code> / <code>architectures</code>（如 <code>qwen3_next</code> → <code>qwen3_next_mtp</code>）</li>
+</ol>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/config/speculative.py</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.method <span class="keyword">in</span> (<span class="string">"eagle"</span>, <span class="string">"eagle3"</span>):</span><br><span class="line">    eagle_config = EAGLEConfig(</span><br><span class="line">        <span class="variable language_">self</span>.draft_model_config.hf_config,</span><br><span class="line">        method=<span class="variable language_">self</span>.method,</span><br><span class="line">        model_type=<span class="string">"eagle"</span>,</span><br><span class="line">    )</span><br><span class="line">    <span class="variable language_">self</span>.draft_model_config.hf_config = eagle_config</span><br></pre></td></tr></table></figure>
+
+<p><code>use_eagle()</code> 方法对 <code>eagle</code>、<code>eagle3</code>、<code>mtp</code> 三种 method 都返回 True：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/config/speculative.py</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">use_eagle</span>(<span class="params">self</span>) -&gt; <span class="built_in">bool</span>:</span><br><span class="line">    <span class="keyword">return</span> <span class="variable language_">self</span>.method <span class="keyword">in</span> (<span class="string">"eagle"</span>, <span class="string">"eagle3"</span>, <span class="string">"mtp"</span>)</span><br></pre></td></tr></table></figure>
+
+<h3 id="3-2-创建-Proposer"><a href="#3-2-创建-Proposer" class="headerlink" title="3.2 创建 Proposer"></a>3.2 创建 Proposer</h3><p>在 <code>GPUModelRunner.__init__</code> 中，若 <code>speculative_config.use_eagle()</code> 为 True，创建 <code>EagleProposer</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/worker/gpu_model_runner.py</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.speculative_config <span class="keyword">and</span> get_pp_group().is_last_rank:</span><br><span class="line">    <span class="keyword">if</span> <span class="variable language_">self</span>.speculative_config.use_eagle():</span><br><span class="line">        <span class="variable language_">self</span>.drafter = EagleProposer(<span class="variable language_">self</span>.vllm_config, <span class="variable language_">self</span>.device, <span class="variable language_">self</span>)</span><br></pre></td></tr></table></figure>
+
+<p>同时创建 <code>RejectionSampler</code> 用于验证。</p>
+<h3 id="3-3-加载模型与权重共享"><a href="#3-3-加载模型与权重共享" class="headerlink" title="3.3 加载模型与权重共享"></a>3.3 加载模型与权重共享</h3><p>先加载 target 模型，再调用 <code>EagleProposer.load_model(target_model)</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/spec_decode/eagle.py — load_model</span></span><br><span class="line"><span class="variable language_">self</span>.model = get_model(</span><br><span class="line">    vllm_config=<span class="variable language_">self</span>.vllm_config,</span><br><span class="line">    model_config=draft_model_config,</span><br><span class="line">    enable_spec_decoding=<span class="literal">True</span>,</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p>加载后进行权重共享：</p>
+<p><strong>embed_tokens 共享：</strong></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Eagle: 可选（检测 has_own_embed_tokens）</span></span><br><span class="line"><span class="keyword">if</span> <span class="built_in">hasattr</span>(<span class="variable language_">self</span>.model, <span class="string">"has_own_embed_tokens"</span>):</span><br><span class="line">    <span class="keyword">if</span> <span class="keyword">not</span> <span class="variable language_">self</span>.model.has_own_embed_tokens:</span><br><span class="line">        share_embeddings = <span class="literal">True</span></span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    <span class="comment"># MTP: 总是共享</span></span><br><span class="line">    share_embeddings = <span class="literal">True</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> share_embeddings:</span><br><span class="line">    <span class="keyword">del</span> <span class="variable language_">self</span>.model.model.embed_tokens</span><br><span class="line">    <span class="variable language_">self</span>.model.model.embed_tokens = target_embed_tokens</span><br></pre></td></tr></table></figure>
+
+<p><strong>lm_head 共享：</strong></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Eagle: 可选</span></span><br><span class="line"><span class="keyword">if</span> <span class="built_in">hasattr</span>(<span class="variable language_">self</span>.model, <span class="string">"has_own_lm_head"</span>):</span><br><span class="line">    <span class="keyword">if</span> <span class="keyword">not</span> <span class="variable language_">self</span>.model.has_own_lm_head:</span><br><span class="line">        share_lm_head = <span class="literal">True</span></span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    <span class="comment"># MTP: 总是共享</span></span><br><span class="line">    share_lm_head = <span class="literal">True</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> share_lm_head:</span><br><span class="line">    <span class="keyword">del</span> <span class="variable language_">self</span>.model.lm_head</span><br><span class="line">    <span class="variable language_">self</span>.model.lm_head = target_language_model.lm_head</span><br></pre></td></tr></table></figure>
+
+<p><strong>MTP 额外共享 shared_head.head：</strong></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 每个 MTP layer 的 shared_head.head 也指向 target 的 lm_head</span></span><br><span class="line"><span class="keyword">for</span> layer <span class="keyword">in</span> items:</span><br><span class="line">    sh = <span class="built_in">getattr</span>(layer, <span class="string">"shared_head"</span>, <span class="literal">None</span>)</span><br><span class="line">    <span class="keyword">if</span> sh <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span> <span class="keyword">and</span> <span class="built_in">hasattr</span>(sh, <span class="string">"head"</span>):</span><br><span class="line">        <span class="keyword">del</span> sh.head</span><br><span class="line">        sh.head = target_language_model.lm_head</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="四、Eagle-模型架构详解"><a href="#四、Eagle-模型架构详解" class="headerlink" title="四、Eagle 模型架构详解"></a>四、Eagle 模型架构详解</h2><h3 id="4-1-Llama-Eagle（经典版）"><a href="#4-1-Llama-Eagle（经典版）" class="headerlink" title="4.1 Llama Eagle（经典版）"></a>4.1 Llama Eagle（经典版）</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/model_executor/models/llama_eagle.py</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">LlamaModel</span>(nn.Module):</span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">__init__</span>(<span class="params">self, *, vllm_config, prefix=<span class="string">""</span>, start_layer_id=<span class="number">0</span></span>):</span><br><span class="line">        <span class="comment"># 词嵌入</span></span><br><span class="line">        <span class="variable language_">self</span>.embed_tokens = VocabParallelEmbedding(vocab_size, hidden_size)</span><br><span class="line">        <span class="comment"># decoder layers，层号从 start_layer_id 开始</span></span><br><span class="line">        <span class="variable language_">self</span>.layers = nn.ModuleList([</span><br><span class="line">            LlamaDecoderLayer(vllm_config, i == <span class="number">0</span>,</span><br><span class="line">                prefix=<span class="string">f"model.layers.<span class="subst">{i + start_layer_id}</span>"</span>)</span><br><span class="line">            <span class="keyword">for</span> i <span class="keyword">in</span> <span class="built_in">range</span>(config.num_hidden_layers)</span><br><span class="line">        ])</span><br><span class="line">        <span class="comment"># 融合投影层：[hidden_size*2] → [hidden_size]</span></span><br><span class="line">        <span class="variable language_">self</span>.fc = ReplicatedLinear(hidden_size * <span class="number">2</span>, hidden_size, bias=<span class="literal">False</span>)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">forward</span>(<span class="params">self, input_ids, positions, hidden_states</span>):</span><br><span class="line">        input_embeds = <span class="variable language_">self</span>.embed_tokens(input_ids)</span><br><span class="line">        <span class="comment"># 直接拼接 + 投影</span></span><br><span class="line">        hidden_states = <span class="variable language_">self</span>.fc(torch.cat((input_embeds, hidden_states), dim=-<span class="number">1</span>))</span><br><span class="line">        residual = <span class="literal">None</span></span><br><span class="line">        <span class="keyword">for</span> layer <span class="keyword">in</span> <span class="variable language_">self</span>.layers:</span><br><span class="line">            hidden_states, residual = layer(positions, hidden_states, residual)</span><br><span class="line">        hidden_states = hidden_states + residual</span><br><span class="line">        <span class="keyword">return</span> hidden_states, hidden_states  <span class="comment"># 返回 tuple</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="4-2-Qwen3-MoE-Eagle"><a href="#4-2-Qwen3-MoE-Eagle" class="headerlink" title="4.2 Qwen3-MoE Eagle"></a>4.2 Qwen3-MoE Eagle</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/model_executor/models/qwen3_moe_eagle.py</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">Qwen3MoeEagleModel</span>(nn.Module):</span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">__init__</span>(<span class="params">self, *, vllm_config, start_layer_id=<span class="number">0</span>, prefix=<span class="string">""</span></span>):</span><br><span class="line">        <span class="variable language_">self</span>.embed_tokens = VocabParallelEmbedding(vocab_size, hidden_size)</span><br><span class="line">        <span class="comment"># 先 norm 再拼接投影</span></span><br><span class="line">        <span class="variable language_">self</span>.e_norm = RMSNorm(hidden_size)</span><br><span class="line">        <span class="variable language_">self</span>.h_norm = RMSNorm(hidden_size)</span><br><span class="line">        <span class="variable language_">self</span>.eh_proj = nn.Linear(<span class="number">2</span> * hidden_size, hidden_size, bias=<span class="literal">False</span>)</span><br><span class="line">        <span class="comment"># 只有 1 层 decoder layer</span></span><br><span class="line">        <span class="variable language_">self</span>.layers = nn.ModuleList([</span><br><span class="line">            Qwen3MoeEagleDecoderLayer(vllm_config,</span><br><span class="line">                prefix=<span class="string">f"model.layers.<span class="subst">{start_layer_id}</span>"</span>)</span><br><span class="line">        ])</span><br><span class="line">        <span class="variable language_">self</span>.norm = RMSNorm(hidden_size)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">forward</span>(<span class="params">self, input_ids, positions, hidden_states</span>):</span><br><span class="line">        input_embeds = <span class="variable language_">self</span>.embed_tokens(input_ids)</span><br><span class="line">        e_feat = <span class="variable language_">self</span>.e_norm(input_embeds)       <span class="comment"># norm(embed)</span></span><br><span class="line">        h_feat = <span class="variable language_">self</span>.h_norm(hidden_states)      <span class="comment"># norm(target_hidden)</span></span><br><span class="line">        hidden_states = <span class="variable language_">self</span>.eh_proj(torch.cat([e_feat, h_feat], dim=-<span class="number">1</span>))</span><br><span class="line">        residual = torch.zeros_like(hidden_states)</span><br><span class="line">        <span class="keyword">for</span> layer <span class="keyword">in</span> <span class="variable language_">self</span>.layers:</span><br><span class="line">            hidden_states, residual = layer(positions, hidden_states, residual)</span><br><span class="line">        hidden_states, _ = <span class="variable language_">self</span>.norm(hidden_states, residual)</span><br><span class="line">        <span class="keyword">return</span> hidden_states, hidden_states  <span class="comment"># 返回 tuple</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="4-3-关键设计"><a href="#4-3-关键设计" class="headerlink" title="4.3 关键设计"></a>4.3 关键设计</h3><ul>
+<li><strong>fc / eh_proj 层</strong>：将 <code>[embed, hidden_states]</code> 拼接后投影回 <code>hidden_size</code>，融合词嵌入信息和 target 隐状态</li>
+<li><strong>Decoder layers 层号从 <code>target_layer_num</code> 开始</strong>：续接 target 模型的层号，共享 KV cache 地址空间，避免 attention layer name 冲突</li>
+<li><strong>返回值</strong>：返回 <code>(hidden_states, hidden_states)</code> 的 tuple，两个是同一个 tensor 的引用</li>
+</ul>
+<hr>
+<h2 id="五、MTP-模型架构详解"><a href="#五、MTP-模型架构详解" class="headerlink" title="五、MTP 模型架构详解"></a>五、MTP 模型架构详解</h2><h3 id="5-1-Qwen3-Next-MTP"><a href="#5-1-Qwen3-Next-MTP" class="headerlink" title="5.1 Qwen3-Next MTP"></a>5.1 Qwen3-Next MTP</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/model_executor/models/qwen3_next_mtp.py</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">Qwen3NextMultiTokenPredictor</span>(nn.Module):</span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">__init__</span>(<span class="params">self, *, vllm_config, prefix=<span class="string">""</span></span>):</span><br><span class="line">        <span class="variable language_">self</span>.mtp_start_layer_idx = config.num_hidden_layers</span><br><span class="line">        <span class="variable language_">self</span>.num_mtp_layers = <span class="built_in">getattr</span>(config, <span class="string">"num_nextn_predict_layers"</span>, <span class="number">1</span>)</span><br><span class="line">        <span class="variable language_">self</span>.embed_tokens = VocabParallelEmbedding(vocab_size, hidden_size)</span><br><span class="line">        <span class="comment"># 融合投影</span></span><br><span class="line">        <span class="variable language_">self</span>.fc = ColumnParallelLinear(hidden_size * <span class="number">2</span>, hidden_size, bias=<span class="literal">False</span>)</span><br><span class="line">        <span class="variable language_">self</span>.pre_fc_norm_hidden = RMSNorm(hidden_size)</span><br><span class="line">        <span class="variable language_">self</span>.pre_fc_norm_embedding = RMSNorm(hidden_size)</span><br><span class="line">        <span class="comment"># 可能有多层 decoder layer</span></span><br><span class="line">        <span class="variable language_">self</span>.layers = nn.ModuleList(</span><br><span class="line">            Qwen3NextDecoderLayer(vllm_config,</span><br><span class="line">                prefix=<span class="string">f"<span class="subst">{prefix}</span>.layers.<span class="subst">{self.mtp_start_layer_idx + idx}</span>"</span>)</span><br><span class="line">            <span class="keyword">for</span> idx <span class="keyword">in</span> <span class="built_in">range</span>(<span class="variable language_">self</span>.num_mtp_layers)</span><br><span class="line">        )</span><br><span class="line">        <span class="variable language_">self</span>.norm = RMSNorm(hidden_size)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">forward</span>(<span class="params">self, input_ids, positions, hidden_states,</span></span><br><span class="line"><span class="params">                intermediate_tensors=<span class="literal">None</span>, inputs_embeds=<span class="literal">None</span>, spec_step_idx=<span class="number">0</span></span>):</span><br><span class="line">        <span class="keyword">if</span> inputs_embeds <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">            inputs_embeds = <span class="variable language_">self</span>.embed_input_ids(input_ids)</span><br><span class="line">        <span class="comment"># 先 norm 再拼接投影</span></span><br><span class="line">        inputs_embeds = <span class="variable language_">self</span>.pre_fc_norm_embedding(inputs_embeds)</span><br><span class="line">        hidden_states = <span class="variable language_">self</span>.pre_fc_norm_hidden(hidden_states)</span><br><span class="line">        hidden_states = torch.cat([inputs_embeds, hidden_states], dim=-<span class="number">1</span>)</span><br><span class="line">        hidden_states = <span class="variable language_">self</span>.fc(hidden_states)</span><br><span class="line">        residual = <span class="literal">None</span></span><br><span class="line">        <span class="comment"># 按 spec_step_idx 选择使用哪一层</span></span><br><span class="line">        current_step_idx = spec_step_idx % <span class="variable language_">self</span>.num_mtp_layers</span><br><span class="line">        hidden_states, residual = <span class="variable language_">self</span>.layers[current_step_idx](</span><br><span class="line">            positions=positions, hidden_states=hidden_states, residual=residual,</span><br><span class="line">        )</span><br><span class="line">        hidden_states, _ = <span class="variable language_">self</span>.norm(hidden_states, residual)</span><br><span class="line">        <span class="keyword">return</span> hidden_states  <span class="comment"># 返回单个 tensor（不是 tuple）</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="5-2-DeepSeek-MTP"><a href="#5-2-DeepSeek-MTP" class="headerlink" title="5.2 DeepSeek MTP"></a>5.2 DeepSeek MTP</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/model_executor/models/deepseek_mtp.py</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">DeepSeekMultiTokenPredictorLayer</span>(nn.Module):</span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">__init__</span>(<span class="params">self, vllm_config, prefix</span>):</span><br><span class="line">        <span class="variable language_">self</span>.enorm = RMSNorm(hidden_size)</span><br><span class="line">        <span class="variable language_">self</span>.hnorm = RMSNorm(hidden_size)</span><br><span class="line">        <span class="variable language_">self</span>.eh_proj = nn.Linear(hidden_size * <span class="number">2</span>, hidden_size, bias=<span class="literal">False</span>)</span><br><span class="line">        <span class="variable language_">self</span>.shared_head = SharedHead(config, prefix)  <span class="comment"># 每层有独立的 shared_head</span></span><br><span class="line">        <span class="variable language_">self</span>.mtp_block = DeepseekV2DecoderLayer(vllm_config, prefix)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">forward</span>(<span class="params">self, input_ids, positions, previous_hidden_states,</span></span><br><span class="line"><span class="params">                inputs_embeds=<span class="literal">None</span>, spec_step_index=<span class="number">0</span></span>):</span><br><span class="line">        inputs_embeds = <span class="variable language_">self</span>.enorm(inputs_embeds)</span><br><span class="line">        previous_hidden_states = <span class="variable language_">self</span>.hnorm(previous_hidden_states)</span><br><span class="line">        hidden_states = <span class="variable language_">self</span>.eh_proj(</span><br><span class="line">            torch.cat([inputs_embeds, previous_hidden_states], dim=-<span class="number">1</span>)</span><br><span class="line">        )</span><br><span class="line">        hidden_states, residual = <span class="variable language_">self</span>.mtp_block(</span><br><span class="line">            positions=positions, hidden_states=hidden_states, residual=<span class="literal">None</span></span><br><span class="line">        )</span><br><span class="line">        hidden_states = residual + hidden_states</span><br><span class="line">        <span class="keyword">return</span> hidden_states</span><br><span class="line"></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">DeepSeekMultiTokenPredictor</span>(nn.Module):</span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">forward</span>(<span class="params">self, input_ids, positions, previous_hidden_states,</span></span><br><span class="line"><span class="params">                inputs_embeds=<span class="literal">None</span>, spec_step_idx=<span class="number">0</span></span>):</span><br><span class="line">        current_step_idx = spec_step_idx % <span class="variable language_">self</span>.num_mtp_layers</span><br><span class="line">        <span class="keyword">return</span> <span class="variable language_">self</span>.layers[<span class="built_in">str</span>(<span class="variable language_">self</span>.mtp_start_layer_idx + current_step_idx)](</span><br><span class="line">            input_ids, positions, previous_hidden_states, inputs_embeds,</span><br><span class="line">        )</span><br><span class="line"></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">compute_logits</span>(<span class="params">self, hidden_states, spec_step_idx=<span class="number">0</span></span>):</span><br><span class="line">        current_step_idx = spec_step_idx % <span class="variable language_">self</span>.num_mtp_layers</span><br><span class="line">        mtp_layer = <span class="variable language_">self</span>.layers[<span class="built_in">str</span>(<span class="variable language_">self</span>.mtp_start_layer_idx + current_step_idx)]</span><br><span class="line">        <span class="comment"># 每层通过自己的 shared_head 计算 logits</span></span><br><span class="line">        logits = <span class="variable language_">self</span>.logits_processor(</span><br><span class="line">            mtp_layer.shared_head.head, mtp_layer.shared_head(hidden_states)</span><br><span class="line">        )</span><br><span class="line">        <span class="keyword">return</span> logits</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="六、Eagle-vs-MTP-关键设计对比"><a href="#六、Eagle-vs-MTP-关键设计对比" class="headerlink" title="六、Eagle vs MTP 关键设计对比"></a>六、Eagle vs MTP 关键设计对比</h2><table>
+<thead>
+<tr>
+<th>设计点</th>
+<th>Eagle (Llama)</th>
+<th>Eagle (Qwen3-MoE)</th>
+<th>MTP (Qwen3-Next)</th>
+<th>MTP (DeepSeek)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>融合方式</strong></td>
+<td><code>fc(concat(embed, hidden))</code></td>
+<td><code>eh_proj(concat(e_norm(embed), h_norm(hidden)))</code></td>
+<td><code>fc(concat(norm_e(embed), norm_h(hidden)))</code></td>
+<td><code>eh_proj(concat(enorm(embed), hnorm(hidden)))</code></td>
+</tr>
+<tr>
+<td><strong>Decoder 层数</strong></td>
+<td><code>config.num_hidden_layers</code>（可多层）</td>
+<td><strong>1 层</strong></td>
+<td><code>num_nextn_predict_layers</code>（可多层）</td>
+<td><code>num_nextn_predict_layers</code>（可多层）</td>
+</tr>
+<tr>
+<td><strong>层号起始</strong></td>
+<td><code>target_layer_num</code></td>
+<td><code>target_layer_num</code></td>
+<td><code>num_hidden_layers</code></td>
+<td><code>num_hidden_layers</code></td>
+</tr>
+<tr>
+<td><strong>多步选层</strong></td>
+<td>所有层都跑（完整 stack）</td>
+<td>单层</td>
+<td><code>spec_step_idx % num_mtp_layers</code></td>
+<td><code>spec_step_idx % num_mtp_layers</code></td>
+</tr>
+<tr>
+<td><strong>forward 返回值</strong></td>
+<td><code>(hidden, hidden)</code> tuple</td>
+<td><code>(hidden, hidden)</code> tuple</td>
+<td>单个 <code>hidden</code> tensor</td>
+<td>单个 <code>hidden</code> tensor</td>
+</tr>
+<tr>
+<td><strong>compute_logits</strong></td>
+<td>全局 <code>logits_processor(lm_head)</code></td>
+<td>全局 <code>logits_processor(lm_head)</code></td>
+<td>全局 <code>logits_processor(lm_head)</code></td>
+<td>每层 <code>shared_head.head</code></td>
+</tr>
+<tr>
+<td><strong>embed_tokens 共享</strong></td>
+<td>可选（检测 <code>has_own_embed_tokens</code>）</td>
+<td>可选</td>
+<td><strong>总是共享</strong></td>
+<td><strong>总是共享</strong></td>
+</tr>
+<tr>
+<td><strong>lm_head 共享</strong></td>
+<td>可选（检测 <code>has_own_lm_head</code>）</td>
+<td>可选</td>
+<td><strong>总是共享</strong></td>
+<td><strong>总是共享</strong> + 每层 <code>shared_head.head</code> 也共享</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="七、EagleProposer-核心逻辑"><a href="#七、EagleProposer-核心逻辑" class="headerlink" title="七、EagleProposer 核心逻辑"></a>七、EagleProposer 核心逻辑</h2><p><code>EagleProposer</code> 是 Eagle 和 MTP 共用的 draft 提议器（<code>vllm/v1/spec_decode/eagle.py</code>）。</p>
+<h3 id="7-1-propose-方法"><a href="#7-1-propose-方法" class="headerlink" title="7.1 propose() 方法"></a>7.1 <code>propose()</code> 方法</h3><h4 id="输入准备"><a href="#输入准备" class="headerlink" title="输入准备"></a>输入准备</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 将 target_hidden_states 拷贝到缓冲区</span></span><br><span class="line"><span class="variable language_">self</span>.hidden_states[:num_tokens] = target_hidden_states</span><br><span class="line"></span><br><span class="line"><span class="comment"># 构造 shifted input_ids：左移一位，末尾填入 next_token_ids</span></span><br><span class="line"><span class="comment"># 原始: [a1, b1, b2, c1, c2, c3]</span></span><br><span class="line"><span class="comment"># 移位: [b1, b2, c1, c2, c3, c3]</span></span><br><span class="line"><span class="variable language_">self</span>.input_ids[:num_tokens - <span class="number">1</span>] = target_token_ids[<span class="number">1</span>:]</span><br><span class="line"><span class="comment"># 替换每个 request 最后一个位置为采样得到的 next_token</span></span><br><span class="line"><span class="comment"># 结果: [a2, b2, b3, c2, c3, c4]</span></span><br><span class="line"><span class="variable language_">self</span>.input_ids[last_token_indices] = next_token_ids</span><br></pre></td></tr></table></figure>
+
+<h4 id="第-1-步-Draft-Forward"><a href="#第-1-步-Draft-Forward" class="headerlink" title="第 1 步 Draft Forward"></a>第 1 步 Draft Forward</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line">ret_hidden_states = <span class="variable language_">self</span>.model(</span><br><span class="line">    input_ids=input_ids,</span><br><span class="line">    positions=<span class="variable language_">self</span>._get_positions(num_input_tokens),</span><br><span class="line">    hidden_states=<span class="variable language_">self</span>.hidden_states[:num_input_tokens],  <span class="comment"># target 的 hidden_states</span></span><br><span class="line">    inputs_embeds=inputs_embeds,</span><br><span class="line">)</span><br><span class="line"><span class="comment"># 区分 Eagle 和 MTP 的返回值</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.method == <span class="string">"mtp"</span>:</span><br><span class="line">    last_hidden_states = ret_hidden_states        <span class="comment"># 单个 tensor</span></span><br><span class="line">    hidden_states = last_hidden_states</span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    last_hidden_states, hidden_states = ret_hidden_states  <span class="comment"># tuple 解包</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 取采样位置的 hidden → 算 logits → argmax 得 draft token</span></span><br><span class="line">sample_hidden_states = last_hidden_states[last_token_indices]</span><br><span class="line">logits = <span class="variable language_">self</span>.model.compute_logits(sample_hidden_states)</span><br><span class="line">draft_token_ids = logits.argmax(dim=-<span class="number">1</span>)</span><br></pre></td></tr></table></figure>
+
+<h4 id="第-2-N-步-Draft-Forward"><a href="#第-2-N-步-Draft-Forward" class="headerlink" title="第 2 ~ N 步 Draft Forward"></a>第 2 ~ N 步 Draft Forward</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> token_index <span class="keyword">in</span> <span class="built_in">range</span>(<span class="variable language_">self</span>.num_speculative_tokens - <span class="number">1</span>):</span><br><span class="line">    input_ids = draft_token_ids_list[-<span class="number">1</span>].<span class="built_in">int</span>()</span><br><span class="line">    positions += <span class="number">1</span></span><br><span class="line">    common_attn_metadata.seq_lens += <span class="number">1</span></span><br><span class="line">    <span class="comment"># 将 Eagle/MTP 自身上一步的输出作为本步的 hidden_states 输入</span></span><br><span class="line">    <span class="variable language_">self</span>.hidden_states[:batch_size] = hidden_states</span><br><span class="line"></span><br><span class="line">    ret_hidden_states = <span class="variable language_">self</span>.model(</span><br><span class="line">        input_ids=input_ids,</span><br><span class="line">        positions=...,</span><br><span class="line">        hidden_states=<span class="variable language_">self</span>.hidden_states[:input_batch_size],  <span class="comment"># Eagle 自身的输出</span></span><br><span class="line">    )</span><br><span class="line">    <span class="comment"># ... 同样的 logits → argmax 逻辑</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="7-2-hidden-states-数据流"><a href="#7-2-hidden-states-数据流" class="headerlink" title="7.2 hidden_states 数据流"></a>7.2 hidden_states 数据流</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">Target Model forward</span><br><span class="line">    → target_hidden_states [num_tokens, hidden_size]  （最后一层 + norm 后，所有 token 位置）</span><br><span class="line">        ↓ (作为输入)</span><br><span class="line">    Eagle/MTP Draft Model forward(input_ids, positions, hidden_states=target_hidden_states)</span><br><span class="line">        → fc(concat(norm(embed), norm(target_hidden)))</span><br><span class="line">        → Eagle decoder layers / MTP decoder layer</span><br><span class="line">        → eagle_hidden_states   ← draft 模型自身的输出</span><br><span class="line">            ↓</span><br><span class="line">        last_hidden_states → [last_token_indices] → compute_logits → draft_token_id_1</span><br><span class="line">        hidden_states → 作为第 2 步的输入</span><br><span class="line">            ↓</span><br><span class="line">        Eagle/MTP Draft Model forward(input_ids=draft_token_1, hidden_states=eagle_hidden)</span><br><span class="line">            → draft_token_id_2</span><br><span class="line">            → ...</span><br></pre></td></tr></table></figure>
+
+<p><strong>第 1 步 draft 用的是 target 的 hidden_states；第 2+ 步 draft 用的是 Eagle/MTP 自身上一步输出的 hidden_states。</strong></p>
+<h3 id="7-3-特殊-MTP-变体的-hidden-states-处理"><a href="#7-3-特殊-MTP-变体的-hidden-states-处理" class="headerlink" title="7.3 特殊 MTP 变体的 hidden_states 处理"></a>7.3 特殊 MTP 变体的 hidden_states 处理</h3><p>对于 DeepSeek、Ernie 等 MTP 变体，下一步的 hidden_states 取自缓冲区而非模型返回值：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.method <span class="keyword">in</span> (<span class="string">"deepseek_mtp"</span>, <span class="string">"ernie_mtp"</span>, <span class="string">"longcat_flash_mtp"</span>, <span class="string">"pangu_ultra_moe_mtp"</span>):</span><br><span class="line">    hidden_states = <span class="variable language_">self</span>.hidden_states[last_token_indices]  <span class="comment"># 从缓冲区取</span></span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    hidden_states = hidden_states[last_token_indices]        <span class="comment"># 从模型输出取</span></span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="八、拒绝采样（Rejection-Sampling）"><a href="#八、拒绝采样（Rejection-Sampling）" class="headerlink" title="八、拒绝采样（Rejection Sampling）"></a>八、拒绝采样（Rejection Sampling）</h2><p>实现位于 <code>vllm/v1/sample/rejection_sampler.py</code>，严格遵循论文 <a target="_blank" rel="noopener" href="https://arxiv.org/abs/2211.17192">https://arxiv.org/abs/2211.17192</a> 的算法。</p>
+<h3 id="8-1-术语"><a href="#8-1-术语" class="headerlink" title="8.1 术语"></a>8.1 术语</h3><ul>
+<li><strong>accepted tokens</strong>：基于 draft 和 target 概率关系被接受的 token</li>
+<li><strong>recovered tokens</strong>：被拒绝后，从调整后的概率分布中重新采样的 token</li>
+<li><strong>bonus tokens</strong>：若所有 draft token 都被接受，额外从 target 概率中采样的 token</li>
+<li><strong>output tokens</strong> = accepted + recovered + bonus</li>
+</ul>
+<h3 id="8-2-验证流程"><a href="#8-2-验证流程" class="headerlink" title="8.2 验证流程"></a>8.2 验证流程</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 1. 取 target logits 在 draft 位置和 bonus 位置</span></span><br><span class="line">bonus_logits = logits[bonus_logits_indices]</span><br><span class="line">raw_target_logits = logits[target_logits_indices]</span><br><span class="line"></span><br><span class="line"><span class="comment"># 2. 采样 bonus token（从 target 概率）</span></span><br><span class="line">bonus_token_ids = sampler(bonus_logits).sampled_token_ids</span><br><span class="line"></span><br><span class="line"><span class="comment"># 3. 对 target logits 应用 logits processors 和采样约束</span></span><br><span class="line">target_logits = apply_logits_processors(raw_target_logits, ...)</span><br><span class="line">target_logits = apply_sampling_constraints(target_logits, ...)</span><br><span class="line">target_probs = target_logits.softmax(dim=-<span class="number">1</span>)</span><br><span class="line"></span><br><span class="line"><span class="comment"># 4. 执行拒绝采样</span></span><br><span class="line">output_token_ids = rejection_sample(</span><br><span class="line">    draft_token_ids, num_draft_tokens,</span><br><span class="line">    draft_probs, target_probs, bonus_token_ids, ...</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<h3 id="8-3-拒绝采样算法"><a href="#8-3-拒绝采样算法" class="headerlink" title="8.3 拒绝采样算法"></a>8.3 拒绝采样算法</h3><p><strong>贪心采样（Greedy）：</strong></p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">对于每个 draft 位置 pos:</span><br><span class="line">    target_argmax = argmax(target_probs[pos])</span><br><span class="line">    output[pos] = target_argmax</span><br><span class="line">    if draft_token_ids[pos] != target_argmax:</span><br><span class="line">        拒绝，后续位置全部丢弃</span><br><span class="line">        break</span><br><span class="line"></span><br><span class="line">如果所有 draft 都被接受:</span><br><span class="line">    追加 bonus token</span><br></pre></td></tr></table></figure>
+
+<p><strong>随机采样（Stochastic）：</strong></p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">对于每个 draft 位置 pos:</span><br><span class="line">    draft_prob = draft_probs[pos][draft_token_id]</span><br><span class="line">    target_prob = target_probs[pos][draft_token_id]</span><br><span class="line">    uniform = random()</span><br><span class="line"></span><br><span class="line">    if target_prob / draft_prob &gt;= uniform:</span><br><span class="line">        接受 draft token</span><br><span class="line">    else:</span><br><span class="line">        拒绝，使用 recovered token（从 max(target - draft, 0) 分布采样）</span><br><span class="line">        后续位置全部丢弃</span><br><span class="line"></span><br><span class="line">如果所有 draft 都被接受:</span><br><span class="line">    追加 bonus token</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="九、调度器集成"><a href="#九、调度器集成" class="headerlink" title="九、调度器集成"></a>九、调度器集成</h2><h3 id="9-1-统一调度（无-draft-verify-两阶段）"><a href="#9-1-统一调度（无-draft-verify-两阶段）" class="headerlink" title="9.1 统一调度（无 draft/verify 两阶段）"></a>9.1 统一调度（无 draft/verify 两阶段）</h3><p>vLLM v1 的调度器没有单独的”draft 阶段”和”verify 阶段”。每个 request 维护：</p>
+<ul>
+<li><code>num_computed_tokens</code>：已经被 target 模型计算过的 token 数</li>
+<li><code>num_tokens_with_spec = len(prompt) + len(output) + len(spec_token_ids)</code></li>
+</ul>
+<p>调度器每步让 <code>num_computed_tokens</code> 追上 <code>num_tokens_with_spec</code>。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/core/sched/scheduler.py</span></span><br><span class="line"><span class="comment"># 调度算法注释：</span></span><br><span class="line"><span class="comment"># There's no "decoding phase" nor "prefill phase" in the scheduler.</span></span><br><span class="line"><span class="comment"># Each request just has num_computed_tokens and num_tokens_with_spec.</span></span><br><span class="line"><span class="comment"># At each step, the scheduler tries to assign tokens to the requests</span></span><br><span class="line"><span class="comment"># so that each request's num_computed_tokens can catch up its</span></span><br><span class="line"><span class="comment"># num_tokens_with_spec.</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="9-2-Draft-Token-的生命周期"><a href="#9-2-Draft-Token-的生命周期" class="headerlink" title="9.2 Draft Token 的生命周期"></a>9.2 Draft Token 的生命周期</h3><ol>
+<li><strong>Draft 生成后</strong>：<code>EagleProposer.propose()</code> 返回 draft token ids</li>
+<li><strong>回传调度器</strong>：Engine <code>post_step</code> → <code>scheduler.update_draft_token_ids()</code> → 存入 <code>request.spec_token_ids</code></li>
+<li><strong>下次调度</strong>：<code>schedule()</code> 将 <code>spec_token_ids</code> 包含在调度中，复制到 <code>scheduled_spec_decode_tokens</code></li>
+<li><strong>验证后修正</strong>：<code>update_from_output</code> 根据拒绝数量回退 <code>num_computed_tokens</code></li>
+</ol>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 修正逻辑</span></span><br><span class="line">num_accepted = <span class="built_in">len</span>(generated_token_ids) - <span class="number">1</span>  <span class="comment"># -1 是因为包含了 bonus</span></span><br><span class="line">num_rejected = num_draft_tokens - num_accepted</span><br><span class="line">request.num_computed_tokens -= num_rejected</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="十、完整运行流程总结"><a href="#十、完整运行流程总结" class="headerlink" title="十、完整运行流程总结"></a>十、完整运行流程总结</h2><h3 id="循环流程"><a href="#循环流程" class="headerlink" title="循环流程"></a>循环流程</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Schedule → Target Forward(验证) → 拒绝采样 → Draft Forward(提议) → 回传 draft → Schedule → ...</span><br></pre></td></tr></table></figure>
+
+<h3 id="详细步骤"><a href="#详细步骤" class="headerlink" title="详细步骤"></a>详细步骤</h3><h4 id="Step-1：调度器调度"><a href="#Step-1：调度器调度" class="headerlink" title="Step 1：调度器调度"></a>Step 1：调度器调度</h4><ul>
+<li>统一处理所有请求，无 draft/verify 两阶段之分</li>
+<li>若 request 有 <code>spec_token_ids</code>（上一步 draft 产生的），包含在本次调度中</li>
+</ul>
+<h4 id="Step-2：Target-模型-Forward（验证-生成-hidden-states）"><a href="#Step-2：Target-模型-Forward（验证-生成-hidden-states）" class="headerlink" title="Step 2：Target 模型 Forward（验证 + 生成 hidden_states）"></a>Step 2：Target 模型 Forward（验证 + 生成 hidden_states）</h4><ul>
+<li>Target 模型对整个调度序列（包括 draft token）做一次 forward</li>
+<li>输出 <code>hidden_states</code>：所有 token 位置的最后一层 + final norm 后的表示</li>
+<li>从中取采样位置 → <code>compute_logits</code> → 得到 target logits</li>
+</ul>
+<h4 id="Step-3：拒绝采样"><a href="#Step-3：拒绝采样" class="headerlink" title="Step 3：拒绝采样"></a>Step 3：拒绝采样</h4><ul>
+<li><code>RejectionSampler</code> 验证上一步的 draft tokens</li>
+<li>贪心：比较 draft token 与 target argmax</li>
+<li>随机：比较 <code>target_prob / draft_prob</code> 与均匀随机数</li>
+<li>输出 accepted + recovered + bonus tokens</li>
+</ul>
+<h4 id="Step-4：Draft-模型-Propose"><a href="#Step-4：Draft-模型-Propose" class="headerlink" title="Step 4：Draft 模型 Propose"></a>Step 4：Draft 模型 Propose</h4><ul>
+<li><strong>准备输入</strong>：取 target 的 <code>hidden_states</code>，构造 shifted <code>input_ids</code></li>
+<li><strong>第 1 步 draft</strong>：Eagle/MTP forward，输入为 target hidden_states → <code>compute_logits</code> → argmax 得第 1 个 draft token</li>
+<li><strong>第 2 ~ N 步 draft</strong>：Eagle/MTP forward，输入为自身上一步的 hidden_states → 得后续 draft tokens</li>
+<li>打包为 <code>[batch_size, num_speculative_tokens]</code></li>
+</ul>
+<h4 id="Step-5：回传-Draft-结果"><a href="#Step-5：回传-Draft-结果" class="headerlink" title="Step 5：回传 Draft 结果"></a>Step 5：回传 Draft 结果</h4><ul>
+<li>Engine <code>post_step</code> 取出 draft token ids</li>
+<li><code>scheduler.update_draft_token_ids()</code> 存入 <code>request.spec_token_ids</code></li>
+</ul>
+<h4 id="Step-6：调度器修正"><a href="#Step-6：调度器修正" class="headerlink" title="Step 6：调度器修正"></a>Step 6：调度器修正</h4><ul>
+<li>根据拒绝采样结果：<code>num_computed_tokens -= num_rejected</code></li>
+</ul>
+<hr>
+<h2 id="附录：Pre-Norm-Transformer-中的残差传递"><a href="#附录：Pre-Norm-Transformer-中的残差传递" class="headerlink" title="附录：Pre-Norm Transformer 中的残差传递"></a>附录：Pre-Norm Transformer 中的残差传递</h2><h3 id="什么是残差"><a href="#什么是残差" class="headerlink" title="什么是残差"></a>什么是残差</h3><p>在 Transformer 中，”残差”指残差连接（Residual Connection）中”跳过”子层的那条路径上的值：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">output = x + sublayer(x)</span><br></pre></td></tr></table></figure>
+
+<p>其中 <code>x</code> 就是”残差”。</p>
+<h3 id="Pre-Norm-结构的残差传递"><a href="#Pre-Norm-结构的残差传递" class="headerlink" title="Pre-Norm 结构的残差传递"></a>Pre-Norm 结构的残差传递</h3><p>vLLM 使用 Pre-Norm 结构，每层的逻辑为：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">Layer N 输入: (hidden_states, residual)</span><br><span class="line"></span><br><span class="line">┌─ input_layernorm(hidden_states, residual):</span><br><span class="line">│    residual = hidden_states + residual   ← 把上层输出加到残差上</span><br><span class="line">│    hidden_states = RMSNorm(residual)     ← 归一化后送给 attention</span><br><span class="line">│</span><br><span class="line">├─ hidden_states = self_attn(hidden_states)</span><br><span class="line">│</span><br><span class="line">├─ post_attention_layernorm(hidden_states, residual):</span><br><span class="line">│    residual = hidden_states + residual   ← 把 attention 输出加到残差上</span><br><span class="line">│    hidden_states = RMSNorm(residual)     ← 归一化后送给 MLP</span><br><span class="line">│</span><br><span class="line">└─ hidden_states = mlp(hidden_states)</span><br><span class="line"></span><br><span class="line">Layer N 输出: (hidden_states, residual)</span><br></pre></td></tr></table></figure>
+
+<p>到最后一层：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">final_norm(hidden_states, residual):</span><br><span class="line">    residual_sum = hidden_states + residual   ← 把最后 MLP 输出加回</span><br><span class="line">    normed = RMSNorm(residual_sum)            ← 归一化</span><br><span class="line">    return (normed, residual_sum)</span><br><span class="line"></span><br><span class="line">hidden_states, _ = self.norm(hidden_states, residual)</span><br><span class="line">                 ↑ 取归一化后的结果，丢弃 residual_sum</span><br></pre></td></tr></table></figure>
+
+<h3 id="为什么分开传递-hidden-states-和-residual"><a href="#为什么分开传递-hidden-states-和-residual" class="headerlink" title="为什么分开传递 hidden_states 和 residual"></a>为什么分开传递 hidden_states 和 residual</h3><p>性能优化——将加法和归一化融合到一个 kernel 里（fused add + norm），减少 GPU 上的中间 tensor 分配和内存读写。代价是需要同时传递 <code>hidden_states</code> 和 <code>residual</code> 两个 tensor。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/" data-id="cmnea1ca80007pt3864zi2iqj" data-title="vLLM 投机解码（Eagle / MTP）实现与运行流程" class="article-share-link"><span class="fa fa-share">分享</span></a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/notes/tags/vLLM/" rel="tag">vLLM</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+    <a href="/notes/2026/03/31/2026-03-31-vllm-quantization-rotate/" id="article-nav-newer" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">前一篇</strong>
+      <div class="article-nav-title">
+        
+          量化中的 Rotate（旋转变换）技术及 vLLM 实现
+        
+      </div>
+    </a>
+  
+  
+</nav>
+
+  
+</article>
+
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签</h3>
+    <div class="widget">
+      <ul class="tag-list" itemprop="keywords"><li class="tag-list-item"><a class="tag-list-link" href="/notes/tags/RL/" rel="tag">RL</a></li><li class="tag-list-item"><a class="tag-list-link" href="/notes/tags/vLLM/" rel="tag">vLLM</a></li><li class="tag-list-item"><a class="tag-list-link" href="/notes/tags/%E6%95%B0%E5%AD%A6/" rel="tag">数学</a></li><li class="tag-list-item"><a class="tag-list-link" href="/notes/tags/%E9%87%8F%E5%8C%96/" rel="tag">量化</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签云</h3>
+    <div class="widget tagcloud">
+      <a href="/notes/tags/RL/" style="font-size: 15px;">RL</a> <a href="/notes/tags/vLLM/" style="font-size: 20px;">vLLM</a> <a href="/notes/tags/%E6%95%B0%E5%AD%A6/" style="font-size: 10px;">数学</a> <a href="/notes/tags/%E9%87%8F%E5%8C%96/" style="font-size: 10px;">量化</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">归档</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/notes/archives/2026/03/">三月 2026</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">最新文章</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/notes/2026/03/31/2026-03-31-kl-divergence/">KL 散度简介与 PPO 中的应用</a>
+          </li>
+        
+          <li>
+            <a href="/notes/2026/03/31/2026-03-31-ppo/">PPO（Proximal Policy Optimization）学习笔记</a>
+          </li>
+        
+          <li>
+            <a href="/notes/2026/03/31/2026-03-31-vllm-gdn-computation/">GDN (GatedDeltaNet) 在 vLLM 中的计算流程</a>
+          </li>
+        
+          <li>
+            <a href="/notes/2026/03/31/2026-03-31-vllm-qsa-computation/">QSA (Query-Side Aggregation) 在 vLLM 中的计算流程</a>
+          </li>
+        
+          <li>
+            <a href="/notes/2026/03/31/2026-03-31-vllm-quantization-rotate/">量化中的 Rotate（旋转变换）技术及 vLLM 实现</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      
+      &copy; 2026 llx-08<br>
+      Powered by <a href="https://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/notes/" class="mobile-nav-link">Home</a>
+  
+    <a href="/notes/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+
+<script src="/notes/js/jquery-3.6.4.min.js"></script>
+
+
+
+  
+<script src="/notes/fancybox/jquery.fancybox.min.js"></script>
+
+
+
+
+<script src="/notes/js/script.js"></script>
+
+
+
+
+
+  </div>
+</body>
+</html>
