@@ -3,6 +3,7 @@ title: GDN (GatedDeltaNet) 在 vLLM 中的计算流程
 date: 2026-03-31
 tags: [vLLM]
 ---
+
 # GDN (GatedDeltaNet) 在 vLLM 中的计算流程
 
 ## 1. 整体架构概览

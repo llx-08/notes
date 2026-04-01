@@ -3,6 +3,7 @@ title: 量化中的 Rotate（旋转变换）技术及 vLLM 实现
 date: 2026-03-31
 tags: [vLLM, 量化]
 ---
+
 # 量化中的 Rotate（旋转变换）技术及 vLLM 实现
 
 ## 1. 背景：为什么需要旋转变换
