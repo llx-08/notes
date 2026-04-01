@@ -62,21 +62,21 @@ TurboQuant 分成两部分：
 
 于是作者把真实向量分解成：
 
-\[
+$$
 x = \hat x_{\text{mse}} + r
-\]
+$$
 
 其中：
-- `\hat x_mse` 是第一阶段量化后的近似
+- $\hat{x}_{\text{mse}}$ 是第一阶段量化后的近似
 - `r` 是残差
 
 然后对残差 `r` 再用一个 **1-bit 的 QJL（Quantized Johnson-Lindenstrauss）** 做编码，用来构造一个对残差内积的**无偏估计器**。
 
 最后总内积估计相当于：
 
-\[
+$$
 \langle y, \hat x_{\text{mse}} \rangle + \text{QJL 对 } \langle y, r \rangle \text{ 的估计}
-\]
+$$
 
 这样就能把第一阶段丢掉的那部分内积贡献“补回来”。
 
@@ -147,9 +147,9 @@ x = \hat x_{\text{mse}} + r
 
 attention score 本质上就是：
 
-\[
+$$
 q \cdot k
-\]
+$$
 
 如果量化后这个值系统性偏大或偏小，就会改变：
 
@@ -197,11 +197,11 @@ q \cdot k
 
 内积失真衡量的是：
 
-\[
+$$
 \langle y, x \rangle
 \quad \text{和} \quad
 \langle y, Q^{-1}(Q(x)) \rangle
-\]
+$$
 
 之间的差异。
 
@@ -298,31 +298,29 @@ Lloyd-Max 的最优条件是：
 
 先做第一阶段量化，得到：
 
-\[
+$$
 \hat x_{\text{mse}}
-\]
+$$
 
 然后定义残差：
 
-\[
+$$
 r = x - \hat x_{\text{mse}}
-\]
+$$
 
 此时真实内积可以拆成：
 
-\[
-\langle y, x\rangle
-=
-\langle y, \hat x_{\text{mse}}\rangle + \langle y, r\rangle
-\]
+$$
+\langle y, x\rangle = \langle y, \hat{x}_{\text{mse}}\rangle + \langle y, r\rangle
+$$
 
 问题是，如果只用第一项，第二项就丢了，因此内积可能产生偏差。
 
 于是作者对残差 `r` 再做一个 1-bit QJL 编码，用来构造对：
 
-\[
+$$
 \langle y, r\rangle
-\]
+$$
 
 的无偏估计。
 
@@ -345,15 +343,15 @@ r = x - \hat x_{\text{mse}}
 
 对于内积估计来说，如果量化后的估计是：
 
-\[
+$$
 \langle y, \hat x \rangle
-\]
+$$
 
 那么无偏就是：
 
-\[
+$$
 \mathbb E_Q[\langle y, \hat x \rangle] = \langle y, x \rangle
-\]
+$$
 
 无偏不是说每次都准确，而是说：
 
@@ -362,45 +360,45 @@ r = x - \hat x_{\text{mse}}
 
 ---
 
-### Q7. “虽然 \hat x_mse 离 x 很近，但它对内积不一定无偏” 是什么意思？
+### Q7. “虽然 $\hat{x}_{\text{mse}}$ 离 x 很近，但它对内积不一定无偏” 是什么意思？
 
 **答：**
 
 “离得很近”通常指：
 
-\[
+$$
 \|x - \hat x_{\text{mse}}\|_2^2
-\]
+$$
 
 很小，也就是 MSE 小。
 
 但内积估计关注的是：
 
-\[
+$$
 \langle y, \hat x_{\text{mse}} \rangle
-\]
+$$
 
 是否在平均意义上等于：
 
-\[
+$$
 \langle y, x \rangle
-\]
+$$
 
 令误差向量为：
 
-\[
+$$
 e = \hat x - x
-\]
+$$
 
 则：
 
-\[
+$$
 \langle y, \hat x \rangle = \langle y, x \rangle + \langle y, e \rangle
-\]
+$$
 
 所以：
 - **MSE 小** 只说明 `e` 的范数小
-- **无偏** 要求 `\langle y, e \rangle` 的期望是 0
+- **无偏** 要求 $\langle y, e \rangle$ 的期望是 0
 
 这是两个不同的条件。
 
@@ -416,37 +414,35 @@ e = \hat x - x
 
 因为真实内积可以精确分解：
 
-\[
-\langle y, x\rangle
-=
-\langle y, \hat x_{\text{mse}}\rangle + \langle y, r\rangle
-\]
+$$
+\langle y, x\rangle = \langle y, \hat{x}_{\text{mse}}\rangle + \langle y, r\rangle
+$$
 
 其中：
 
-\[
+$$
 r = x - \hat x_{\text{mse}}
-\]
+$$
 
-只用第一阶段时，缺失的是残差项 `\langle y, r \rangle`。
+只用第一阶段时，缺失的是残差项 $\langle y, r \rangle$。
 
 QJL 的作用是构造一个对该残差内积的**无偏估计器**。只要它满足：
 
-\[
+$$
 \mathbb E[\widehat{\langle y,r\rangle}_{\text{QJL}}] = \langle y,r\rangle
-\]
+$$
 
 那么总估计：
 
-\[
+$$
 \langle y,\hat x_{\text{mse}}\rangle + \widehat{\langle y,r\rangle}_{\text{QJL}}
-\]
+$$
 
 在期望上就等于：
 
-\[
+$$
 \langle y,x\rangle
-\]
+$$
 
 所以它能把第一阶段漏掉的那部分内积贡献补回来。
 
@@ -520,17 +516,17 @@ attention score 本质上是 `q · k`。
 
 假设某个 query 对三个 key 的真实内积为：
 
-\[
+$$
 q\cdot k_1 = 4.0,\quad q\cdot k_2 = 3.8,\quad q\cdot k_3 = 1.0
-\]
+$$
 
 softmax 后，`k1` 和 `k2` 是主要关注对象。
 
 现在假设量化偏差后变成：
 
-\[
+$$
 q\cdot \hat k_1 = 3.6,\quad q\cdot \hat k_2 = 4.0,\quad q\cdot \hat k_3 = 1.0
-\]
+$$
 
 也就是说：
 - 原本 `k1` 更重要
@@ -547,9 +543,9 @@ q\cdot \hat k_1 = 3.6,\quad q\cdot \hat k_2 = 4.0,\quad q\cdot \hat k_3 = 1.0
 
 所以内积偏差会沿着：
 
-\[
+$$
 \text{logit} \rightarrow \text{softmax} \rightarrow \text{context vector} \rightarrow \text{token prediction}
-\]
+$$
 
 一路传播。
 
@@ -561,9 +557,9 @@ q\cdot \hat k_1 = 3.6,\quad q\cdot \hat k_2 = 4.0,\quad q\cdot \hat k_3 = 1.0
 
 不是恒等变换，因为：
 
-\[
+$$
 Q : \mathbb R^d \to \{0,1\}^B
-\]
+$$
 
 它是一个**有损压缩**，把无限多的实数向量映射到有限多个 bit 串。
 
@@ -571,9 +567,9 @@ Q : \mathbb R^d \to \{0,1\}^B
 
 因此：
 
-\[
+$$
 Q^{-1}(Q(x)) \neq x
-\]
+$$
 
 一般只能近似恢复。
 
@@ -591,20 +587,20 @@ Q^{-1}(Q(x)) \neq x
 
 就在这个映射里：
 
-\[
+$$
 Q:\mathbb R^d \to \{0,1\}^B
-\]
+$$
 
 这表示：
 
 - 输入是一个连续空间里的向量
 - 输出是长度为 `B` 的二进制串
 
-而 `\{0,1\}^B` 一共只有：
+而 $\{0,1\}^B$ 一共只有：
 
-\[
+$$
 2^B
-\]
+$$
 
 种可能。
 
