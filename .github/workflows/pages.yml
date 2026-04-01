@@ -15,6 +15,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Needed for git push back to default branch
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync root markdown to Hexo _posts
+        run: python scripts/sync_root_to_hexo_posts.py
+
+      - name: Commit synced _posts if changed
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add hexo-site/source/_posts/
+          if git diff --staged --quiet; then
+            echo "No _posts changes; skip commit."
+          else
+            git commit -m "chore: sync hexo _posts from repo root markdown [skip ci]"
+            git push
+            echo "Pushed updated _posts to default branch."
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
