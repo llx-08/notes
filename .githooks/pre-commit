@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Sync root *.md and imgs/ into hexo-site before each commit.
+# Skip: git commit --no-verify
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "pre-commit: python3 not found; cannot run sync scripts." >&2
+  exit 1
+fi
+
+python3 scripts/sync_root_imgs_to_hexo.py
+python3 scripts/sync_root_to_hexo_posts.py
+
+git add hexo-site/source/_posts/ hexo-site/source/imgs/
