@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>和GPT-5.4一起的TurboQuant 学习笔记 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="和GPT-5.4一起的TurboQuant 学习笔记 1. 论文简介 1.1 论文信息 论文标题 ：TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate 核心主题 ：提出一种适用于高维向量、KV cache 和向量检索场景的在线量化方法，在低比特下同时兼顾： 向量重构误差小（MSE 小） 内积估计尽量准确，"><meta property="og:type" content="blog"><meta property="og:title" content="和GPT-5.4一起的TurboQuant 学习笔记"><meta property="og:url" content="https://llx-08.github.io/notes/2026/04/01/2026-04-01-turboquant/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="和GPT-5.4一起的TurboQuant 学习笔记 1. 论文简介 1.1 论文信息 论文标题 ：TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate 核心主题 ：提出一种适用于高维向量、KV cache 和向量检索场景的在线量化方法，在低比特下同时兼顾： 向量重构误差小（MSE 小） 内积估计尽量准确，"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-04-01T00:00:00.000Z"><meta property="article:modified_time" content="2026-04-01T03:18:05.668Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="量化"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/04/01/2026-04-01-turboquant/"},"headline":"和GPT-5.4一起的TurboQuant 学习笔记","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-04-01T00:00:00.000Z","dateModified":"2026-04-01T03:18:05.668Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"和GPT-5.4一起的TurboQuant 学习笔记 1. 论文简介 1.1 论文信息 论文标题 ：TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate 核心主题 ：提出一种适用于高维向量、KV cache 和向量检索场景的在线量化方法，在低比特下同时兼顾： 向量重构误差小（MSE 小） 内积估计尽量准确，"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/04/01/2026-04-01-turboquant/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-04-01T00:00:00.000Z" title="4/1/2026, 12:00:00 AM">2026-04-01</time>发表</span><span class="level-item"><time dateTime="2026-04-01T03:18:05.668Z" title="4/1/2026, 3:18:05 AM">2026-04-01</time>更新</span><span class="level-item">26 分钟读完 (大约3898个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">和GPT-5.4一起的TurboQuant 学习笔记</h1><div class="content"><h1 id="和GPT-5-4一起的TurboQuant-学习笔记"><a href="#和GPT-5-4一起的TurboQuant-学习笔记" class="headerlink" title="和GPT-5.4一起的TurboQuant 学习笔记"></a>和GPT-5.4一起的TurboQuant 学习笔记</h1><h2 id="1-论文简介"><a href="#1-论文简介" class="headerlink" title="1. 论文简介"></a>1. 论文简介</h2><h3 id="1-1-论文信息"><a href="#1-1-论文信息" class="headerlink" title="1.1 论文信息"></a>1.1 论文信息</h3><p><strong>论文标题</strong>：TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate</p>
+<p><strong>核心主题</strong>：提出一种适用于高维向量、KV cache 和向量检索场景的在线量化方法，在低比特下同时兼顾：</p>
+<ul>
+<li>向量重构误差小（MSE 小）</li>
+<li>内积估计尽量准确，甚至做到无偏</li>
+<li>算法适合在线使用，不依赖训练或校准数据</li>
+<li>在理论上接近信息论最优下界</li>
+</ul>
+<hr>
+<h3 id="1-2-论文要解决什么问题"><a href="#1-2-论文要解决什么问题" class="headerlink" title="1.2 论文要解决什么问题"></a>1.2 论文要解决什么问题</h3><p>向量量化的目标，是把高维浮点向量压缩成更少的 bit 来存储和计算，同时尽量保留原来的几何性质。</p>
+<p>在这篇论文中，作者主要关心两类误差：</p>
+<ol>
+<li><p><strong>MSE（均方误差）</strong><br>表示量化前后的向量本身是否接近。</p>
+</li>
+<li><p><strong>内积误差</strong><br>表示量化后的向量拿去和别的向量做点积时，结果是否还能保持准确。</p>
+</li>
+</ol>
+<p>这在两个场景尤其重要：</p>
+<ul>
+<li><strong>LLM 的 KV cache</strong><br>attention score 本质上依赖 query 和 key 的内积。</li>
+<li><strong>向量检索 / 近邻搜索</strong><br>排序通常直接依赖内积或相似度。</li>
+</ul>
+<hr>
+<h3 id="1-3-TurboQuant-的核心思路"><a href="#1-3-TurboQuant-的核心思路" class="headerlink" title="1.3 TurboQuant 的核心思路"></a>1.3 TurboQuant 的核心思路</h3><p>TurboQuant 分成两部分：</p>
+<h4 id="第一部分：MSE-优化量化"><a href="#第一部分：MSE-优化量化" class="headerlink" title="第一部分：MSE 优化量化"></a>第一部分：MSE 优化量化</h4><p>作者先对输入向量做一个<strong>随机旋转</strong>，使旋转后的各个坐标分布变得更规则，近似满足高维下的 Beta / Gaussian 性质。</p>
+<p>然后对每个坐标单独做<strong>最优标量量化</strong>，即使用 Lloyd-Max 方法为该分布设计最合适的量化点，而不是简单均匀量化。</p>
+<p>这一部分的目标是：</p>
+<ul>
+<li>用给定 bit 数把向量主体表达得尽量好</li>
+<li>让重构向量和原向量尽量接近</li>
+<li>从而让残差尽量小</li>
+</ul>
+<hr>
+<h4 id="第二部分：用-1-bit-QJL-补残差"><a href="#第二部分：用-1-bit-QJL-补残差" class="headerlink" title="第二部分：用 1-bit QJL 补残差"></a>第二部分：用 1-bit QJL 补残差</h4><p>仅仅让 MSE 小，还不够，因为：</p>
+<ul>
+<li>向量整体接近，不代表内积估计无偏</li>
+<li>MSE 最优量化可能让内积系统性偏大或偏小</li>
+</ul>
+<p>于是作者把真实向量分解成：</p>
+<p>[<br>x = \hat x_{\text{mse}} + r<br>]</p>
+<p>其中：</p>
+<ul>
+<li><code>\hat x_mse</code> 是第一阶段量化后的近似</li>
+<li><code>r</code> 是残差</li>
+</ul>
+<p>然后对残差 <code>r</code> 再用一个 <strong>1-bit 的 QJL（Quantized Johnson-Lindenstrauss）</strong> 做编码，用来构造一个对残差内积的<strong>无偏估计器</strong>。</p>
+<p>最后总内积估计相当于：</p>
+<p>[<br>\langle y, \hat x_{\text{mse}} \rangle + \text{QJL 对 } \langle y, r \rangle \text{ 的估计}<br>]</p>
+<p>这样就能把第一阶段丢掉的那部分内积贡献“补回来”。</p>
+<hr>
+<h3 id="1-4-论文的创新点"><a href="#1-4-论文的创新点" class="headerlink" title="1.4 论文的创新点"></a>1.4 论文的创新点</h3><h4 id="1-同时考虑-MSE-和内积误差"><a href="#1-同时考虑-MSE-和内积误差" class="headerlink" title="1. 同时考虑 MSE 和内积误差"></a>1. 同时考虑 MSE 和内积误差</h4><p>很多量化方法只关注向量重构误差，但这篇论文明确指出：</p>
+<ul>
+<li>MSE 小不等于内积准确</li>
+<li>更不等于内积无偏</li>
+</ul>
+<p>这是一个很重要的区分。</p>
+<hr>
+<h4 id="2-利用随机旋转把高维最坏情况变成“可量化分布”"><a href="#2-利用随机旋转把高维最坏情况变成“可量化分布”" class="headerlink" title="2. 利用随机旋转把高维最坏情况变成“可量化分布”"></a>2. 利用随机旋转把高维最坏情况变成“可量化分布”</h4><p>作者通过随机旋转，使任意输入向量在新坐标系下具有更好的统计结构，从而能用逐坐标量化获得接近最优的结果。</p>
+<hr>
+<h4 id="3-用-Lloyd-Max-做逐坐标最优标量量化"><a href="#3-用-Lloyd-Max-做逐坐标最优标量量化" class="headerlink" title="3. 用 Lloyd-Max 做逐坐标最优标量量化"></a>3. 用 Lloyd-Max 做逐坐标最优标量量化</h4><p>不是简单把值除以 scale 然后四舍五入到均匀网格，而是根据目标分布真正求出最优量化点和边界。</p>
+<hr>
+<h4 id="4-两阶段设计：MSE-主体-QJL-残差"><a href="#4-两阶段设计：MSE-主体-QJL-残差" class="headerlink" title="4. 两阶段设计：MSE 主体 + QJL 残差"></a>4. 两阶段设计：MSE 主体 + QJL 残差</h4><p>这是论文最关键的结构：</p>
+<ul>
+<li>第一阶段把大头量化好</li>
+<li>第二阶段对小残差做低成本无偏修正</li>
+</ul>
+<p>这样同时兼顾：</p>
+<ul>
+<li>向量整体重构质量</li>
+<li>内积估计无偏性</li>
+<li>总体 bit 开销低</li>
+</ul>
+<hr>
+<h4 id="5-给出接近信息论下界的理论保证"><a href="#5-给出接近信息论下界的理论保证" class="headerlink" title="5. 给出接近信息论下界的理论保证"></a>5. 给出接近信息论下界的理论保证</h4><p>论文不仅提出算法，还证明：</p>
+<ul>
+<li>MSE 失真和内积失真都接近理论下界</li>
+<li>只差一个常数因子</li>
+<li>对所有 bit 宽和维度都成立</li>
+</ul>
+<p>这就是 “near-optimal distortion rate” 的含义。</p>
+<p>它的意思不是“完全最优”，而是：</p>
+<ul>
+<li>理论上最好的失真大约是 <code>4^{-b}</code> 这个量级</li>
+<li>TurboQuant 也达到了同样的衰减速度</li>
+<li>只比最优多一个常数倍，而不是多一个数量级</li>
+</ul>
+<hr>
+<h3 id="1-5-为什么论文一直强调内积偏差"><a href="#1-5-为什么论文一直强调内积偏差" class="headerlink" title="1.5 为什么论文一直强调内积偏差"></a>1.5 为什么论文一直强调内积偏差</h3><p>因为在很多下游系统里，内积不是辅助量，而是核心计算量。</p>
+<h4 id="在-attention-中"><a href="#在-attention-中" class="headerlink" title="在 attention 中"></a>在 attention 中</h4><p>attention score 本质上就是：</p>
+<p>[<br>q \cdot k<br>]</p>
+<p>如果量化后这个值系统性偏大或偏小，就会改变：</p>
+<ul>
+<li>softmax 权重</li>
+<li>value 的加权和</li>
+<li>当前层输出</li>
+<li>最终生成 token</li>
+</ul>
+<h4 id="在向量检索中"><a href="#在向量检索中" class="headerlink" title="在向量检索中"></a>在向量检索中</h4><p>排名往往由内积决定。内积有偏可能直接导致 top-k 排序变化。</p>
+<p>所以论文强调的不是“向量看起来像不像”，而是：</p>
+<p><strong>量化后，模型真正用来做决策的那个量还准不准。</strong></p>
+<hr>
+<h3 id="1-6-论文实验结论"><a href="#1-6-论文实验结论" class="headerlink" title="1.6 论文实验结论"></a>1.6 论文实验结论</h3><p>论文在几个方向上做了验证：</p>
+<h4 id="1-理论验证"><a href="#1-理论验证" class="headerlink" title="1. 理论验证"></a>1. 理论验证</h4><p>实验表明：</p>
+<ul>
+<li><code>TurboQuant_prod</code> 的内积估计是无偏的</li>
+<li><code>TurboQuant_mse</code> 在低比特下会有明显偏差</li>
+<li>随 bit 提升，偏差会减小</li>
+</ul>
+<h4 id="2-KV-cache-压缩"><a href="#2-KV-cache-压缩" class="headerlink" title="2. KV cache 压缩"></a>2. KV cache 压缩</h4><p>在长上下文任务上，TurboQuant 在较低比特下仍保持较好效果，尤其 3.5 bit 时几乎接近无损。</p>
+<h4 id="3-近邻搜索"><a href="#3-近邻搜索" class="headerlink" title="3. 近邻搜索"></a>3. 近邻搜索</h4><p>在向量检索任务上，TurboQuant 在召回率和索引效率上表现很好。</p>
+<hr>
+<h2 id="2-Q-A：学习中的问题与回答"><a href="#2-Q-A：学习中的问题与回答" class="headerlink" title="2. Q&A：学习中的问题与回答"></a>2. Q&amp;A：学习中的问题与回答</h2><h3 id="Q1-什么是内积失真？它和一般“精度损失”有什么区别？"><a href="#Q1-什么是内积失真？它和一般“精度损失”有什么区别？" class="headerlink" title="Q1. 什么是内积失真？它和一般“精度损失”有什么区别？"></a>Q1. 什么是内积失真？它和一般“精度损失”有什么区别？</h3><p><strong>答：</strong></p>
+<p>内积失真衡量的是：</p>
+<p>[<br>\langle y, x \rangle<br>\quad \text{和} \quad<br>\langle y, Q^{-1}(Q(x)) \rangle<br>]</p>
+<p>之间的差异。</p>
+<p>它关心的是：<strong>量化后，向量与别的向量之间的几何关系，尤其是点积关系，是否还被保持。</strong></p>
+<p>这和一般说的“最终精度掉了多少”不完全一样。</p>
+<ul>
+<li><strong>内积失真</strong>：是中间层面的数学量，衡量几何结构是否保住</li>
+<li><strong>端到端精度损失</strong>：是任务最终结果，比如 LongBench 分数、生成质量、检索召回等</li>
+</ul>
+<p>二者有关，但不是同一个概念。</p>
+<hr>
+<h3 id="Q2-如果概率分布相似，数值之间的差异是不是就不重要了？"><a href="#Q2-如果概率分布相似，数值之间的差异是不是就不重要了？" class="headerlink" title="Q2. 如果概率分布相似，数值之间的差异是不是就不重要了？"></a>Q2. 如果概率分布相似，数值之间的差异是不是就不重要了？</h3><p><strong>答：</strong></p>
+<p>不是。概率分布相似只能说明整体统计形态相近，但：</p>
+<ul>
+<li>某些关键位置的数值差异仍可能很重要</li>
+<li>特别是在 attention 中，logit 的小变化会通过 softmax 放大</li>
+<li>在排序问题中，两个相近分数的微小变化就可能导致顺序翻转</li>
+</ul>
+<p>所以不能只看“分布相似”，还要看：</p>
+<ul>
+<li>是否保持内积</li>
+<li>是否保持相对大小</li>
+<li>是否引入系统偏差</li>
+</ul>
+<hr>
+<h3 id="Q3-Lloyd-Max-最优标量量化是什么？"><a href="#Q3-Lloyd-Max-最优标量量化是什么？" class="headerlink" title="Q3. Lloyd-Max 最优标量量化是什么？"></a>Q3. Lloyd-Max 最优标量量化是什么？</h3><p><strong>答：</strong></p>
+<p>它是针对某个已知分布的标量量化最优设计方法。</p>
+<p>目标是：</p>
+<ul>
+<li>给定只有 <code>2^b</code> 个可用量化值</li>
+<li>如何选这些量化值，以及每个值负责的区间</li>
+<li>使量化误差（通常是 MSE）最小</li>
+</ul>
+<p>它包含两个核心对象：</p>
+<ol>
+<li><p><strong>决策边界</strong><br>输入落在哪个区间，就映射到哪个量化值</p>
+</li>
+<li><p><strong>重构值 / 质心</strong><br>每个区间用哪个值来代表</p>
+</li>
+</ol>
+<p>Lloyd-Max 的最优条件是：</p>
+<ul>
+<li>每个输入映射到最近的重构值</li>
+<li>每个重构值等于它负责区间内样本的条件均值</li>
+</ul>
+<p>这两个条件交替迭代直到收敛。</p>
+<hr>
+<h3 id="Q4-它和普通量化看起来很像，优势是什么？"><a href="#Q4-它和普通量化看起来很像，优势是什么？" class="headerlink" title="Q4. 它和普通量化看起来很像，优势是什么？"></a>Q4. 它和普通量化看起来很像，优势是什么？</h3><p><strong>答：</strong></p>
+<p>表面上相似，都是“选最近的量化值”，但核心区别在于：</p>
+<h4 id="普通均匀量化"><a href="#普通均匀量化" class="headerlink" title="普通均匀量化"></a>普通均匀量化</h4><ul>
+<li>量化点通常是均匀间隔</li>
+<li>不考虑输入分布</li>
+<li>更通用，更容易实现</li>
+</ul>
+<h4 id="Lloyd-Max-量化"><a href="#Lloyd-Max-量化" class="headerlink" title="Lloyd-Max 量化"></a>Lloyd-Max 量化</h4><ul>
+<li>量化点不是均匀的</li>
+<li>会根据输入分布，把更多量化点放在高概率区域</li>
+<li>因此在相同比特下 MSE 更小</li>
+</ul>
+<p>举例来说：</p>
+<p>如果数据大多数集中在 0 附近，而很少出现在远端，那么均匀量化会浪费很多量化级别在不常见区域；而 Lloyd-Max 会把更多级别放在高密度区域，从而更高效。</p>
+<p>所以它的优点是：</p>
+<ul>
+<li>同 bit 下误差更小</li>
+<li>更贴近目标分布</li>
+<li>对这篇论文里旋转后的坐标分布更合适</li>
+</ul>
+<hr>
+<h3 id="Q5-论文里说“再与-QJL-组合，对残差每坐标-1-bit”，这是什么意思？"><a href="#Q5-论文里说“再与-QJL-组合，对残差每坐标-1-bit”，这是什么意思？" class="headerlink" title="Q5. 论文里说“再与 QJL 组合，对残差每坐标 1 bit”，这是什么意思？"></a>Q5. 论文里说“再与 QJL 组合，对残差每坐标 1 bit”，这是什么意思？</h3><p><strong>答：</strong></p>
+<p>先做第一阶段量化，得到：</p>
+<p>[<br>\hat x_{\text{mse}}<br>]</p>
+<p>然后定义残差：</p>
+<p>[<br>r = x - \hat x_{\text{mse}}<br>]</p>
+<p>此时真实内积可以拆成：</p>
+<h1 id="langle-y-x-rangle"><a href="#langle-y-x-rangle" class="headerlink" title="[\langle y, x\rangle"></a>[<br>\langle y, x\rangle</h1><p>\langle y, \hat x_{\text{mse}}\rangle + \langle y, r\rangle<br>]</p>
+<p>问题是，如果只用第一项，第二项就丢了，因此内积可能产生偏差。</p>
+<p>于是作者对残差 <code>r</code> 再做一个 1-bit QJL 编码，用来构造对：</p>
+<p>[<br>\langle y, r\rangle<br>]</p>
+<p>的无偏估计。</p>
+<p>最后把这个估计加回去，整体就变成对真实内积的无偏估计。</p>
+<p>可以简单理解为：</p>
+<ul>
+<li>第一阶段：把大部分向量表示好</li>
+<li>第二阶段：把第一阶段漏掉的那部分内积贡献补回来</li>
+</ul>
+<hr>
+<h3 id="Q6-什么叫“无偏”？"><a href="#Q6-什么叫“无偏”？" class="headerlink" title="Q6. 什么叫“无偏”？"></a>Q6. 什么叫“无偏”？</h3><p><strong>答：</strong></p>
+<p>无偏的意思是：</p>
+<p>如果把量化过程中的随机性平均掉，估计值的平均结果等于真实值。</p>
+<p>对于内积估计来说，如果量化后的估计是：</p>
+<p>[<br>\langle y, \hat x \rangle<br>]</p>
+<p>那么无偏就是：</p>
+<p>[<br>\mathbb E_Q[\langle y, \hat x \rangle] = \langle y, x \rangle<br>]</p>
+<p>无偏不是说每次都准确，而是说：</p>
+<ul>
+<li>单次可以有误差</li>
+<li>但长期平均不能系统性偏大或偏小</li>
+</ul>
+<hr>
+<h3 id="Q7-“虽然-hat-x-mse-离-x-很近，但它对内积不一定无偏”-是什么意思？"><a href="#Q7-“虽然-hat-x-mse-离-x-很近，但它对内积不一定无偏”-是什么意思？" class="headerlink" title="Q7. “虽然 \hat x_mse 离 x 很近，但它对内积不一定无偏” 是什么意思？"></a>Q7. “虽然 \hat x_mse 离 x 很近，但它对内积不一定无偏” 是什么意思？</h3><p><strong>答：</strong></p>
+<p>“离得很近”通常指：</p>
+<p>[<br>|x - \hat x_{\text{mse}}|_2^2<br>]</p>
+<p>很小，也就是 MSE 小。</p>
+<p>但内积估计关注的是：</p>
+<p>[<br>\langle y, \hat x_{\text{mse}} \rangle<br>]</p>
+<p>是否在平均意义上等于：</p>
+<p>[<br>\langle y, x \rangle<br>]</p>
+<p>令误差向量为：</p>
+<p>[<br>e = \hat x - x<br>]</p>
+<p>则：</p>
+<p>[<br>\langle y, \hat x \rangle = \langle y, x \rangle + \langle y, e \rangle<br>]</p>
+<p>所以：</p>
+<ul>
+<li><strong>MSE 小</strong> 只说明 <code>e</code> 的范数小</li>
+<li><strong>无偏</strong> 要求 <code>\langle y, e \rangle</code> 的期望是 0</li>
+</ul>
+<p>这是两个不同的条件。</p>
+<p>也就是说：</p>
+<ul>
+<li>向量看起来已经很接近</li>
+<li>但拿去做内积时，仍然可能长期偏大或偏小</li>
+</ul>
+<hr>
+<h3 id="Q8-为什么给残差加一个-1-bit-QJL-就能把偏差补回来？"><a href="#Q8-为什么给残差加一个-1-bit-QJL-就能把偏差补回来？" class="headerlink" title="Q8. 为什么给残差加一个 1-bit QJL 就能把偏差补回来？"></a>Q8. 为什么给残差加一个 1-bit QJL 就能把偏差补回来？</h3><p><strong>答：</strong></p>
+<p>因为真实内积可以精确分解：</p>
+<h1 id="langle-y-x-rangle-1"><a href="#langle-y-x-rangle-1" class="headerlink" title="[\langle y, x\rangle"></a>[<br>\langle y, x\rangle</h1><p>\langle y, \hat x_{\text{mse}}\rangle + \langle y, r\rangle<br>]</p>
+<p>其中：</p>
+<p>[<br>r = x - \hat x_{\text{mse}}<br>]</p>
+<p>只用第一阶段时，缺失的是残差项 <code>\langle y, r \rangle</code>。</p>
+<p>QJL 的作用是构造一个对该残差内积的<strong>无偏估计器</strong>。只要它满足：</p>
+<p>[<br>\mathbb E[\widehat{\langle y,r\rangle}_{\text{QJL}}] = \langle y,r\rangle<br>]</p>
+<p>那么总估计：</p>
+<p>[<br>\langle y,\hat x_{\text{mse}}\rangle + \widehat{\langle y,r\rangle}_{\text{QJL}}<br>]</p>
+<p>在期望上就等于：</p>
+<p>[<br>\langle y,x\rangle<br>]</p>
+<p>所以它能把第一阶段漏掉的那部分内积贡献补回来。</p>
+<hr>
+<h3 id="Q9-为什么只对残差用-1-bit-就够了？"><a href="#Q9-为什么只对残差用-1-bit-就够了？" class="headerlink" title="Q9. 为什么只对残差用 1-bit 就够了？"></a>Q9. 为什么只对残差用 1-bit 就够了？</h3><p><strong>答：</strong></p>
+<p>因为第一阶段已经把向量的大头表示好了，残差通常比较小。</p>
+<p>所以第二阶段不需要高精度重构整个残差，只需要：</p>
+<ul>
+<li>用很低的 bit 成本</li>
+<li>对残差的内积贡献做无偏估计</li>
+</ul>
+<p>这样就可以以较低额外开销修正系统偏差。</p>
+<p>简单说：</p>
+<ul>
+<li>第一阶段负责“主体”</li>
+<li>第二阶段负责“修正尾巴”</li>
+</ul>
+<hr>
+<h3 id="Q10-内积有偏差会对端到端产生什么影响？"><a href="#Q10-内积有偏差会对端到端产生什么影响？" class="headerlink" title="Q10. 内积有偏差会对端到端产生什么影响？"></a>Q10. 内积有偏差会对端到端产生什么影响？</h3><p><strong>答：</strong></p>
+<p>会，尤其是在以下场景：</p>
+<h4 id="1-Attention"><a href="#1-Attention" class="headerlink" title="1. Attention"></a>1. Attention</h4><p>attention score 本质上是 <code>q · k</code>。<br>如果 key 被量化后，内积系统性偏大或偏小，就会改变：</p>
+<ul>
+<li>softmax 权重</li>
+<li>当前 token 关注哪些历史 token</li>
+<li>value 加权和</li>
+<li>最终生成 token</li>
+</ul>
+<h4 id="2-向量检索"><a href="#2-向量检索" class="headerlink" title="2. 向量检索"></a>2. 向量检索</h4><p>排序依据就是相似度或内积。偏差会导致 top-k 变化。</p>
+<p>所以内积偏差可能不是“数值有点误差”这么简单，而是会改变模型的决策路径。</p>
+<hr>
+<h3 id="Q11-为什么论文一直强调内积偏差？"><a href="#Q11-为什么论文一直强调内积偏差？" class="headerlink" title="Q11. 为什么论文一直强调内积偏差？"></a>Q11. 为什么论文一直强调内积偏差？</h3><p><strong>答：</strong></p>
+<p>因为在这些任务里，内积就是核心算子本身。</p>
+<ul>
+<li>在 Transformer 中，attention score 来自内积</li>
+<li>在向量检索中，排序来自内积</li>
+</ul>
+<p>如果内积长期偏掉，模型就可能：</p>
+<ul>
+<li>长期关注错对象</li>
+<li>排错序</li>
+<li>生成错误 token</li>
+<li>在自回归过程中逐步放大误差</li>
+</ul>
+<p>所以作者强调内积偏差，不是只盯着某个中间指标，而是在盯着模型的关键决策量。</p>
+<hr>
+<h3 id="Q12-内积偏差是怎么传到-softmax，再传到最终生成-token-的？"><a href="#Q12-内积偏差是怎么传到-softmax，再传到最终生成-token-的？" class="headerlink" title="Q12. 内积偏差是怎么传到 softmax，再传到最终生成 token 的？"></a>Q12. 内积偏差是怎么传到 softmax，再传到最终生成 token 的？</h3><p><strong>答：</strong></p>
+<p>假设某个 query 对三个 key 的真实内积为：</p>
+<p>[<br>q\cdot k_1 = 4.0,\quad q\cdot k_2 = 3.8,\quad q\cdot k_3 = 1.0<br>]</p>
+<p>softmax 后，<code>k1</code> 和 <code>k2</code> 是主要关注对象。</p>
+<p>现在假设量化偏差后变成：</p>
+<p>[<br>q\cdot \hat k_1 = 3.6,\quad q\cdot \hat k_2 = 4.0,\quad q\cdot \hat k_3 = 1.0<br>]</p>
+<p>也就是说：</p>
+<ul>
+<li>原本 <code>k1</code> 更重要</li>
+<li>量化后 <code>k2</code> 反而变得更重要</li>
+</ul>
+<p>经过 softmax，这种 <code>0.2 ~ 0.4</code> 的差别会变成明显的注意力权重变化。</p>
+<p>接着：</p>
+<ul>
+<li>注意力权重变了</li>
+<li>value 的加权和变了</li>
+<li>当前层输出向量变了</li>
+<li>最终词表打分变了</li>
+<li>最终生成 token 也可能变了</li>
+</ul>
+<p>所以内积偏差会沿着：</p>
+<p>[<br>\text{logit} \rightarrow \text{softmax} \rightarrow \text{context vector} \rightarrow \text{token prediction}<br>]</p>
+<p>一路传播。</p>
+<hr>
+<h3 id="Q13-公式里为什么会有误差？不是先量化再反量化吗？不是恒等变换吗？"><a href="#Q13-公式里为什么会有误差？不是先量化再反量化吗？不是恒等变换吗？" class="headerlink" title="Q13. 公式里为什么会有误差？不是先量化再反量化吗？不是恒等变换吗？"></a>Q13. 公式里为什么会有误差？不是先量化再反量化吗？不是恒等变换吗？</h3><p><strong>答：</strong></p>
+<p>不是恒等变换，因为：</p>
+<p>[<br>Q : \mathbb R^d \to {0,1}^B<br>]</p>
+<p>它是一个<strong>有损压缩</strong>，把无限多的实数向量映射到有限多个 bit 串。</p>
+<p>由于输出空间只有有限种字符串，所以一定有很多不同的输入会映射到同一个量化结果。</p>
+<p>因此：</p>
+<p>[<br>Q^{-1}(Q(x)) \neq x<br>]</p>
+<p>一般只能近似恢复。</p>
+<p>误差正是来自这里：</p>
+<ul>
+<li>原始实数向量被压成有限种码字</li>
+<li>再解码时只能恢复到码字对应的代表值</li>
+<li>不可能完全还原原向量</li>
+</ul>
+<hr>
+<h3 id="Q14-公式里哪里体现了“压缩到有限种字符串”？"><a href="#Q14-公式里哪里体现了“压缩到有限种字符串”？" class="headerlink" title="Q14. 公式里哪里体现了“压缩到有限种字符串”？"></a>Q14. 公式里哪里体现了“压缩到有限种字符串”？</h3><p><strong>答：</strong></p>
+<p>就在这个映射里：</p>
+<p>[<br>Q:\mathbb R^d \to {0,1}^B<br>]</p>
+<p>这表示：</p>
+<ul>
+<li>输入是一个连续空间里的向量</li>
+<li>输出是长度为 <code>B</code> 的二进制串</li>
+</ul>
+<p>而 <code>\{0,1\}^B</code> 一共只有：</p>
+<p>[<br>2^B<br>]</p>
+<p>种可能。</p>
+<p>也就是说，不管输入空间多大，量化之后只能落到有限种码字之一。<br>这正是“压缩”的数学表达。</p>
+<p>因此 <code>Q(x)</code> 这个括号里的结果，确实就是那个有限 bit 串。</p>
+<hr>
+<h2 id="3-一句话总结"><a href="#3-一句话总结" class="headerlink" title="3. 一句话总结"></a>3. 一句话总结</h2><p>TurboQuant 的关键思想是：</p>
+<p><strong>先用随机旋转 + Lloyd-Max 标量量化把向量主体高效压缩，再用 1-bit QJL 对残差做无偏内积补偿，从而同时兼顾低 MSE、低内积失真和理论上的近最优性。</strong></p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>和GPT-5.4一起的TurboQuant 学习笔记</p><p><a href="https://llx-08.github.io/notes/2026/04/01/2026-04-01-turboquant/">https://llx-08.github.io/notes/2026/04/01/2026-04-01-turboquant/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-04-01</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-04-01</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E9%87%8F%E5%8C%96/">量化</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/03/31/2026-03-31-ppo/"><span class="level-item">PPO（Proximal Policy Optimization）学习笔记</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">7</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-04-01T00:00:00.000Z">2026-04-01</time></p><p class="title"><a href="/notes/2026/04/01/2026-04-01-turboquant/">和GPT-5.4一起的TurboQuant 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-03-31T00:00:00.000Z">2026-03-31</time></p><p class="title"><a href="/notes/2026/03/31/2026-03-31-ppo/">PPO（Proximal Policy Optimization）学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-03-31T00:00:00.000Z">2026-03-31</time></p><p class="title"><a href="/notes/2026/03/31/2026-03-31-kl-divergence/">KL 散度简介与 PPO 中的应用</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-03-31T00:00:00.000Z">2026-03-31</time></p><p class="title"><a href="/notes/2026/03/31/2026-03-31-vllm-gdn-computation/">GDN (GatedDeltaNet) 在 vLLM 中的计算流程</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-03-31T00:00:00.000Z">2026-03-31</time></p><p class="title"><a href="/notes/2026/03/31/2026-03-31-vllm-qsa-computation/">QSA (Query-Side Aggregation) 在 vLLM 中的计算流程</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">1</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script></body></html>
