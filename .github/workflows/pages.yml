@@ -19,21 +19,23 @@ jobs:
           # Needed for git push back to default branch
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sync root markdown to Hexo _posts
-        run: python scripts/sync_root_to_hexo_posts.py
+      - name: Sync repo root into Hexo (_posts + imgs)
+        run: |
+          python scripts/sync_root_to_hexo_posts.py
+          python scripts/sync_root_imgs_to_hexo.py
 
-      - name: Commit synced _posts if changed
+      - name: Commit synced _posts and imgs if changed
         run: |
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add hexo-site/source/_posts/
+          git add hexo-site/source/_posts/ hexo-site/source/imgs/
           if git diff --staged --quiet; then
-            echo "No _posts changes; skip commit."
+            echo "No _posts/imgs changes; skip commit."
           else
-            git commit -m "chore: sync hexo _posts from repo root markdown [skip ci]"
+            git commit -m "chore: sync hexo _posts and imgs from repo root [skip ci]"
             git push
-            echo "Pushed updated _posts to default branch."
+            echo "Pushed updated _posts/imgs to default branch."
           fi
 
       - name: Setup Node.js

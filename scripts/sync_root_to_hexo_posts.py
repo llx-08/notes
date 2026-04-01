@@ -53,6 +53,13 @@ def slug_from_root_name(stem: str) -> str:
     return stem.replace("_", "-").lower()
 
 
+def rewrite_hexo_img_paths(body: str) -> str:
+    """Repo-root markdown uses ./imgs/ or imgs/; Hexo needs /imgs/ (see hexo-site README)."""
+    body = body.replace("](./imgs/", "](/imgs/")
+    body = body.replace("](imgs/", "](/imgs/")
+    return body
+
+
 def find_post_for_slug(d: Path, slug: str) -> Path | None:
     matches = sorted(d.glob(f"*-{slug}.md"))
     if not matches:
@@ -106,6 +113,7 @@ def sync_one(
         body = root_body
     else:
         body = raw
+    body = rewrite_hexo_img_paths(body)
 
     existing = find_post_for_slug(posts, slug)
     if existing is not None:

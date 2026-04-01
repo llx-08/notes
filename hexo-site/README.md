@@ -6,7 +6,7 @@
 
 数学公式仍由根目录 **`_config.yml`** 中的 **`hexo-filter-mathjax`**（服务端）渲染；Icarus 自带 `plugins.mathjax` / `katex` 保持关闭，避免重复加载。
 
-源码在 `hexo-site/`，仓库根目录下的 `*.md` 为原始笔记副本，已同步到 `source/_posts/`。
+源码在 `hexo-site/`，仓库根目录下的 `*.md` 为原始笔记副本，已同步到 `source/_posts/`；根目录 **`imgs/`** 会通过脚本同步到 **`source/imgs/`**（`npm run sync-imgs` 或 `npm run build` 会自动执行）。
 
 **首页摘要**：未写 `<!-- more -->` 时，脚本会按纯文本约 **420 字**截断（`_config.yml` 里 `auto_excerpt_length`）。单篇若要自定截断位置，在正文插入一行 `<!-- more -->` 即可。
 

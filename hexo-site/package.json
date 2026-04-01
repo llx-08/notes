@@ -3,8 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "sync-imgs": "python ../scripts/sync_root_imgs_to_hexo.py",
     "sync-posts": "python ../scripts/sync_root_to_hexo_posts.py",
-    "build": "npm run sync-posts && hexo generate",
+    "build": "npm run sync-imgs && npm run sync-posts && hexo generate",
     "clean": "hexo clean",
     "deploy": "hexo deploy",
     "server": "hexo server"
