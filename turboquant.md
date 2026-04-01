@@ -1,4 +1,4 @@
-# TurboQuant 学习笔记
+# 和GPT-5.4一起的TurboQuant 学习笔记
 
 ## 1. 论文简介
 
