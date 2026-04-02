@@ -10,6 +10,9 @@ tags: [vLLM]
 
 ### 阅读时记录的问题
 
+![](/imgs/sps_formula.png)
+
+
 1. q(x) * min(1, p(x)/q(x)) = min(q(x), p(x))，其实这个公式就是说：第一个step生成token x的概率等于draft model生成token x 的概率q(x) 乘它被接收的概率，也就得到了min(q(x), p(x))
 
 2. “如果 q(x) <= p(x)，那 x 一定被接受，所以第一步给了它 q(x) 的概率质量”，一定被接受是因为按照P_accept(x)计算，得到1所以一定被接受，我理解的对吗？
