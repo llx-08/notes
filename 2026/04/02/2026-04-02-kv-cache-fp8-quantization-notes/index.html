@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>和GPT-5.4 的KV Cache FP8 量化讨论记录 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="和GPT-5.4 的KV Cache FP8 量化讨论记录 背景 本文档整理了围绕 kvtransfer 链路中 KV cache 量化方案的技术讨论，重点包括： 当前已有的 direct cast FP8 路径 曾经评估过的 per-block 量化思路 最终决定继续采用 direct cast 的原因 当前实现概述 FP8 转换方式&amp;quot;&amp;gt; 1. 现有的 BF16 -&amp;gt; FP8 转换方式 当"><meta property="og:type" content="blog"><meta property="og:title" content="和GPT-5.4 的KV Cache FP8 量化讨论记录"><meta property="og:url" content="https://llx-08.github.io/notes/2026/04/02/2026-04-02-kv-cache-fp8-quantization-notes/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="和GPT-5.4 的KV Cache FP8 量化讨论记录 背景 本文档整理了围绕 kvtransfer 链路中 KV cache 量化方案的技术讨论，重点包括： 当前已有的 direct cast FP8 路径 曾经评估过的 per-block 量化思路 最终决定继续采用 direct cast 的原因 当前实现概述 FP8 转换方式&amp;quot;&amp;gt; 1. 现有的 BF16 -&amp;gt; FP8 转换方式 当"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-04-02T00:00:00.000Z"><meta property="article:modified_time" content="2026-04-02T02:27:31.724Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/04/02/2026-04-02-kv-cache-fp8-quantization-notes/"},"headline":"和GPT-5.4 的KV Cache FP8 量化讨论记录","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-04-02T00:00:00.000Z","dateModified":"2026-04-02T02:27:31.724Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"和GPT-5.4 的KV Cache FP8 量化讨论记录 背景 本文档整理了围绕 kvtransfer 链路中 KV cache 量化方案的技术讨论，重点包括： 当前已有的 direct cast FP8 路径 曾经评估过的 per-block 量化思路 最终决定继续采用 direct cast 的原因 当前实现概述 FP8 转换方式&quot;&gt; 1. 现有的 BF16 -&gt; FP8 转换方式 当"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/04/02/2026-04-02-kv-cache-fp8-quantization-notes/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-04-02T00:00:00.000Z" title="4/2/2026, 12:00:00 AM">2026-04-02</time>发表</span><span class="level-item"><time dateTime="2026-04-02T02:27:31.724Z" title="4/2/2026, 2:27:31 AM">2026-04-02</time>更新</span><span class="level-item">16 分钟读完 (大约2407个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">和GPT-5.4 的KV Cache FP8 量化讨论记录</h1><div class="content"><h1 id="和GPT-5-4-的KV-Cache-FP8-量化讨论记录"><a href="#和GPT-5-4-的KV-Cache-FP8-量化讨论记录" class="headerlink" title="和GPT-5.4 的KV Cache FP8 量化讨论记录"></a>和GPT-5.4 的KV Cache FP8 量化讨论记录</h1><h2 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h2><p>本文档整理了围绕 <code>kvtransfer</code> 链路中 KV cache 量化方案的技术讨论，重点包括：</p>
+<ul>
+<li>当前已有的 direct cast FP8 路径</li>
+<li>曾经评估过的 per-block 量化思路</li>
+<li>最终决定继续采用 direct cast 的原因</li>
+</ul>
+<h2 id="当前实现概述"><a href="#当前实现概述" class="headerlink" title="当前实现概述"></a>当前实现概述</h2><h3 id="1-现有的-BF16-FP8-转换方式"><a href="#1-现有的-BF16-FP8-转换方式" class="headerlink" title="1. 现有的 BF16 -> FP8 转换方式"></a>1. 现有的 BF16 -&gt; FP8 转换方式</h3><p>当前代码已经支持在 TCP 链路上对 KV cache 做可选的 BF16 -&gt; FP8 转换。</p>
+<p>核心特点如下：</p>
+<ul>
+<li>转换发生在 sender 侧的 D2H 过程中</li>
+<li>实现位于 <code>copy_d2h_bf16_to_fp8_kernel</code></li>
+<li><code>bf16_to_fp8_e4m3()</code> 对每个 BF16 元素直接执行到 FP8 E4M3 的转换</li>
+<li>没有显式 scale</li>
+<li>没有 amax 统计</li>
+<li>没有 per-block、per-token、per-channel 等额外量化元数据</li>
+</ul>
+<p>也就是说，当前实现本质上是：</p>
+<ul>
+<li>按元素转换</li>
+<li>直接 cast</li>
+<li>无 scale</li>
+<li>receiver 侧无需反量化</li>
+</ul>
+<h3 id="2-当前量化粒度"><a href="#2-当前量化粒度" class="headerlink" title="2. 当前量化粒度"></a>2. 当前量化粒度</h3><p>函数：</p>
+<ul>
+<li><code>bf16_to_fp8_e4m3(__nv_bfloat16 val)</code></li>
+</ul>
+<p>输入一个 BF16 元素，输出一个 FP8 字节。因此当前量化的语义是：</p>
+<ul>
+<li>量化单位：单个元素</li>
+<li>scale 粒度：不存在</li>
+<li>kernel 中一次打包 8 个值只是向量化读写优化，不代表量化粒度是 8</li>
+</ul>
+<h3 id="3-为什么-decode-侧今天可以直接使用收到的-KV-cache"><a href="#3-为什么-decode-侧今天可以直接使用收到的-KV-cache" class="headerlink" title="3. 为什么 decode 侧今天可以直接使用收到的 KV cache"></a>3. 为什么 decode 侧今天可以直接使用收到的 KV cache</h3><p>当前 direct cast 路径之所以简单有效，是因为：</p>
+<ul>
+<li>sender 直接把 BF16 转成目标 FP8 格式</li>
+<li>receiver 只需要把字节搬运到目标 KV cache 区域</li>
+<li>decode 侧 GPU 上常驻的 KV cache 已经是下游可以直接使用的最终格式</li>
+</ul>
+<p>因此 receiver 不需要做：</p>
+<ul>
+<li>scale 查找</li>
+<li>反量化</li>
+<li>再量化</li>
+</ul>
+<p>这也是当前方案最大的工程优势之一。</p>
+<h2 id="关于不同量化粒度的讨论"><a href="#关于不同量化粒度的讨论" class="headerlink" title="关于不同量化粒度的讨论"></a>关于不同量化粒度的讨论</h2><p>讨论中涉及了几种常见量化粒度：</p>
+<ul>
+<li><code>per-tensor</code></li>
+<li><code>per-channel</code></li>
+<li><code>per-token</code></li>
+<li><code>per-block / per-group</code></li>
+</ul>
+<h3 id="Per-tensor"><a href="#Per-tensor" class="headerlink" title="Per-tensor"></a>Per-tensor</h3><p>一个大 tensor 或一大块 tensor 共享一个 scale。</p>
+<p>优点：</p>
+<ul>
+<li>实现最简单</li>
+<li>元数据开销最低</li>
+</ul>
+<p>缺点：</p>
+<ul>
+<li>对 KV cache 来说通常过于粗糙</li>
+<li>容易被少量 outlier 影响</li>
+<li>对这种动态变化的 activation/cache 类数据，精度一般较差</li>
+</ul>
+<h3 id="Per-channel"><a href="#Per-channel" class="headerlink" title="Per-channel"></a>Per-channel</h3><p>每个 channel 使用一个 scale。对于 KV cache，可以理解成按 head 或某种逻辑切片分配 scale。</p>
+<p>优点：</p>
+<ul>
+<li>比 per-tensor 好很多</li>
+</ul>
+<p>缺点：</p>
+<ul>
+<li>在 KV cache 场景下不一定天然贴合，除非 channel 语义定义得很明确</li>
+<li>仍然可能无法捕捉 token 维度上的变化</li>
+</ul>
+<h3 id="Per-token"><a href="#Per-token" class="headerlink" title="Per-token"></a>Per-token</h3><p>每个 token 一个 scale，或者更细地按 token 和 head/group 组合分配 scale。</p>
+<p>优点：</p>
+<ul>
+<li>表达能力强</li>
+<li>对 activation 类数据通常精度较好</li>
+</ul>
+<p>缺点：</p>
+<ul>
+<li>scale 开销明显更高</li>
+<li>layout 和计算链路会更复杂</li>
+</ul>
+<h3 id="Per-block-per-group"><a href="#Per-block-per-group" class="headerlink" title="Per-block / per-group"></a>Per-block / per-group</h3><p>这里我们重点澄清了 “block” 的含义。</p>
+<p>在 KV cache 语义下，“block” 一般指缓存系统里的物理 block；但为了更方便落地实现，我们还评估过把当前传输中的 <code>IpcBlock</code> 作为量化单元。</p>
+<p>在讨论的方案里，最终想采用的定义是：</p>
+<ul>
+<li><code>per-block</code> = 每个传输的 <code>IpcBlock</code> 对应一个 scale</li>
+</ul>
+<p>这样设计的优势是：</p>
+<ul>
+<li>能复用当前已有的 <code>IpcBlock</code> 元数据链路</li>
+<li>比 direct cast 有更好的局部精度</li>
+<li>比 per-token 的改动和开销更小</li>
+</ul>
+<p>对应的风险是：</p>
+<ul>
+<li>精度提升依赖于单个 <code>IpcBlock</code> 内部的数据分布是否足够集中</li>
+<li>receiver 必须理解并处理 scale 元数据</li>
+</ul>
+<h2 id="曾经评估过的-per-block-方案"><a href="#曾经评估过的-per-block-方案" class="headerlink" title="曾经评估过的 per-block 方案"></a>曾经评估过的 per-block 方案</h2><p>在正式实现之前，我们评估过给系统加一个选项，用环境变量控制两种模式：</p>
+<ul>
+<li>当前 direct cast 模式</li>
+<li>per-block 量化模式</li>
+</ul>
+<p>大致思路是：</p>
+<ul>
+<li>在 <code>envcfg</code> 中新增量化模式配置</li>
+<li>sender 侧：<ul>
+<li>direct cast 模式：保持现有 BF16 -&gt; FP8 direct cast</li>
+<li>per-block 模式：为每个 <code>IpcBlock</code> 计算一个 scale，对 payload 做量化，并传输 <code>fp8_data + scales</code></li>
+</ul>
+</li>
+<li>receiver 侧：<ul>
+<li>解析 payload 和 scales</li>
+<li>为了性能，将 scale 处理融合进 H2D kernel</li>
+</ul>
+</li>
+</ul>
+<h3 id="额外涉及的链路修改"><a href="#额外涉及的链路修改" class="headerlink" title="额外涉及的链路修改"></a>额外涉及的链路修改</h3><p>评估后发现，per-block 方案并不是只改一个 kernel 就够了，还会牵涉到整条链路。</p>
+<p>需要改动的部分包括：</p>
+<ul>
+<li>env 配置接口</li>
+<li>TCP channel 的 send buffer 大小计算</li>
+<li>TCP payload 格式</li>
+<li>copy kernel 的 metadata staging</li>
+<li>receiver 侧 payload 解析</li>
+<li>H2D 的 scale-aware kernel</li>
+<li>当前很多地方默认 “FP8 大小就是 BF16 的一半” 的字节规划逻辑</li>
+</ul>
+<h2 id="关键技术问题：per-block-能否提升精度"><a href="#关键技术问题：per-block-能否提升精度" class="headerlink" title="关键技术问题：per-block 能否提升精度"></a>关键技术问题：per-block 能否提升精度</h2><p>答案是：</p>
+<ul>
+<li>相比当前 direct cast，per-block 通常可以提升量化精度</li>
+</ul>
+<p>原因是：</p>
+<ul>
+<li>每个 block 拥有自己的局部 scale</li>
+<li>更少的值会因为全局范围不匹配而饱和</li>
+<li>更少的小值会在固定格式下直接损失掉</li>
+</ul>
+<p><strong>但是，这个精度收益只有在 scale 一直保留到最终消费者时，才是真正有意义的。</strong></p>
+<h2 id="讨论中最关键的架构结论"><a href="#讨论中最关键的架构结论" class="headerlink" title="讨论中最关键的架构结论"></a>讨论中最关键的架构结论</h2><p>本次讨论里最重要的一个结论是：</p>
+<p>如果 sender 使用了 per-block 量化，但 receiver 在 H2D 过程中只是把 scale 用掉，然后最终仍然写回一个不携带 scale 的 plain FP8 cache，那么 per-block 的大部分精度收益都会丢失。</p>
+<p>原因如下：</p>
+<ul>
+<li>带 scale 的量化本质上表达的是近似 <code>q * scale</code></li>
+<li>如果 scale 在最终常驻表示中被消掉，而数据又重新落回普通 FP8 表示，那么最终常驻格式依然没有局部 scale</li>
+<li>从 decode 的实际使用角度看，这样的 resident cache 会重新接近当前 direct cast FP8 的语义</li>
+</ul>
+<p>因此：</p>
+<ul>
+<li>“在 H2D 里乘一下 scale，然后存成普通 FP8” 并不足以完整保留 per-block 的价值</li>
+</ul>
+<h2 id="关于-decode-侧使用方式的讨论"><a href="#关于-decode-侧使用方式的讨论" class="headerlink" title="关于 decode 侧使用方式的讨论"></a>关于 decode 侧使用方式的讨论</h2><p>我们也专门讨论了一个问题：decode 在收到量化后的 KV cache 之后，是不是只需要乘 scale 就可以直接用了？</p>
+<p>结论是：</p>
+<ul>
+<li>如果最终常驻 cache 仍然希望保持和今天一样的 plain FP8 格式，那么只乘 scale 是不够的</li>
+</ul>
+<p>为了真正保留 per-block 量化的语义，至少需要满足以下三种之一：</p>
+<ol>
+<li>receiver 侧反量化后存 BF16</li>
+<li>receiver 侧存 <code>FP8 + scale</code></li>
+<li>decode kernel 原生理解并消费 block-scaled FP8</li>
+</ol>
+<p>如果 receiver 的行为是：</p>
+<ul>
+<li>乘 scale</li>
+<li>然后再写回普通 FP8 cache</li>
+</ul>
+<p>那么最终表示中 scale 还是被丢掉了。</p>
+<h2 id="最终建议"><a href="#最终建议" class="headerlink" title="最终建议"></a>最终建议</h2><p>经过讨论，最终结论是：</p>
+<ul>
+<li>当前需求下，direct cast 已经足够</li>
+</ul>
+<h3 id="为什么最后选择-direct-cast"><a href="#为什么最后选择-direct-cast" class="headerlink" title="为什么最后选择 direct cast"></a>为什么最后选择 direct cast</h3><ol>
+<li>当前 direct cast 链路明显更简单。</li>
+<li>sender 侧已经能够直接产出 decode 期望的最终 resident FP8 格式。</li>
+<li>receiver 不需要解析 scale，也不需要做反量化和再量化。</li>
+<li>per-block 方案会引入较大的协议、kernel 和 layout 级改造。</li>
+<li>如果不连同 decode 侧 resident 格式和消费路径一起改，per-block 最核心的精度收益无法被完整保留。</li>
+<li>因此，在当前阶段，per-block 的复杂度和收益不匹配。</li>
+</ol>
+<h2 id="实际结论"><a href="#实际结论" class="headerlink" title="实际结论"></a>实际结论</h2><p>当前推荐并接受的方向是：</p>
+<ul>
+<li>保持现有 direct-cast 的 BF16 -&gt; FP8 路径</li>
+<li>暂时不引入 per-block 量化方案</li>
+</ul>
+<p>这样做的结果是，系统继续保留以下优点：</p>
+<ul>
+<li>sender 侧量化逻辑简单</li>
+<li>TCP payload 结构简单</li>
+<li>receiver 侧 H2D 链路简单</li>
+<li>decode 侧拿到的 KV cache 可以直接使用，不需要额外 scale 逻辑</li>
+</ul>
+<h2 id="如果未来重新考虑-per-block"><a href="#如果未来重新考虑-per-block" class="headerlink" title="如果未来重新考虑 per-block"></a>如果未来重新考虑 per-block</h2><p>如果后续真的要重新启用 per-block 方案，更合理的方向应当是：</p>
+<ul>
+<li>sender：发送 <code>fp8_data + scale</code></li>
+<li>receiver 常驻格式：<code>FP8 + scale</code>，或者完整反量化后的 BF16</li>
+<li>decode 消费路径：显式理解 scale</li>
+</ul>
+<p>否则系统虽然承担了额外复杂度，但精度收益却无法真正保留下来。</p>
+<h2 id="简短问答总结"><a href="#简短问答总结" class="headerlink" title="简短问答总结"></a>简短问答总结</h2><h3 id="问：当前量化粒度是什么？"><a href="#问：当前量化粒度是什么？" class="headerlink" title="问：当前量化粒度是什么？"></a>问：当前量化粒度是什么？</h3><p>答：按元素直接从 BF16 cast 到 FP8 E4M3，没有 scale。</p>
+<h3 id="问：per-block-量化会提升精度吗？"><a href="#问：per-block-量化会提升精度吗？" class="headerlink" title="问：per-block 量化会提升精度吗？"></a>问：per-block 量化会提升精度吗？</h3><p>答：通常会，比 direct cast 更好。</p>
+<h3 id="问：decode-侧是不是只要乘一下-scale-就可以用了？"><a href="#问：decode-侧是不是只要乘一下-scale-就可以用了？" class="headerlink" title="问：decode 侧是不是只要乘一下 scale 就可以用了？"></a>问：decode 侧是不是只要乘一下 scale 就可以用了？</h3><p>答：如果最终常驻 cache 仍然是今天这种 plain FP8，并且期望和当前格式行为一致，那么只乘 scale 不够。</p>
+<h3 id="问：为什么现在没有采用-per-block？"><a href="#问：为什么现在没有采用-per-block？" class="headerlink" title="问：为什么现在没有采用 per-block？"></a>问：为什么现在没有采用 per-block？</h3><p>答：因为要真正保留它的精度收益，需要连同 resident format 和 decode 消费路径一起调整；而当前 direct cast 方案已经足够简单且满足需求。</p>
+<p>补充一下：vllm侧在使用e4m3 fp8的存储格式时，如果模型checkpoint中没有设置，默认的scale是1，这说明实际在bf16 -&gt; fp8的转换中，与直接cast无异。这也说明，尽管当时开发的时候没有详细的考虑这部分，但是可以直接使用并通过精度测试的原因。<br>实际上，pd两侧只需要对kv cache的格式有共识即可，显然目前的设计有着约定俗成：直接cast。后续如果要设计更复杂的量化策略，只要d能够知道，且在启动服务时的转换对齐了这种量化策略，也是可行的。</p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>和GPT-5.4 的KV Cache FP8 量化讨论记录</p><p><a href="https://llx-08.github.io/notes/2026/04/02/2026-04-02-kv-cache-fp8-quantization-notes/">https://llx-08.github.io/notes/2026/04/02/2026-04-02-kv-cache-fp8-quantization-notes/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-04-02</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-04-02</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/04/01/2026-04-01-turboquant/"><span class="level-item">和GPT-5.4一起的TurboQuant 学习笔记</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">8</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-04-02T00:00:00.000Z">2026-04-02</time></p><p class="title"><a href="/notes/2026/04/02/2026-04-02-kv-cache-fp8-quantization-notes/">和GPT-5.4 的KV Cache FP8 量化讨论记录</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-04-01T00:00:00.000Z">2026-04-01</time></p><p class="title"><a href="/notes/2026/04/01/2026-04-01-turboquant/">和GPT-5.4一起的TurboQuant 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-03-31T00:00:00.000Z">2026-03-31</time></p><p class="title"><a href="/notes/2026/03/31/2026-03-31-kl-divergence/">KL 散度简介与 PPO 中的应用</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-03-31T00:00:00.000Z">2026-03-31</time></p><p class="title"><a href="/notes/2026/03/31/2026-03-31-ppo/">PPO（Proximal Policy Optimization）学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-03-31T00:00:00.000Z">2026-03-31</time></p><p class="title"><a href="/notes/2026/03/31/2026-03-31-vllm-gdn-computation/">GDN (GatedDeltaNet) 在 vLLM 中的计算流程</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script></body></html>
