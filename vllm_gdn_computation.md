@@ -480,3 +480,582 @@ QSA 时额外有 Indexer K cache：`[num_blocks, block_size, index_kv_heads, ind
 | `vllm/model_executor/models/qsa_indexer_utils.py` | QSA Indexer 的 MQA logits 计算工具 |
 | `vllm/model_executor/layers/mamba/ops/causal_conv1d.py` | 因果卷积实现 |
 | `vllm/v1/worker/gpu_model_runner.py` | GDN metadata 与 model runner 的集成 |
+
+---
+
+## 11. 门控机制对照图
+
+下面这张图把 Full Attention 中的 `gate`，以及 GDN 中的 `z / g / beta` 放在同一视角下对照：
+
+```text
+Full Attention 路径
+==================
+
+hidden_states
+    |
+    v
+qkv_proj
+    |
+    +--> q -----------------> q_norm -> RoPE --+
+    |                                          |
+    +--> k -----------------> k_norm -> RoPE --+--> Flash / Sparse Attention --> attn_output
+    |                                          |
+    +--> v ------------------------------------+
+    |
+    +--> gate -> sigmoid ------------------------------+
+                                                       |
+attn_output -------------------------------------------* (逐元素相乘)
+                                                       |
+                                                       v
+                                                    o_proj
+                                                       |
+                                                       v
+                                                     output
+
+作用：
+- `gate` 是 attention 输出门控
+- 控制 attention 结果有多少被送入 `o_proj`
+
+
+GDN 路径
+========
+
+hidden_states
+    |
+    v
+in_proj_qkvz / in_proj_ba
+    |
+    +--> q, k, v --+--> causal_conv1d --> recurrent core --> core_attn_out
+    |              |
+    |              +--> a -> softplus + A_log -> g
+    |              |
+    |              +--> b -> sigmoid ---------> beta
+    |
+    +--> z ----------------------------------------------+
+                                                         |
+core_attn_out --> RMSNormGated(norm(out), z) ------------+
+                                                         |
+                                                         v
+                                                      out_proj
+                                                         |
+                                                         v
+                                                       output
+
+作用：
+- `g` 是状态衰减门控，控制历史状态遗忘速度
+- `beta` 是写入门控，控制新信息写入状态的强度
+- `z` 是输出门控，在 `RMSNormGated` 中对核心输出做门控
+```
+
+---
+
+## 12. 问答补充
+
+### 问题
+
+`../study_doc/vllm_gdn_computation.md` 这里说明了qwen3.5中GDN和full_attention的计算流程，最后的[gate * ] o_proj 这里是什么作用？
+
+### 回答
+
+这里的 `[gate * ] o_proj`，作用可以直接理解成：
+
+**先对 attention 的输出做一次逐元素门控，再送进 `o_proj`。**
+
+在 `Qwen3NextAttention.forward()` 里，full attention 的实际流程是：
+
+```python
+qkv, _ = self.qkv_proj(hidden_states)
+
+if self.attn_output_gate:
+    q_gate, k, v = qkv.split(
+        [self.q_size * 2, self.kv_size, self.kv_size], dim=-1
+    )
+    orig_shape = q_gate.shape[:-1]
+    q_gate = q_gate.view(*orig_shape, self.num_heads, -1)
+    q, gate = torch.chunk(q_gate, 2, dim=-1)
+    q = q.reshape(*orig_shape, -1)
+    gate = gate.reshape(*orig_shape, -1)
+else:
+    q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+
+# ... q/k norm, rope, attention ...
+
+attn_output = self.attn(q, k, v)
+
+if self.attn_output_gate:
+    gate = torch.sigmoid(gate)
+    attn_output = attn_output * gate
+
+output[:], _ = self.o_proj(attn_output)
+```
+
+所以它不是“`o_proj` 的一部分”，而是：
+
+\[
+\text{output} = o\_proj(\text{attn\_output} \odot \sigma(\text{gate}))
+\]
+
+也就是：
+- `gate` 是从输入 `hidden_states` 里一起投影出来的
+- 经过 `sigmoid` 后变成 0 到 1 之间的门值
+- 对 attention 输出按维度逐元素缩放
+- 最后再过 `o_proj` 混合回 `hidden_size`
+
+它的主要作用有三点：
+
+1. **控制 attention 输出强度**
+   - 哪些通道/哪些 head 的输出该保留更多，哪些该压小，不让所有 attention 结果都等权流向后面。
+
+2. **给 full attention 增加一层动态选择**
+   - attention 负责“从哪里取信息”，这个 gate 负责“取回来之后放多少进去”。
+
+3. **提高表达能力和稳定性**
+   - 有点像 GLU/门控残差 的思路，让模型可以按 token 自适应地调节 attention 分支输出。
+
+再补一个你这个文档上下文里很容易混淆的点：
+
+- **full attention 里的 `gate`**：是在 `self.attn(...)` 之后、`o_proj` 之前做 `sigmoid(gate) * attn_output`
+- **GDN 里的门控**：不是这个东西。GDN 里有 `g`、`beta` 控制递归状态更新，最后还有一个 `z` 进入 `RMSNormGated`：
+
+```python
+core_attn_out = core_attn_out.reshape(-1, core_attn_out.shape[-1])
+z = z.reshape(-1, z.shape[-1])
+core_attn_out = self.norm(core_attn_out, z)     # RMSNormGated: silu(z) * norm(out)
+core_attn_out = rearrange(core_attn_out, "... h d -> ... (h d)")
+output[:num_tokens], _ = self.out_proj(core_attn_out)
+```
+
+也就是说：
+- **full attention**：`gate` 是“attention 输出门控”
+- **GDN**：`z` 是“norm 后输出门控”，`g/beta` 是“状态更新门控”
+
+---
+
+## 13. 问答补充
+
+### 问题
+
+“gate 本身不直接决定“这个 token 是否重要”，而是决定attention 已经取回来的这些特征里，哪些维度该更多流向后面的 o_proj。”
+这里有什么数学含义？对最终的结果，比如采样到的token概率有什么影响
+
+### 回答
+
+有，而且这个数学含义其实很清楚：
+
+`gate` 不是在做“token 级别的重要性判断”，而是在做**attention 输出特征空间里的逐维重加权**。
+
+在这层里，full attention 分支可以写成：
+
+\[
+y = W_o \bigl(o \odot \sigma(g)\bigr)
+\]
+
+其中：
+- `o` 是 attention 返回的输出 `attn_output`
+- `g` 是从输入 `hidden_states` 里一起投影出来的 gate
+- `\sigma(g)` 是 sigmoid 后的门值
+- `W_o` 就是 `o_proj`
+
+源码对应的是：
+
+```python
+qkv, _ = self.qkv_proj(hidden_states)
+# ...
+attn_output = self.attn(q, k, v)
+
+if self.attn_output_gate:
+    gate = torch.sigmoid(gate)
+    attn_output = attn_output * gate
+
+output[:], _ = self.o_proj(attn_output)
+```
+
+数学上这等价于：
+
+\[
+y = W_o \operatorname{Diag}(\sigma(g))\, o
+\]
+
+这句话的含义是：
+
+- `o_proj` 本来是一个**固定线性映射**
+- `gate` 在它前面插入了一个**输入相关的对角矩阵**
+- 所以同样的 `o_proj`，面对不同 token，会先看到不同的“被缩放过的 attention 特征”
+
+这就是我前面说“不是在决定 token 是否重要，而是在决定 attention 取回来的哪些维度更该往后流”的数学版本。
+
+---
+
+### 直观一点
+
+如果没有 gate：
+
+\[
+y = W_o o
+\]
+
+如果有 gate：
+
+\[
+y = W_o (o \odot s), \quad s=\sigma(g)
+\]
+
+假设某个 token 的 attention 输出：
+
+\[
+o = [2,\ -1,\ 0.5]
+\]
+
+如果门值是：
+
+\[
+s = [0.1,\ 0.8,\ 0.95]
+\]
+
+那么进入 `o_proj` 前先变成：
+
+\[
+o' = o \odot s = [0.2,\ -0.8,\ 0.475]
+\]
+
+含义就是：
+- 第 1 维被强烈抑制
+- 第 2 维保留大部分
+- 第 3 维几乎原样通过
+
+所以 gate 作用的不是“选哪个历史 token”，而是“attention 聚合完以后，这些输出通道分别该放大到什么程度进入下一步线性混合”。
+
+---
+
+### 为什么这会影响最终 token 概率
+
+因为它会改变每层输出的 hidden state，而最终 logits 就是 hidden state 乘上 `lm_head` 得到的。
+
+在这个模型里，attention 输出先进入 decoder layer，之后还会经过残差/归一化/MLP，最后再经过最终 norm 和 `lm_head`：
+
+```python
+self_attention_output = torch.empty_like(hidden_states)
+# ...
+self.self_attn(
+    hidden_states=hidden_states,
+    output=self_attention_output,
+    positions=positions,
+)
+hidden_states = self_attention_output
+
+# Fully Connected
+hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
+hidden_states = self.mlp(hidden_states)
+
+return hidden_states, residual
+```
+
+```python
+hidden_states, _ = self.norm(hidden_states, residual)
+return hidden_states
+```
+
+```python
+def compute_logits(
+    self,
+    hidden_states: torch.Tensor,
+) -> torch.Tensor | None:
+    return self.logits_processor(self.lm_head, hidden_states)
+```
+
+```python
+def _get_logits(
+    self,
+    hidden_states: torch.Tensor,
+    lm_head: VocabParallelEmbedding,
+    embedding_bias: torch.Tensor | None,
+) -> torch.Tensor | None:
+    # Get the logits for the next tokens.
+    logits = lm_head.quant_method.apply(lm_head, hidden_states, bias=embedding_bias)
+    # ...
+    return logits
+```
+
+所以链路是：
+
+\[
+\text{gate}
+\rightarrow \text{attn output}
+\rightarrow \text{layer hidden state}
+\rightarrow \text{final hidden state}
+\rightarrow \text{logits}
+\rightarrow \text{softmax}
+\rightarrow \text{token probability}
+\]
+
+最终概率是：
+
+\[
+p(t \mid x) = \operatorname{softmax}(\text{logits})_t
+\]
+
+只要 `gate` 改变了 hidden state，就会改变 logits，进而改变 softmax 后每个 token 的概率。
+
+---
+
+### 它对概率的影响，最准确怎么理解
+
+不是“gate 小了，就某个 token 概率一定小”。
+
+更准确的说法是：
+
+**gate 改变了当前层 attention 分支贡献给表示向量的方式，从而改变了最终 hidden state 在词表方向上的投影。**
+
+也就是说：
+- 某些 attention 特征如果和“下一个 token 应该是 `the`”这个方向强相关，gate 把它压低，`the` 的 logit 可能下降
+- 某些特征如果更支持另一个 token，gate 保留或增强它们对应的通道，那个 token 的 logit 可能上升
+- softmax 是相对竞争，所以一个 token 概率升高，通常意味着别的一些会下降
+
+---
+
+### 线性化视角
+
+如果只看小扰动，可以写成：
+
+\[
+\Delta \text{logits} \approx J \cdot \Delta y
+\]
+
+其中：
+- `y = W_o(o \odot \sigma(g))`
+- `J` 是从这一层输出到最终 logits 的整体雅可比
+
+这说明：
+- gate 改变的是一个**中间表示**
+- 这个中间表示经过后面所有层的非线性变换后，传导到 logits
+- 所以影响通常是**间接的、分布式的、非局部的**
+
+也正因为这样，gate 更像是“调整表征几何结构”，而不是直接给某个词加减分的显式规则。
+
+---
+
+### 一个很重要的现实点
+
+它虽然会影响概率，但**不是单独决定概率**，因为还有：
+- 残差路径
+- 后续层的 attention / GDN / MLP
+- 最终 norm
+- `lm_head`
+
+所以：
+- gate 把某些 attention 特征压低，不等于这些信息彻底没了
+- 残差里原始表示还在
+- 后续层仍然可能重新恢复或放大相关信息
+
+因此它更像是一个**调节器**，不是一个绝对开关。
+
+---
+
+### 一句话总结
+
+数学上，`gate` 相当于在 `o_proj` 前加了一个**输入相关的对角缩放矩阵** `Diag(sigmoid(g))`；  
+它会改变 attention 分支输出的特征组成，进而改变最终 hidden state、logits 和 softmax 概率分布，但这种影响是**连续的、分布式的、通过整条网络链路传播的**，不是“直接决定哪个 token 重要”的硬规则。
+
+如果你想，我下一条可以继续回答这个问题：
+
+**“为什么 gate 放在 `o_proj` 前，而不是放在 attention score 或 softmax 上？”**
+
+这个和“特征选择” vs “token 选择”的区别正好对应。
+
+---
+
+## 14. 问答补充
+
+### 问题
+
+“为什么 gate 放在 o_proj 前，而不是放在 attention score 或 softmax 上？” 这个问题很有意思，请帮我回答
+
+### 回答
+
+核心区别是：
+
+- **放在 attention score / softmax 上**，是在决定“看哪里、看多少历史 token”
+- **放在 `o_proj` 前**，是在决定“已经看回来的信息里，哪些特征该继续往后传”
+
+这两者控制的对象不一样。
+
+## 数学上看区别
+
+标准 attention 可以写成：
+
+\[
+A = \operatorname{softmax}(QK^\top / \sqrt{d})
+\]
+\[
+o = AV
+\]
+\[
+y = W_o o
+\]
+
+现在 Qwen 这个 gate 做的是：
+
+\[
+y = W_o (o \odot \sigma(g))
+\]
+
+也就是 gate 作用在 **`o` 这个特征向量** 上。
+
+如果把 gate 放到 score 上，那就会变成类似：
+
+\[
+A' = \operatorname{softmax}(f(Q,K,g))
+\]
+
+它影响的是 **attention 分布 `A`**，也就是每个 query 对各个历史位置的权重。
+
+所以：
+
+- `score/softmax` gate: 控制 **token-to-token 路由**
+- `o_proj` 前的 gate: 控制 **feature/channel 选择**
+
+## 为什么很多模型更愿意把这类 gate 放在 `o_proj` 前
+
+### 1. 它更像“特征调制”，比改 attention 分布更稳
+
+attention score 很敏感，因为 softmax 会放大差异。
+
+如果你在 score 上加门控，哪怕是很小的扰动，也可能让注意力分布发生很大变化：
+
+- 原本 0.4 / 0.35 / 0.25
+- 稍微改一下 score
+- softmax 后可能变成 0.7 / 0.2 / 0.1
+
+这会直接改变“从哪些 token 取信息”，行为更激进。
+
+而在 `o_proj` 前乘 gate，只是在 `AV` 之后做连续缩放：
+
+\[
+o' = o \odot \sigma(g)
+\]
+
+这是对已经聚合好的表示做后处理，通常更平滑、更容易训练。
+
+### 2. 它不会破坏 attention 的归一化结构
+
+softmax 有明确的概率意义：
+
+\[
+\sum_j A_{ij} = 1
+\]
+
+如果你把 gate 混进 score/softmax，本质上是在改这个概率分配机制。  
+模型不仅要学“内容匹配”，还要学“门控后的匹配”，耦合更重。
+
+放在 `o_proj` 前则不碰 `A` 的定义：
+
+- attention 还是正常算“该看哪些 token”
+- gate 只负责“取回来以后怎么用”
+
+这是一种更清晰的职责分离。
+
+### 3. 它能做“通道级选择”，而 score gate 更偏“位置级选择”
+
+attention score 的维度本质上是：
+
+- query 位置
+- key 位置
+- head
+
+它擅长控制的是：
+
+- 看第几个历史 token
+- 哪个 head 更关注哪个位置
+
+但 `o_proj` 前的 gate 作用在 `attn_output` 的 hidden/channel 维上，更适合控制：
+
+- 哪类语义特征保留
+- 哪些通道被抑制
+- 同一批取回的信息里，哪些成分更该进入后续层
+
+所以它回答的问题不是“该看谁”，而是“看完之后，哪些特征值得继续传下去”。
+
+### 4. 计算上更简单，兼容各种 attention backend
+
+你这个代码里 full attention 既可能是 dense flash attention，也可能是 QSA sparse attention。  
+如果 gate 放在 score 上，就必须介入 attention kernel 内部逻辑。
+
+但现在放在 `o_proj` 前：
+
+```python
+qkv, _ = self.qkv_proj(hidden_states)
+# ...
+attn_output = self.attn(q, k, v)
+
+if self.attn_output_gate:
+    gate = torch.sigmoid(gate)
+    attn_output = attn_output * gate
+
+output[:], _ = self.o_proj(attn_output)
+```
+
+这意味着：
+- 不管前面是 dense attention 还是 sparse attention
+- 只要 `self.attn(q,k,v)` 给出输出
+- 后面统一乘 gate 即可
+
+工程上解耦得很好。
+
+## 从功能上说，两种 gate 学到的东西也不同
+
+### 如果 gate 放在 score/softmax 上
+
+模型更容易学到：
+- 哪些上下文 token 该被关注
+- 哪些位置该被忽略
+- 稀疏路由、检索式选择
+
+这更接近“检索机制”或“选择记忆源”。
+
+### 如果 gate 放在 `o_proj` 前
+
+模型更容易学到：
+- 当前 token 从上下文取回的信息里，哪些语义分量更有用
+- 哪些 head 输出应该弱化
+- 哪些 feature 该进入残差流和后续 MLP
+
+这更接近“表示控制”或“信息过滤”。
+
+## 一个直观类比
+
+可以把 attention 想成“查资料”：
+
+- `score/softmax` gate：决定去翻哪几页资料
+- `o_proj` 前 gate：资料已经翻回来了，决定摘抄其中哪些内容进入最终总结
+
+前者是“选来源”，后者是“选内容”。
+
+## 对最终 token 概率的影响差别
+
+### 放在 score 上
+会更直接改变：
+- 哪些历史 token 被聚合
+- attention pattern
+- 模型的检索行为
+
+所以通常对行为模式影响更结构化、更剧烈。
+
+### 放在 `o_proj` 前
+更直接改变：
+- attention 输出特征的组成
+- 当前层 hidden state 的几何方向
+- 进而影响最终 logits
+
+它对概率分布的影响往往更“连续”和“表征级”。
+
+## 一句话总结
+
+`gate` 放在 `o_proj` 前，而不是放在 attention score 或 softmax 上，是因为它想做的不是“改注意力分配”，而是“对 attention 已经聚合出的表示做稳定、细粒度、通道级的动态筛选”。这样既保留了标准 attention 的路由能力，又额外给模型一个更平滑的特征控制旋钮。
+
+如果你愿意，我还可以继续把这两种方案写成一个并排对照表：
+
+- `score gate`
+- `value gate`
+- `output gate (o_proj 前)`
+
+这样你会更容易看出 Qwen 这里为什么选第三种。

@@ -4,20 +4,16 @@
 
 ### 阅读时记录的问题
 
-![](./imgs/sps_formula.png)
 
 
 1. q(x) * min(1, p(x)/q(x)) = min(q(x), p(x))，其实这个公式就是说：第一个step生成token x的概率等于draft model生成token x 的概率q(x) 乘它被接收的概率，也就得到了min(q(x), p(x))
-
 2. “如果 q(x) <= p(x)，那 x 一定被接受，所以第一步给了它 q(x) 的概率质量”，一定被接受是因为按照P_accept(x)计算，得到1所以一定被接受，我理解的对吗？
-
 3. 为什么还要除以一个总和 这里我没看懂，为什么说这是一个条件分布？分母代表什么？
 
 看了后面的例子我大概理解了，是说需要对所有需要补概率的可选的token进行遍历，求和总的需要补的概率大小，并对当前token需要补的概率进行加权？
 
-4. ”只要发生拒绝，第二步就一定补 B。“我没太理解，以及“第一步接受总概率是 0.5+0.1+0.2=0.8，拒绝概率是 0.2。”，这是说明采样到A,B,C都有可能接受，但概率是0.8，如果拒绝了，那一定会生成B的意思吗？但是拒绝后的B是怎么生成的？由谁来生成？
-
-5. 好的，按你说的 “为什么接受率是 min(1, p/q)，以及它和残差分布一起如何严格保证无偏”，用更容易懂的“面积图/水桶补水”方式再解释一遍。
+1. ”只要发生拒绝，第二步就一定补 B。“我没太理解，以及“第一步接受总概率是 0.5+0.1+0.2=0.8，拒绝概率是 0.2。”，这是说明采样到A,B,C都有可能接受，但概率是0.8，如果拒绝了，那一定会生成B的意思吗？但是拒绝后的B是怎么生成的？由谁来生成？
+2. 好的，按你说的 “为什么接受率是 min(1, p/q)，以及它和残差分布一起如何严格保证无偏”，用更容易懂的“面积图/水桶补水”方式再解释一遍。
 
 ### 回答
 
@@ -38,13 +34,13 @@
 为什么它等于 `min(q(x), p(x))`？分两种情况看：
 
 - 如果 `q(x) <= p(x)`，那么 `p(x)/q(x) >= 1`，接受率就是 `1`，所以
-  `q(x) * 1 = q(x) = min(q(x), p(x))`
+`q(x) * 1 = q(x) = min(q(x), p(x))`
 - 如果 `q(x) > p(x)`，那么接受率就是 `p(x)/q(x)`，所以
-  `q(x) * p(x)/q(x) = p(x) = min(q(x), p(x))`
+`q(x) * p(x)/q(x) = p(x) = min(q(x), p(x))`
 
 所以第一步对每个 token 实际“留下来”的概率质量，就是 `q` 和 `p` 的**重叠部分**。
 
-2. 对，你这里理解是对的。
+1. 对，你这里理解是对的。
 
 “如果 `q(x) <= p(x)`，那 `x` 一定被接受”就是因为：
 
@@ -58,7 +54,7 @@
 
 所以这时第一步会把 `q(x)` 这部分概率质量**全部保留下来**。
 
-3. 这里是关键点。你问“为什么还要除以一个总和”，答案是：
+1. 这里是关键点。你问“为什么还要除以一个总和”，答案是：
 
 因为 `max(0, p(x)-q(x))` 只是每个 token 的“缺口大小”，**还不是一个概率分布**。
 
@@ -93,15 +89,17 @@
 
 这正是残差分布的含义。
 
-4. “只要发生拒绝，第二步就一定补 B”这句话**不是普遍规律**，只是那个例子里恰好如此。
+1. “只要发生拒绝，第二步就一定补 B”这句话**不是普遍规律**，只是那个例子里恰好如此。
 
 我用一个最典型的 3-token 例子讲清楚：
 
+
 | token | `q(x)` | `p(x)` | 第一步留下 `min(q,p)` | 缺口 `max(0,p-q)` |
-|---|---:|---:|---:|---:|
-| A | 0.5 | 0.5 | 0.5 | 0.0 |
-| B | 0.1 | 0.3 | 0.1 | 0.2 |
-| C | 0.4 | 0.2 | 0.2 | 0.0 |
+| ----- | ------ | ------ | ---------------- | --------------- |
+| A     | 0.5    | 0.5    | 0.5              | 0.0             |
+| B     | 0.1    | 0.3    | 0.1              | 0.2             |
+| C     | 0.4    | 0.2    | 0.2              | 0.0             |
+
 
 先看第一步：
 
@@ -156,7 +154,7 @@
 
 这就严格对上目标分布了。
 
-5. 用“面积图 / 水桶补水”方式解释，最直观。
+1. 用“面积图 / 水桶补水”方式解释，最直观。
 
 把每个 token 看成一个水桶：
 
@@ -224,7 +222,7 @@
 
 这就是“**严格无偏**”的意思：
 
-最终采样结果的分布，**恰好就是目标模型的 `p(x)`**，不多不少。
+最终采样结果的分布，**恰好就是目标模型的 `p(x)*`*，不多不少。
 
 ## 一句最浓缩的总结
 
@@ -238,6 +236,7 @@
 
 1. bonus token 是怎么来的，原理是什么？
 2. “这意味着当前这条路径不会走“显式 max(p-q, 0)”那个分支，而是走 NO_DRAFT_PROBS 分支。那个分支里 recovered token 的候选概率是：
+
 用 target_probs
 但把“刚被拒绝的 draft token”排除掉” 这句话是什么意思，这样采样的概率分布是正确的吗？
 
@@ -247,7 +246,7 @@
 
 先说结论：
 
-**`bonus token` 是“当本轮所有 draft token 都被 target 接受时，顺手再从 target 模型的下一个位置多采 1 个 token”。**
+`**bonus token` 是“当本轮所有 draft token 都被 target 接受时，顺手再从 target 模型的下一个位置多采 1 个 token”。**
 
 它的作用不是“补偿拒绝”，而是：
 
@@ -438,15 +437,14 @@ recovered_id = tl.argmax(prob / q, axis=-1)
 
 - 如果真实 draft proposal 确实就是“只提一个确定 token，没有完整概率向量”，那这个分支是对的
 - 如果真实 draft 模型其实有完整的 `q(x)`，那更一般、也更严格的理论形式还是：
-  `max(p(x)-q(x), 0)`
+`max(p(x)-q(x), 0)`
 
 所以这两种情况要区分：
 
 1. **完整 draft 分布可得**
-   用显式 `max(p-q,0)`
-
+  用显式 `max(p-q,0)`
 2. **只有 draft token id，没有完整 draft 分布**
-   把 proposal 视为 delta 分布，残差就退化成“从 `p` 里排除这个 token 再重采样”
+  把 proposal 视为 delta 分布，残差就退化成“从 `p` 里排除这个 token 再重采样”
 
 ---
 
@@ -470,7 +468,7 @@ recovered_id = tl.argmax(prob / q, axis=-1)
 
 下面我用两个 **4-token 小例子**来讲：
 
-1. `bonus token` 到底是什么  
+1. `bonus token` 到底是什么
 2. `NO_DRAFT_PROBS` 时，为什么“拒绝后排除 draft token 再重采样”是对的
 
 ---
@@ -496,11 +494,13 @@ target 一次 forward 时，实际上会算出 3 个位置的 logits：
 
 可以画成这样：
 
-| 位置 | 含义 | 由谁决定 | 用来干什么 |
-|---|---|---|---|
-| pos1 | 验证第 1 个 draft token `B` | target logits | 看 `B` 接不接受 |
-| pos2 | 验证第 2 个 draft token `C` | target logits | 看 `C` 接不接受 |
-| pos3 | 已验证前缀之后的下一个 token | target logits | 当作 `bonus token` 候选 |
+
+| 位置   | 含义                      | 由谁决定          | 用来干什么               |
+| ---- | ----------------------- | ------------- | ------------------- |
+| pos1 | 验证第 1 个 draft token `B` | target logits | 看 `B` 接不接受          |
+| pos2 | 验证第 2 个 draft token `C` | target logits | 看 `C` 接不接受          |
+| pos3 | 已验证前缀之后的下一个 token       | target logits | 当作 `bonus token` 候选 |
+
 
 ---
 
@@ -508,10 +508,12 @@ target 一次 forward 时，实际上会算出 3 个位置的 logits：
 
 比如：
 
-| 位置 | draft 提议 | target 验证结果 |
-|---|---|---|
-| pos1 | `B` | 接受 |
-| pos2 | `C` | 接受 |
+
+| 位置   | draft 提议 | target 验证结果 |
+| ---- | -------- | ----------- |
+| pos1 | `B`      | 接受          |
+| pos2 | `C`      | 接受          |
+
 
 那这一轮最终输出就会是：
 
@@ -523,12 +525,14 @@ B, C, bonus
 
 比如 pos3 的 target 分布是：
 
+
 | token | target 概率 |
-|---|---:|
-| A | 0.10 |
-| B | 0.20 |
-| C | 0.30 |
-| D | 0.40 |
+| ----- | --------- |
+| A     | 0.10      |
+| B     | 0.20      |
+| C     | 0.30      |
+| D     | 0.40      |
+
 
 那 `bonus token` 就按这个分布采样，可能是 `D`，也可能是 `C/B/A`。
 
@@ -547,10 +551,12 @@ B, C, D
 
 比如：
 
-| 位置 | draft 提议 | target 验证结果 |
-|---|---|---|
-| pos1 | `B` | 接受 |
-| pos2 | `C` | 拒绝，改成 recovered token `D` |
+
+| 位置   | draft 提议 | target 验证结果               |
+| ---- | -------- | ------------------------- |
+| pos1 | `B`      | 接受                        |
+| pos2 | `C`      | 拒绝，改成 recovered token `D` |
+
 
 那么这一轮最终输出就只能是：
 
@@ -582,10 +588,12 @@ B, D
 
 ### 一张总表看懂 `bonus token`
 
-| 情况 | draft token 是否全被接受 | 最终输出 |
-|---|---|---|
-| 全接受 | 是 | `accepted draft tokens + 1 bonus token` |
-| 中途有拒绝 | 否 | `接受到拒绝点为止 + 1 recovered token` |
+
+| 情况    | draft token 是否全被接受 | 最终输出                                    |
+| ----- | ------------------ | --------------------------------------- |
+| 全接受   | 是                  | `accepted draft tokens + 1 bonus token` |
+| 中途有拒绝 | 否                  | `接受到拒绝点为止 + 1 recovered token`          |
+
 
 所以你可以把 `bonus token` 理解成：
 
@@ -604,12 +612,14 @@ B, D
 
 于是它把 draft 当成一个 **delta 分布**：
 
+
 | token | draft 分布 `q(x)` |
-|---|---:|
-| A | 0 |
-| B | 1 |
-| C | 0 |
-| D | 0 |
+| ----- | --------------- |
+| A     | 0               |
+| B     | 1               |
+| C     | 0               |
+| D     | 0               |
+
 
 也就是“draft 100% 提议 B”。
 
@@ -617,12 +627,14 @@ B, D
 
 ### target 分布假设如下
 
+
 | token | target 概率 `p(x)` |
-|---|---:|
-| A | 0.10 |
-| B | 0.20 |
-| C | 0.30 |
-| D | 0.40 |
+| ----- | ---------------- |
+| A     | 0.10             |
+| B     | 0.20             |
+| C     | 0.30             |
+| D     | 0.40             |
+
 
 ---
 
@@ -651,12 +663,14 @@ max(p(x)-q(x), 0)
 
 代进去看：
 
+
 | token | `p(x)` | `q(x)` | `max(p-q,0)` |
-|---|---:|---:|---:|
-| A | 0.10 | 0 | 0.10 |
-| B | 0.20 | 1 | 0 |
-| C | 0.30 | 0 | 0.30 |
-| D | 0.40 | 0 | 0.40 |
+| ----- | ------ | ------ | ------------ |
+| A     | 0.10   | 0      | 0.10         |
+| B     | 0.20   | 1      | 0            |
+| C     | 0.30   | 0      | 0.30         |
+| D     | 0.40   | 0      | 0.40         |
+
 
 你会发现：
 
@@ -665,23 +679,27 @@ max(p(x)-q(x), 0)
 
 所以 recovered token 的未归一化权重就是：
 
+
 | token | recovered 权重 |
-|---|---:|
-| A | 0.10 |
-| B | 0 |
-| C | 0.30 |
-| D | 0.40 |
+| ----- | ------------ |
+| A     | 0.10         |
+| B     | 0            |
+| C     | 0.30         |
+| D     | 0.40         |
+
 
 归一化之后：
 
 总和 = `0.10 + 0.30 + 0.40 = 0.80`
 
-| token | recovered 概率 |
-|---|---:|
-| A | 0.10 / 0.80 = 0.125 |
-| B | 0 |
-| C | 0.30 / 0.80 = 0.375 |
-| D | 0.40 / 0.80 = 0.500 |
+
+| token | recovered 概率        |
+| ----- | ------------------- |
+| A     | 0.10 / 0.80 = 0.125 |
+| B     | 0                   |
+| C     | 0.30 / 0.80 = 0.375 |
+| D     | 0.40 / 0.80 = 0.500 |
+
 
 这就正好等价于：
 
@@ -751,48 +769,58 @@ P_final(D) = 0.80 * 0.50 = 0.40
 
 ### target 分布
 
+
 | token | `p(x)` |
-|---|---:|
-| A | 0.10 |
-| B | 0.20 |
-| C | 0.30 |
-| D | 0.40 |
+| ----- | ------ |
+| A     | 0.10   |
+| B     | 0.20   |
+| C     | 0.30   |
+| D     | 0.40   |
+
 
 ### draft 退化分布
 
+
 | token | `q(x)` |
-|---|---:|
-| A | 0 |
-| B | 1 |
-| C | 0 |
-| D | 0 |
+| ----- | ------ |
+| A     | 0      |
+| B     | 1      |
+| C     | 0      |
+| D     | 0      |
+
 
 ### 第一步接受部分
 
+
 | token | 第一阶段贡献 |
-|---|---:|
-| A | 0 |
-| B | 0.20 |
-| C | 0 |
-| D | 0 |
+| ----- | ------ |
+| A     | 0      |
+| B     | 0.20   |
+| C     | 0      |
+| D     | 0      |
+
 
 ### 第二步 recovered 部分
 
+
 | token | 拒绝后条件概率 | 乘上拒绝概率 0.80 后的贡献 |
-|---|---:|---:|
-| A | 0.125 | 0.10 |
-| B | 0 | 0 |
-| C | 0.375 | 0.30 |
-| D | 0.500 | 0.40 |
+| ----- | ------- | ---------------- |
+| A     | 0.125   | 0.10             |
+| B     | 0       | 0                |
+| C     | 0.375   | 0.30             |
+| D     | 0.500   | 0.40             |
+
 
 ### 最终总概率
 
-| token | 第一阶段 | 第二阶段 | 最终 |
-|---|---:|---:|---:|
-| A | 0 | 0.10 | 0.10 |
-| B | 0.20 | 0 | 0.20 |
-| C | 0 | 0.30 | 0.30 |
-| D | 0 | 0.40 | 0.40 |
+
+| token | 第一阶段 | 第二阶段 | 最终   |
+| ----- | ---- | ---- | ---- |
+| A     | 0    | 0.10 | 0.10 |
+| B     | 0.20 | 0    | 0.20 |
+| C     | 0    | 0.30 | 0.30 |
+| D     | 0    | 0.40 | 0.40 |
+
 
 最终恰好恢复成 target 分布 `p(x)`。
 
@@ -810,7 +838,7 @@ P_final(D) = 0.80 * 0.50 = 0.40
 
 - 不知道完整 draft 分布时，就把 draft 看成“100% 只提这个 token”
 - 如果它被拒绝，那补偿分布自然就是：
-  **target 分布里除去这个 token 的剩余部分**
+**target 分布里除去这个 token 的剩余部分**
 
 ---
 
@@ -856,57 +884,71 @@ vLLM v1 实现了两种主要的投机解码方案：
 
 ### 配置
 
-| 文件 | 作用 |
-|------|------|
-| `vllm/config/speculative.py` | `SpeculativeConfig`：用户配置入口，自动检测 method，构建 draft `ModelConfig` |
-| `vllm/config/vllm.py` | `VllmConfig`：持有 `speculative_config`，传递给 worker |
-| `vllm/transformers_utils/configs/eagle.py` | `EAGLEConfig`：重写 HF config 的 `architectures` 字段 |
+
+| 文件                                         | 作用                                                            |
+| ------------------------------------------ | ------------------------------------------------------------- |
+| `vllm/config/speculative.py`               | `SpeculativeConfig`：用户配置入口，自动检测 method，构建 draft `ModelConfig` |
+| `vllm/config/vllm.py`                      | `VllmConfig`：持有 `speculative_config`，传递给 worker               |
+| `vllm/transformers_utils/configs/eagle.py` | `EAGLEConfig`：重写 HF config 的 `architectures` 字段               |
+
 
 ### Proposer（草案生成）
 
-| 文件 | 作用 |
-|------|------|
-| `vllm/v1/spec_decode/eagle.py` | **`EagleProposer`**：Eagle 和 MTP 共用的 draft 提议器 |
-| `vllm/v1/spec_decode/utils.py` | Triton 辅助 kernel（padded batch 处理） |
-| `vllm/v1/spec_decode/metadata.py` | 投机解码元数据 |
+
+| 文件                                | 作用                                            |
+| --------------------------------- | --------------------------------------------- |
+| `vllm/v1/spec_decode/eagle.py`    | `**EagleProposer`**：Eagle 和 MTP 共用的 draft 提议器 |
+| `vllm/v1/spec_decode/utils.py`    | Triton 辅助 kernel（padded batch 处理）             |
+| `vllm/v1/spec_decode/metadata.py` | 投机解码元数据                                       |
+
 
 ### Eagle 模型实现
 
-| 文件 | 作用 |
-|------|------|
-| `vllm/model_executor/models/llama_eagle.py` | Llama Eagle draft 模型 |
+
+| 文件                                              | 作用                       |
+| ----------------------------------------------- | ------------------------ |
+| `vllm/model_executor/models/llama_eagle.py`     | Llama Eagle draft 模型     |
 | `vllm/model_executor/models/qwen3_moe_eagle.py` | Qwen3-MoE Eagle draft 模型 |
-| `vllm/model_executor/models/llama_eagle3.py` | Eagle3 变体 |
+| `vllm/model_executor/models/llama_eagle3.py`    | Eagle3 变体                |
+
 
 ### MTP 模型实现
 
-| 文件 | 作用 |
-|------|------|
-| `vllm/model_executor/models/deepseek_mtp.py` | DeepSeek MTP |
+
+| 文件                                             | 作用             |
+| ---------------------------------------------- | -------------- |
+| `vllm/model_executor/models/deepseek_mtp.py`   | DeepSeek MTP   |
 | `vllm/model_executor/models/qwen3_next_mtp.py` | Qwen3-Next MTP |
-| `vllm/model_executor/models/qwen_mtp.py` | Qwen MTP |
-| `vllm/model_executor/models/ernie_mtp.py` | Ernie MTP |
+| `vllm/model_executor/models/qwen_mtp.py`       | Qwen MTP       |
+| `vllm/model_executor/models/ernie_mtp.py`      | Ernie MTP      |
+
 
 ### Worker 与 Runner
 
-| 文件 | 作用 |
-|------|------|
+
+| 文件                                   | 作用                                              |
+| ------------------------------------ | ----------------------------------------------- |
 | `vllm/v1/worker/gpu_model_runner.py` | 实例化 `EagleProposer`，调度 draft 和 target 的 forward |
-| `vllm/v1/worker/gpu_worker.py` | 选择 V1/V2 model runner |
+| `vllm/v1/worker/gpu_worker.py`       | 选择 V1/V2 model runner                           |
+
 
 ### 验证（拒绝采样）
 
-| 文件 | 作用 |
-|------|------|
-| `vllm/v1/sample/rejection_sampler.py` | `RejectionSampler`：验证 draft tokens |
-| `vllm/v1/sample/tree_rejection_sampler.py` | 树状投机解码的验证器 |
+
+| 文件                                         | 作用                                 |
+| ------------------------------------------ | ---------------------------------- |
+| `vllm/v1/sample/rejection_sampler.py`      | `RejectionSampler`：验证 draft tokens |
+| `vllm/v1/sample/tree_rejection_sampler.py` | 树状投机解码的验证器                         |
+
 
 ### 调度器
 
-| 文件 | 作用 |
-|------|------|
+
+| 文件                                | 作用                       |
+| --------------------------------- | ------------------------ |
 | `vllm/v1/core/sched/scheduler.py` | 统一调度，管理 `spec_token_ids` |
-| `vllm/v1/engine/core.py` | Engine 层面的 draft 结果回传 |
+| `vllm/v1/engine/core.py`          | Engine 层面的 draft 结果回传    |
+
 
 ---
 
@@ -918,7 +960,7 @@ vLLM v1 实现了两种主要的投机解码方案：
 
 1. `SpeculativeConfig.__post_init__` 构建 `draft_model_config`
 2. 自动检测 method 类型（`eagle` / `eagle3` / `mtp`）
-3. **Eagle**：用 `EAGLEConfig` 重写 HF config 的 `architectures`，映射到 vLLM 的 `Eagle*` 模型类
+3. **Eagle**：用 `EAGLEConfig` 重写 HF config 的 `architectures`，映射到 vLLM 的 `Eagle`* 模型类
 4. **MTP**：重写 `model_type` / `architectures`（如 `qwen3_next` → `qwen3_next_mtp`）
 
 ```python
@@ -1170,16 +1212,18 @@ class DeepSeekMultiTokenPredictor(nn.Module):
 
 ## 六、Eagle vs MTP 关键设计对比
 
-| 设计点 | Eagle (Llama) | Eagle (Qwen3-MoE) | MTP (Qwen3-Next) | MTP (DeepSeek) |
-|--------|---------------|---------------------|-------------------|----------------|
-| **融合方式** | `fc(concat(embed, hidden))` | `eh_proj(concat(e_norm(embed), h_norm(hidden)))` | `fc(concat(norm_e(embed), norm_h(hidden)))` | `eh_proj(concat(enorm(embed), hnorm(hidden)))` |
-| **Decoder 层数** | `config.num_hidden_layers`（可多层） | **1 层** | `num_nextn_predict_layers`（可多层） | `num_nextn_predict_layers`（可多层） |
-| **层号起始** | `target_layer_num` | `target_layer_num` | `num_hidden_layers` | `num_hidden_layers` |
-| **多步选层** | 所有层都跑（完整 stack） | 单层 | `spec_step_idx % num_mtp_layers` | `spec_step_idx % num_mtp_layers` |
-| **forward 返回值** | `(hidden, hidden)` tuple | `(hidden, hidden)` tuple | 单个 `hidden` tensor | 单个 `hidden` tensor |
-| **compute_logits** | 全局 `logits_processor(lm_head)` | 全局 `logits_processor(lm_head)` | 全局 `logits_processor(lm_head)` | 每层 `shared_head.head` |
-| **embed_tokens 共享** | 可选（检测 `has_own_embed_tokens`） | 可选 | **总是共享** | **总是共享** |
-| **lm_head 共享** | 可选（检测 `has_own_lm_head`） | 可选 | **总是共享** | **总是共享** + 每层 `shared_head.head` 也共享 |
+
+| 设计点                 | Eagle (Llama)                   | Eagle (Qwen3-MoE)                                | MTP (Qwen3-Next)                            | MTP (DeepSeek)                                 |
+| ------------------- | ------------------------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- |
+| **融合方式**            | `fc(concat(embed, hidden))`     | `eh_proj(concat(e_norm(embed), h_norm(hidden)))` | `fc(concat(norm_e(embed), norm_h(hidden)))` | `eh_proj(concat(enorm(embed), hnorm(hidden)))` |
+| **Decoder 层数**      | `config.num_hidden_layers`（可多层） | **1 层**                                          | `num_nextn_predict_layers`（可多层）             | `num_nextn_predict_layers`（可多层）                |
+| **层号起始**            | `target_layer_num`              | `target_layer_num`                               | `num_hidden_layers`                         | `num_hidden_layers`                            |
+| **多步选层**            | 所有层都跑（完整 stack）                 | 单层                                               | `spec_step_idx % num_mtp_layers`            | `spec_step_idx % num_mtp_layers`               |
+| **forward 返回值**     | `(hidden, hidden)` tuple        | `(hidden, hidden)` tuple                         | 单个 `hidden` tensor                          | 单个 `hidden` tensor                             |
+| **compute_logits**  | 全局 `logits_processor(lm_head)`  | 全局 `logits_processor(lm_head)`                   | 全局 `logits_processor(lm_head)`              | 每层 `shared_head.head`                          |
+| **embed_tokens 共享** | 可选（检测 `has_own_embed_tokens`）   | 可选                                               | **总是共享**                                    | **总是共享**                                       |
+| **lm_head 共享**      | 可选（检测 `has_own_lm_head`）        | 可选                                               | **总是共享**                                    | **总是共享** + 每层 `shared_head.head` 也共享           |
+
 
 ---
 
@@ -1480,7 +1524,380 @@ hidden_states, _ = self.norm(hidden_states, residual)
 
 性能优化——将加法和归一化融合到一个 kernel 里（fused add + norm），减少 GPU 上的中间 tensor 分配和内存读写。代价是需要同时传递 `hidden_states` 和 `residual` 两个 tensor。
 
+---
+
+  一、Gamma 个额外 mamba block 的分配机制
+
+  1.1 概念：num_speculative_blocks = gamma
+
+  MambaSpec 上有一个字段 num_speculative_blocks，它就是 MTP 时多出来的 mamba block 数量。
+
+  定义（vllm/v1/kv_cache_interface.py:341-347）：
+  @dataclass(frozen=True)
+  class MambaSpec(KVCacheSpec):
+      shapes: tuple[tuple[int, ...], ...]
+      dtypes: tuple[torch.dtype]
+      page_size_padded: int | None = None
+      mamba_type: str = "mamba2"
+      mamba_cache_mode: str = "none"
+      num_speculative_blocks: int = 0
+
+  赋值入口（vllm/model_executor/layers/mamba/abstract.py:60-71），在每个 mamba/GDN 层构造自己的 MambaSpec 时：
+  return MambaSpec(
+      ...,
+      mamba_cache_mode=vllm_config.cache_config.mamba_cache_mode,
+      num_speculative_blocks=(
+          vllm_config.speculative_config.num_speculative_tokens
+          if vllm_config.speculative_config
+          else 0
+      ),
+  )
+  也就是说 gamma == speculative_config.num_speculative_tokens（MTP 配置里的 draft 步数）。
+
+  1.2 一次请求要多分配多少块
+
+  vllm/v1/kv_cache_interface.py:359-367 — 单条请求最大占用：
+
+  def max_memory_usage_bytes(self, vllm_config):
+      if vllm_config.cache_config.mamba_cache_mode == "all":
+          return cdiv(max_model_len, self.block_size) * self.page_size_bytes
+      elif vllm_config.cache_config.mamba_cache_mode == "light":
+          return self.page_size_bytes * (3 + self.num_speculative_blocks)
+      else:  # "none"
+          return self.page_size_bytes * (1 + self.num_speculative_blocks)
+
+  vllm/v1/worker/gpu_model_runner.py:7498-7514 — 设置 max_num_blocks_per_req：
+
+  if isinstance(kv_cache_group.kv_cache_spec, MambaSpec):
+      if self.cache_config.mamba_cache_mode == "light":
+          # 1 个 prefix-hit + (1+gamma) 个 runtime + 其它 state-cache
+          mamba_blocks_per_req = (
+              2 + kv_cache_group.kv_cache_spec.num_speculative_blocks
+              + max_num_blocks_per_req
+          )
+      else:
+          mamba_blocks_per_req = (
+              max_num_blocks_per_req if self.cache_config.enable_prefix_caching else 1
+          ) + kv_cache_group.kv_cache_spec.num_speculative_blocks
+
+  1.3 块表实际布局（MambaManager）
+
+  vllm/v1/core/single_type_kv_cache_manager.py:710-722：
+  class MambaManager(SingleTypeKVCacheManager):
+      def **init**(self, kv_cache_spec, block_pool, **kwargs):
+          ...
+          self.num_speculative_blocks = kv_cache_spec.num_speculative_blocks
+          if self.mamba_cache_mode == "light":
+              self._num_prefix_hit_blocks  = 1
+              self._num_runtime_blocks     = 1 + self.num_speculative_blocks   # ← gamma+1
+              self._num_state_cache_blocks = 1
+
+  get_num_blocks_to_allocate / allocate_new_blocks（single_type_kv_cache_manager.py:847-868, 927-940）：
+
+- 非 light（"none"/"all"）：在 num_tokens 上额外加 gamma * block_size 个 token，让上层多分配 gamma 个 block
+- light：在请求首次进来时一次性分 _num_runtime_blocks + _num_state_cache_blocks，其中 runtime 段大小就是 1+gamma
+
+  因此每个 mamba/GDN 层的 block_table 形如：
+
+- mamba_cache_mode="none"：[runtime_0, runtime_1, ..., runtime_gamma]，共 1+gamma 个块
+- mamba_cache_mode="light"：[prefix_block, runtime_0, runtime_1, ..., runtime_gamma, state_cache_block]，共 3+gamma 个块
+
+  1.4 为什么需要这些额外的块
+
+  mamba/GDN 是 recurrent 状态：状态是按 token 顺序累积演化的。一旦你把状态向前推了 k 步，没有办法廉价地回退到第 j < k 步的状态。
+
+  MTP/spec decoding 的核心需求是：
+
+1. 一次 verify 会让主模型在 1 + gamma 个 token 上做 forward；
+2. 但 sampler 可能只接受其中前 n_accept 个（剩下要丢弃）；
+3. 下一轮要从「最后一个被接受的位置」的状态开始继续。
+
+  所以 GDN/mamba 必须为这 1+gamma 个位置都保留一个 SSM/conv state 的快照，verify 完之后按 num_accepted_tokens
+  选出正确的快照作为下一轮的"当前状态"。这就是这些额外块存在的意义。
+
+---
+
+  二、这些额外 block 何时、如何被使用
+
+  2.1 块表切片：传给 kernel 的实际索引
+
+  vllm/v1/attention/backends/utils.py:1248-1270，mamba_get_block_table_tensor：
+
+- "all":   返回原始 block_table
+- "none":  返回原始 block_table，形状 (#req, 1+gamma)
+- "light": 返回 block_table[:, 1 : 2+gamma]，即跳过 prefix_block，取 runtime 段
+
+  也就是说，无论哪种模式，GDN/mamba kernel 拿到的"可用 state 槽"都是 1+gamma 个。
+
+  2.2 GDN 后端构造 metadata
+
+  vllm/v1/attention/backends/gdn_attn.py:80-101：
+  self.num_spec       = speculative_config.num_speculative_tokens   # = gamma
+  self.use_spec_decode = self.num_spec > 0
+  self.spec_state_indices_tensor = torch.empty(
+      (self.decode_cudagraph_max_bs, self.num_spec + 1), dtype=torch.int32, device=device,
+  )
+  build 时（gdn_attn.py:230-260）切出：
+  spec_state_indices_tensor    = block_table_tensor[:, : self.num_spec + 1]   # 形状 (B, 1+gamma)
+  non_spec_state_indices_tensor = block_table_tensor[:, 0]                    # 形状 (B,)
+  并把 num_accepted_tokens（形状 (B,)，每个请求上轮被接受的 draft 数）一同打包进 GDNAttentionMetadata。
+
+  num_accepted_tokens 的传入位置在 vllm/v1/worker/gpu_model_runner.py:2222-2241：
+  if use_spec_decode and isinstance(builder, GDNAttentionMetadataBuilder):
+      num_accepted_tokens = self.num_accepted_tokens.gpu[:num_reqs_padded]
+      ...
+      extra_attn_metadata_args = dict(
+          num_accepted_tokens=num_accepted_tokens,
+          num_decode_draft_tokens_cpu=num_decode_draft_tokens_cpu,
+      )
+
+  2.3 GDN kernel 内部如何用这 gamma+1 槽
+
+  vllm/model_executor/models/qwen3_next.py:930-1080（Qwen3.5 的 Qwen3_5GatedDeltaNet 继承自这里）：
+
+  conv 部分（qwen3_next.py:957-974）：
+  mixed_qkv_spec = causal_conv1d_update(
+      mixed_qkv_spec, conv_state, conv_weights, ...,
+      conv_state_indices=spec_state_indices_tensor[:, 0][:num_spec_decodes],
+      num_accepted_tokens=num_accepted_tokens,
+      query_start_loc=spec_query_start_loc,
+      max_query_len=spec_state_indices_tensor.size(-1),  # = 1+gamma
+      retrieve_parent_token=attn_metadata.retrieve_parent_token,
+  )
+
+  SSM/recurrent 部分（qwen3_next.py:1041-1056）：
+  core_attn_out_spec, last_recurrent_state = fused_recurrent_gated_delta_rule(
+      q=query_spec, k=key_spec, v=value_spec, g=g_spec, beta=beta_spec,
+      initial_state=ssm_state,
+      inplace_final_state=True,
+      cu_seqlens=spec_query_start_loc[: num_spec_decodes + 1],
+      ssm_state_indices=spec_state_indices_tensor,   # 形状 (B, 1+gamma)
+      num_accepted_tokens=num_accepted_tokens,
+      retrieve_parent_token=attn_metadata.retrieve_parent_token,
+  )
+
+  具体的 triton kernel 逻辑：
+
+- vllm/model_executor/layers/mamba/ops/mamba_ssm.py:138：num_accepted = tl.load(num_accepted_tokens_ptr + pid_b).to(tl.int64) —
+  从上一轮接受数中算出"基准状态"在哪个槽
+- vllm/model_executor/layers/mamba/ops/causal_conv1d.py:870：同理，用 num_accepted_tokens 选 base conv-state 槽
+
+  每次 verify forward 时：
+
+- 对每个 spec 请求遍历 1+gamma 个 query token
+- 每处理完一个 token 就把当前 SSM/conv state 写入 ssm_state[spec_state_indices_tensor[req, position]] 对应的槽
+- 下一轮 forward 进来时，kernel 用 num_accepted_tokens 选出「真正应该作为初始状态的那个槽」，相当于完成了状态回退
+
+  2.4 light 模式下的 prefix-cache 拷贝
+
+  vllm/v1/worker/mamba_utils.py（GPU 上的辅助操作）：
+
+- preprocess_mamba_for_light_mode（line 47-125）：每次 step 前把 block_ids[0]（命中的 prefix 块）拷到 block_ids[1]（runtime base 槽），确保 GDN
+  forward 看到的初始状态正确。注意 assert len(new_block_ids) >= 2 + mamba_spec.num_speculative_blocks（line 112）就是要求 runtime 段已经分到了 1+gamma
+  块。
+- postprocess_mamba_for_light_mode（line 128-178）：forward 结束后，把当前 runtime block 拷到末尾的 state-cache 块（line 147-152），供后续
+  prefix-cache 命中使用。assert len(block_ids) == 3 + num_speculative_blocks 就是要求总块数是 prefix + (1+gamma) runtime + state_cache。
+
+  调用点在 gpu_model_runner.py:4585-4594（preprocess）和 gpu_model_runner.py:4762-4769（postprocess）。
+
+---
+
+  三、Qwen3.5 MTP 完整流程
+
+  3.1 模型结构（关键前提）
+
+  Qwen3.5 主模型是混合架构（vllm/model_executor/models/qwen3_5.py:224-267, 417-420）：
+
+- 每一层根据 config.layer_types[layer_idx] 选择是 "linear_attention"（GDN/mamba）还是 "full_attention"
+- Qwen3_5GatedDeltaNet 继承自 Qwen3NextGatedDeltaNet，forward 走 torch.ops.vllm.gdn_attention_core（qwen3_5.py:163-222）
+
+  Qwen3_5 MTP 模块（vllm/model_executor/models/qwen3_5_mtp.py）：
+
+- Qwen3_5MultiTokenPredictor.**init**（line 113-225）：
+  - mtp_start_layer_idx = config.num_hidden_layers，MTP 层序号接在主模型后面
+  - num_mtp_layers = getattr(config, "mtp_num_hidden_layers", 1)
+  - self.fc = ColumnParallelLinear(hidden_size*2, hidden_size) — 把 [embed | last_hidden] 投影回 hidden_size
+  - self.layers = ModuleList([Qwen3_5DecoderLayer(..., layer_type="full_attention", ...)])（line 207-220）
+  - MTP 模块本身全部是 full attention 层，没有 GDN/mamba
+- forward（line 233-265）：
+a. inputs_embeds = embed_tokens(input_ids) （input_ids 已经被 shift 过）
+b. inputs_embeds = pre_fc_norm_embedding(inputs_embeds)
+c. hidden_states = pre_fc_norm_hidden(hidden_states) （hidden_states 来自主模型最后一层）
+d. hidden_states = fc(concat([inputs_embeds, hidden_states], dim=-1))
+e. hidden_states, residual = self.layers[step_idx](positions, hidden_states, residual)
+f. return norm(hidden_states, residual)
+
+  注册关系（vllm/config/speculative.py:265-272, vllm/model_executor/models/registry.py:503-504）：
+
+- model_type == "qwen3_5_mtp" → 走 Qwen3_5MTP / Qwen3_5MoeMTP
+- MTP 在 vLLM 中复用 EagleProposer（spec_config.method == "mtp"）
+
+  3.2 单 step 的完整流程
+
+  vllm/v1/worker/gpu_model_runner.py:execute_model（line 4406+）：
+
+  阶段 A：Verify（主模型对上轮 draft 做验证）
+
+  输入：每个 spec 请求带 1+gamma 个 token（上一轮被接受的 1 个 + gamma 个 draft）。
+
+1. Mamba 预处理（line 4585-4594，light 模式）
+  mamba_utils.preprocess_mamba_for_light_mode 把 prefix 块拷到 runtime base 块。
+2. 构造 attention metadata（line 4617-4636）
+  _build_attention_metadata 同时为 full attention 和 GDN 构造 metadata。对 GDN 走 GDNAttentionMetadataBuilder.build，构造出：
+- spec_state_indices_tensor[:, :gamma+1] —— 1+gamma 个 SSM state 槽
+- non_spec_state_indices_tensor —— prefill / 纯 decode 请求只用 1 个槽
+- num_accepted_tokens —— 上轮各请求接受了几个 draft
+3. 主模型 forward（line 4700+）
+  主模型在 1+gamma token 上跑一遍：
+- 各 full_attention 层写各位置的 KV cache
+- 各 linear_attention（GDN）层用 gamma+1 个状态槽分别记录每个位置之后的 SSM/conv state；kernel 内部用 num_accepted_tokens 决定从哪个槽继续
+4. Sampler / 拒绝采样（line 3870-3889）
+  weighted = ...   # rejection sampling
+  num_accepted_tokens = weighted.max(dim=-1).values
+  num_accepted_tokens.add_(1)   # +1 for the bonus token
+5. 得到每条请求本轮真正接受了多少 token。
+6. Mamba 后处理（line 4762-4769，light 模式）
+  把当前 runtime block 拷到 state_cache 槽，供未来 prefix 命中。
+
+  阶段 B：Propose（用 MTP 模块草拟下一轮 gamma 个 token）
+
+  入口 gpu_model_runner.py:5335 propose_draft_token_ids → vllm/v1/spec_decode/eagle.py:266 EagleProposer.propose：
+
+1. 输入准备（eagle.py:301-305）
+  self.input_ids[: num_tokens - 1] = target_token_ids[1:]
+  self.input_ids[last_token_indices] = next_token_ids
+2. 把 input_ids 整体左移 1，再用刚 sample 出的 next_token_ids 替换每条序列的最后一位。
+3. 构造 MTP 的 attn metadata（eagle.py:337-356）
+  只为 MTP 的 full attention 层（以及可选的 indexer 层）构造，不涉及 GDN/mamba。
+4. MTP forward（eagle.py:430-447）
+  ret_hidden_states = self.model(
+ input_ids=input_ids,
+ positions=...,
+ hidden_states=self.hidden_states[:num_input_tokens],   # 主模型 last layer 输出
+ inputs_embeds=...,
+  )
+5. MTP 模块内部：concat(embed, hidden) → fc → 1 个 full-attention decoder layer → norm。
+6. 采 draft token（eagle.py:451-455）
+  logits = compute_logits(...) ; draft_token_ids = logits.argmax(-1)。
+7. 多步 draft：若 num_speculative_tokens > 1（即 gamma > 1），循环：把刚出的 draft token + 新的 hidden state 喂回 MTP 再 forward 一次，循环 gamma
+  次产出 gamma 个 draft。每一步用 layers[spec_step_idx % num_mtp_layers]（qwen3_5_mtp.py:248）。
+8. 写回 _draft_token_ids，调度器下一轮把它们附在 prompt/output 之后再送进 verify。
+
+  3.3 主模型 ↔ MTP ↔ 状态块 三者关系一图概览
+
+```
+┌────────────────────────────────────────────────┐
+│ Main model (hybrid: GDN layers + full-attn layers)
+│  - 验 1+gamma 个 token
+│  - GDN layer 把每个位置的 state 写到
+│    block_table[req, i]，i ∈ [0..gamma]   ←─ 这就是 “gamma 个额外 mamba block”
+│  - 输出 hidden_states (传给 MTP)
+└────────────────────────────────────────────────┘
+                │ 接受 num_accepted_tokens 个
+                ▼
+┌────────────────────────────────────────────────┐
+│ MTP module (单/多层 full-attention)
+│  - 只用 attention KV cache，不动 mamba block
+│  - 输入：上轮接受的 token + 它们的 hidden states
+│  - 输出：gamma 个 draft token，附在请求上
+└────────────────────────────────────────────────┘
+                │
+                ▼
+      下一轮 verify 又回到主模型，
+      kernel 用 num_accepted_tokens 选回
+      正确的 mamba state 槽继续推进
+```
+
+---
+
+  关键引用一览
+
+- MambaSpec 定义：vllm/v1/kv_cache_interface.py:341-367
+- num_speculative_blocks 来源：vllm/model_executor/layers/mamba/abstract.py:60-71
+- MambaManager（块分配）：vllm/v1/core/single_type_kv_cache_manager.py:710-940
+- 每请求 mamba 块数：vllm/v1/worker/gpu_model_runner.py:7498-7514
+- 块表切片：vllm/v1/attention/backends/utils.py:1248-1270
+- GDN attention metadata builder：vllm/v1/attention/backends/gdn_attn.py:71-260
+- GDN forward 使用状态槽：vllm/model_executor/models/qwen3_next.py:930-1080
+- mamba block 预 / 后处理：vllm/v1/worker/mamba_utils.py:47-178
+- Qwen3.5 主模型混合层：vllm/model_executor/models/qwen3_5.py:122-267, 417-420
+- Qwen3.5 MTP 模块：vllm/model_executor/models/qwen3_5_mtp.py:113-265, 472+
+- MTP 注册：vllm/config/speculative.py:265-272, vllm/model_executor/models/registry.py:503-504
+- EagleProposer.propose（MTP 复用）：vllm/v1/spec_decode/eagle.py:266-490
+- 主模型 verify 入口 + spec/verify 衔接：vllm/v1/worker/gpu_model_runner.py:2222-2241, 4406+, 4585-4769, 5335+
+
+⏺ 一句话总结：num_speculative_blocks 就是 speculative_config.num_speculative_tokens（gamma），给每个请求的 mamba/GDN 层多分 gamma 块，让主模型 verify
+  1+gamma 个 token 时能在每个位置都存一份 SSM/conv state 快照；GDN kernel 用 num_accepted_tokens 在下一轮挑出"最后被接受位置"的那份快照作为起点，实现
+  recurrent 状态的回退。Qwen3.5 MTP 模块本身只是一个 full-attention 的 decoder layer（拼 [embed | last_hidden] → fc → attn），不动 mamba block，gamma
+  块完全是给主模型 GDN 层准备的。  
+  
+我理解一下，mtp相当于是主模型forward了1步，然后小模型（head）又forward了gamma步，主模型forward的1步是肯定会被accept的，所以n_accept 至少为1，对吗
+
+⏺ 结论是对的（num_accepted_tokens >= 1），但把"主模型只 forward 1 步"这个说法稍微纠一下会更准确。实际机制是这样的：
+
+  真实的 verify 是 1+gamma 并行 forward
+
+  主模型在 verify 阶段是一次性把 1+gamma 个 token 并行喂进去 forward 一次，而不是"forward 1 步"。这 1+gamma 个 token 是：
+
+  - 1 个：上一轮最终被接受的最后一个 token（context 里的最后一个 already-committed token）
+
+  - gamma 个：上一轮 MTP 草拟的 draft
+
+  forward 完得到 1+gamma 个位置的分布 p_1, p_2, ..., p_{gamma+1}：
+
+  - p_i 是「以前面 i-1 个 token 为条件的下一个 token 分布」
+
+  - 然后用 rejection sampling 把 draft 一个个跟 p_i 对比
+
+  为什么 n_accept >= 1：bonus token 机制
+
+  不是因为"主模型 forward 的 1 步肯定接受"，而是因为 spec decoding 的 bonus token 规则：
+
+  - 如果 draft d_i 被拒：用 (p_i - q_i)_+ 重采一个 token 作为本轮最后一个输出，后面的 draft 全部丢弃 → 至少产出 1 个
+
+  - 如果所有 gamma 个 draft 都被接受：再从 p_{gamma+1} 里多采一个 token 作为 bonus → 产出 gamma+1 个
+
+  所以无论如何，主模型那次 forward 至少能产出 1 个新 token。这也是为什么代码里你能看到（gpu_model_runner.py:3886-3889）：
+
+  num_accepted_tokens = weighted.max(dim=-1).values
+
+  num_accepted_tokens.add_(1)   # ← 这个 +1 就是 bonus token
+
+  最终 num_accepted_tokens ∈ [1, gamma+1]。
+
+  时序：MTP 的 gamma 步发生在 verify 之后
+
+  你说的"主模型 forward 1 步，然后小模型（head）forward gamma 步"——这两者的先后顺序在一次迭代里其实是反过来的：
+
+  iter k:
+
+    ┌─ verify: 主模型并行 forward 1+gamma 个 token，rejection sampling
+
+    │   → 提交 n_accept 个 token (n_accept ∈ [1, gamma+1])
+
+    │
+
+    └─ propose: MTP 模块（head）从「最后一个被接受 token 的 hidden state」
+
+                出发，自回归 forward gamma 步，产出 gamma 个 draft
+
+  iter k+1:
+
+    ┌─ verify: 主模型并行 forward 1+gamma 个 token (上轮的 1 bonus + gamma drafts)
+
+    ...
+
+  一次迭代内：主模型 1 次并行 forward（覆盖 1+gamma 个位置） + MTP 模块 gamma 次自回归 forward。
+
+  对额外 mamba block 的影响
+
+  这也回答了「为什么是 1+gamma 个 mamba state 槽」：因为主模型那一次 forward 要经过 1+gamma 个 token 的 GDN 状态演化，kernel
+
+  在每个位置都要存一份快照；verify 完之后用 num_accepted_tokens（∈ [1, gamma+1]）作为索引选出"真正应该留下的那份状态"作为下一轮的起点——所以是 gamma+1
+
+  个槽，而不是 gamma 个。  
+  
 
 
 Ref:
-https://zhuanlan.zhihu.com/p/2020161669217658288
+[https://zhuanlan.zhihu.com/p/2020161669217658288](https://zhuanlan.zhihu.com/p/2020161669217658288)
