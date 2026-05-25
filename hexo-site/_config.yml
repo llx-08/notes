@@ -55,6 +55,12 @@ highlight:
   tab_replace: ''
   wrap: true
   hljs: false
+  exclude_languages:
+    - mermaid
+mermaid:
+  version: 11
+  startOnLoad: true
+  theme: default
 prismjs:
   preprocess: true
   line_number: true
