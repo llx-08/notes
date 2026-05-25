@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>blade-kvt 项目架构与 vLLM 对接指南 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="blade-kvt 项目架构与 vLLM 对接指南 本文档基于仓库源码与 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm 中 kvtbackend 集成代码整理，用于理解 blade-kvt 自身结构、组件抽象，以及 Prefill (P) &amp;#x2F; Decode (D) 分离场景下如何与 vLLM 协同工作。 目录 项目概览 目录结构 核心抽象与组件职责 数据面：KV 传输流程 与 vLLM 的对接 P&amp;#x2F;D 实"><meta property="og:type" content="blog"><meta property="og:title" content="blade-kvt 项目架构与 vLLM 对接指南"><meta property="og:url" content="https://llx-08.github.io/notes/2026/05/25/2026-05-25-project-architecture-and-vllm-integration/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="blade-kvt 项目架构与 vLLM 对接指南 本文档基于仓库源码与 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm 中 kvtbackend 集成代码整理，用于理解 blade-kvt 自身结构、组件抽象，以及 Prefill (P) &amp;#x2F; Decode (D) 分离场景下如何与 vLLM 协同工作。 目录 项目概览 目录结构 核心抽象与组件职责 数据面：KV 传输流程 与 vLLM 的对接 P&amp;#x2F;D 实"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-05-25T00:00:00.000Z"><meta property="article:modified_time" content="2026-05-25T02:44:16.884Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/05/25/2026-05-25-project-architecture-and-vllm-integration/"},"headline":"blade-kvt 项目架构与 vLLM 对接指南","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-05-25T00:00:00.000Z","dateModified":"2026-05-25T02:44:16.884Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"blade-kvt 项目架构与 vLLM 对接指南 本文档基于仓库源码与 &#x2F;mnt&#x2F;data&#x2F;llx&#x2F;vllm 中 kvtbackend 集成代码整理，用于理解 blade-kvt 自身结构、组件抽象，以及 Prefill (P) &#x2F; Decode (D) 分离场景下如何与 vLLM 协同工作。 目录 项目概览 目录结构 核心抽象与组件职责 数据面：KV 传输流程 与 vLLM 的对接 P&#x2F;D 实"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/05/25/2026-05-25-project-architecture-and-vllm-integration/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-05-25T00:00:00.000Z" title="5/25/2026, 12:00:00 AM">2026-05-25</time>发表</span><span class="level-item"><time dateTime="2026-05-25T02:44:16.884Z" title="5/25/2026, 2:44:16 AM">2026-05-25</time>更新</span><span class="level-item">30 分钟读完 (大约4471个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">blade-kvt 项目架构与 vLLM 对接指南</h1><div class="content"><h1 id="blade-kvt-项目架构与-vLLM-对接指南"><a href="#blade-kvt-项目架构与-vLLM-对接指南" class="headerlink" title="blade-kvt 项目架构与 vLLM 对接指南"></a>blade-kvt 项目架构与 vLLM 对接指南</h1><p>本文档基于仓库源码与 <code>/mnt/data/llx/vllm</code> 中 <code>kvtbackend</code> 集成代码整理，用于理解 <strong>blade-kvt</strong> 自身结构、组件抽象，以及 <strong>Prefill (P) / Decode (D)</strong> 分离场景下如何与 vLLM 协同工作。</p>
+<hr>
+<h2 id="目录"><a href="#目录" class="headerlink" title="目录"></a>目录</h2><ol>
+<li><a href="#1-%E9%A1%B9%E7%9B%AE%E6%A6%82%E8%A7%88">项目概览</a></li>
+<li><a href="#2-%E7%9B%AE%E5%BD%95%E7%BB%93%E6%9E%84">目录结构</a></li>
+<li><a href="#3-%E6%A0%B8%E5%BF%83%E6%8A%BD%E8%B1%A1%E4%B8%8E%E7%BB%84%E4%BB%B6%E8%81%8C%E8%B4%A3">核心抽象与组件职责</a></li>
+<li><a href="#4-%E6%95%B0%E6%8D%AE%E9%9D%A2kv-%E4%BC%A0%E8%BE%93%E6%B5%81%E7%A8%8B">数据面：KV 传输流程</a></li>
+<li><a href="#5-%E4%B8%8E-vllm-%E7%9A%84%E5%AF%B9%E6%8E%A5">与 vLLM 的对接</a></li>
+<li><a href="#6-pd-%E5%AE%9E%E4%BE%8B%E5%8F%91%E7%8E%B0">P/D 实例发现</a></li>
+<li><a href="#7-%E8%AF%B7%E6%B1%82%E7%94%9F%E5%91%BD%E5%91%A8%E6%9C%9F%E4%B8%8E%E7%8A%B6%E6%80%81%E7%BB%B4%E6%8A%A4">请求生命周期与状态维护</a></li>
+<li><a href="#8-%E5%AE%9E%E4%BE%8B%E4%B8%8E%E8%BF%90%E8%A1%8C%E6%97%B6%E7%8A%B6%E6%80%81">实例与运行时状态</a></li>
+<li><a href="#9-%E9%85%8D%E7%BD%AE%E4%B8%8E%E7%8E%AF%E5%A2%83%E5%8F%98%E9%87%8F%E9%80%9F%E6%9F%A5">配置与环境变量速查</a></li>
+<li><a href="#10-%E5%85%B3%E9%94%AE%E6%BA%90%E7%A0%81%E7%B4%A2%E5%BC%95">关键源码索引</a></li>
+</ol>
+<hr>
+<h2 id="1-项目概览"><a href="#1-项目概览" class="headerlink" title="1. 项目概览"></a>1. 项目概览</h2><p><strong>blade-kvt</strong> 是面向 <strong>Prefill/Decode 分离（P/D Disaggregation）</strong> 的 KV Cache 传输库：</p>
+<table>
+<thead>
+<tr>
+<th>角色</th>
+<th>含义</th>
+<th>典型部署</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>P (Producer / Prefill)</strong></td>
+<td>执行 prompt prefill，将 KV cache 块发送给 D</td>
+<td><code>kv_role=kv_producer</code></td>
+</tr>
+<tr>
+<td><strong>D (Consumer / Decode)</strong></td>
+<td>接收 KV，在本地继续 decode</td>
+<td><code>kv_role=kv_consumer</code></td>
+</tr>
+</tbody></table>
+<p>传输协议支持 <strong>RDMA</strong>（<code>accl-barex</code>，GDR 直写或 Staged D2H+Send）和 <strong>TCP</strong>（CUDA D2H + 网络发送）。上层通过 Python 扩展 <code>kvtransfer_ops</code> 暴露 API，由 vLLM 的 <code>HybridConnector</code> + <code>kvtbackend</code> 在调度与模型 forward 过程中驱动。</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">┌─────────────────────────────────────────────────────────────────┐</span><br><span class="line">│ vLLM (HybridConnector / kvtbackend)                              │</span><br><span class="line">│  PBackend (Scheduler + Worker)  │  DBackend (Scheduler + Worker) │</span><br><span class="line">└────────────┬────────────────────┴──────────────────┬──────────────┘</span><br><span class="line">             │ RPC (PREFILL_REQ / TRANSFER_KV_REQ)   │</span><br><span class="line">             │                                       │</span><br><span class="line">┌────────────▼──────────────────────────────────────▼──────────────┐</span><br><span class="line">│ blade_kvt (Python)                                                 │</span><br><span class="line">│  KVTransferClient (P)              KVTransferServer (D)            │</span><br><span class="line">│  connect_naming()                  worker_{id} 注册               │</span><br><span class="line">└────────────┬──────────────────────────────────────────────────────┘</span><br><span class="line">             │</span><br><span class="line">┌────────────▼──────────────────────────────────────────────────────┐</span><br><span class="line">│ kvtransfer (C++/CUDA)                                              │</span><br><span class="line">│  KvTransferClient → KvSendStub → IChannel (RDMA/TCP)              │</span><br><span class="line">│  ITransferServer ← 接收并写入 decode 侧 GPU KV                     │</span><br><span class="line">│  parse_block_* / TransferPlan → IpcBlock 描述符                   │</span><br><span class="line">└───────────────────────────────────────────────────────────────────┘</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="2-目录结构"><a href="#2-目录结构" class="headerlink" title="2. 目录结构"></a>2. 目录结构</h2><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line">blade-kvt/</span><br><span class="line">├── blade_kvt/                    # Python 封装层</span><br><span class="line">│   ├── __init__.py               # 默认 ACCL/RDMA 环境变量</span><br><span class="line">│   ├── kv_transfer.py            # 未编译时的 stub，保证 vLLM 可启动</span><br><span class="line">│   ├── kv_transfer_impl.py       # KVTransferClient / KVTransferServer</span><br><span class="line">│   └── nic_affinity.py           # RDMA NIC 亲和性文件</span><br><span class="line">│</span><br><span class="line">├── kvtransfer/                   # C++/CUDA 核心</span><br><span class="line">│   ├── include/                  # 头文件（接口定义）</span><br><span class="line">│   ├── src/                      # 实现（client、channel、parse_block 等）</span><br><span class="line">│   ├── kvtransfer_pybind.cpp     # pybind11 入口 → kvtransfer_ops</span><br><span class="line">│   ├── docs/cache_transfer_spec.md</span><br><span class="line">│   └── tests/</span><br><span class="line">│</span><br><span class="line">├── setup.py / pyproject.toml</span><br><span class="line">├── CRC_README.md                 # CRC 校验说明</span><br><span class="line">└── study_doc/                    # 本文档所在目录</span><br></pre></td></tr></table></figure>
+
+<p>vLLM 侧相关路径（不在本仓库内，但为对接必读）：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">vllm/v1/hybrid_connector/</span><br><span class="line">├── __init__.py           # HybridConnector, HybridScheduler, HybridWorker</span><br><span class="line">├── kvtbackend.py         # PBackend, DBackend, KVTDInfo, KVTState</span><br><span class="line">├── engine_proxy.py       # 与 EngineCore 的 RPC/调度桥接</span><br><span class="line">└── utils.py              # PeerManager, PeerInfo, ConnManager</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="3-核心抽象与组件职责"><a href="#3-核心抽象与组件职责" class="headerlink" title="3. 核心抽象与组件职责"></a>3. 核心抽象与组件职责</h2><p>设计采用 <strong>接口 + 工厂 + 策略</strong> 分层：上层编排（Client/Server），中层发送执行（SendStub），底层传输（Channel），旁路服务发现（Naming）与布局解析（parse_block）。</p>
+<h3 id="3-1-状态与上下文"><a href="#3-1-状态与上下文" class="headerlink" title="3.1 状态与上下文"></a>3.1 状态与上下文</h3><table>
+<thead>
+<tr>
+<th>类型</th>
+<th>文件</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Context</code></td>
+<td><code>kvtransfer/include/context.h</code></td>
+<td>单 worker 全局状态：TP 信息、层 GPU 地址、block/token 大小、协议上下文</td>
+</tr>
+<tr>
+<td><code>WorkerInfo</code></td>
+<td><code>kvtransfer/include/common.h</code></td>
+<td>可序列化的 worker 元数据（inst_id、IP:port、engine_tp_size、GDN/indexer 字段等）</td>
+</tr>
+<tr>
+<td><code>LayerInfo</code></td>
+<td><code>common.h</code></td>
+<td>单层：<code>token_size</code>, <code>block_size</code>, <code>layer_addr</code></td>
+</tr>
+<tr>
+<td><code>IProtocolContext</code></td>
+<td><code>context.h</code></td>
+<td>协议初始化钩子；<code>BarexProtoContext</code> 实现 RDMA/TCP</td>
+</tr>
+<tr>
+<td><code>ICUDABarrier</code></td>
+<td><code>context.h</code></td>
+<td>每层 CUDA event，与 Python <code>record_event</code> 同步</td>
+</tr>
+</tbody></table>
+<h3 id="3-2-发送路径（P-侧）"><a href="#3-2-发送路径（P-侧）" class="headerlink" title="3.2 发送路径（P 侧）"></a>3.2 发送路径（P 侧）</h3><table>
+<thead>
+<tr>
+<th>类型</th>
+<th>文件</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>KvTransferClient</code></td>
+<td><code>include/client.h</code></td>
+<td>请求缓冲、Step 生命周期、Target 池、与 forward 的层同步</td>
+</tr>
+<tr>
+<td><code>ISendStub</code> / <code>KvSendStub</code></td>
+<td><code>include/tx_stub.h</code></td>
+<td>针对单个目标 worker 的发送执行器</td>
+</tr>
+<tr>
+<td><code>TargetMgr</code></td>
+<td><code>src/client.cpp</code></td>
+<td><code>(dst_inst, dst_worker)</code> → SendStub 的 LRU 池</td>
+</tr>
+<tr>
+<td><code>BatchSendTask</code></td>
+<td><code>tx_stub.h</code></td>
+<td>一个 substep 内绑定到 <code>Step</code> 的批量任务</td>
+</tr>
+<tr>
+<td><code>Step</code> / <code>StepGuard</code></td>
+<td><code>include/step.h</code></td>
+<td>step 协调：等待各层 <code>record_event</code> 完成后再 send_data</td>
+</tr>
+<tr>
+<td><code>RequestInfo</code> / <code>ReqSendTask</code></td>
+<td><code>common.h</code></td>
+<td>单请求元数据、块 ID、token 范围</td>
+</tr>
+</tbody></table>
+<p><strong>KvTransferClient 关键职责：</strong></p>
+<ol>
+<li><code>submit_req_send</code> / <code>submit_delta_send</code>：将任务写入 <code>targets_tasks_buf_</code></li>
+<li><code>start_send(stepid)</code>：创建 <code>Step</code> + <code>StepGuard</code>，提交到线程池</li>
+<li><code>notify_event_record</code>：Python 每层 forward 后释放对应层信号量</li>
+<li><code>flush_send_step</code>：等待所有层就绪并收尾</li>
+</ol>
+<h3 id="3-3-传输通道"><a href="#3-3-传输通道" class="headerlink" title="3.3 传输通道"></a>3.3 传输通道</h3><table>
+<thead>
+<tr>
+<th>类型</th>
+<th>文件</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>IChannel</code></td>
+<td><code>include/channel.h</code></td>
+<td>统一协议：<code>connect</code> → <code>register_data</code> → <code>send_data(layer)</code> → <code>flush</code></td>
+</tr>
+<tr>
+<td><code>IpcBlock</code></td>
+<td><code>channel.h</code></td>
+<td><code>{src_offset, dst_offset, length}</code> 拷贝描述符</td>
+</tr>
+<tr>
+<td><code>RDMAChannel</code></td>
+<td><code>protocol/rdma_channel.h</code></td>
+<td>GDR 注册 + RDMA WriteBatch 直写 D 的 GPU</td>
+</tr>
+<tr>
+<td><code>RDMAStagedChannel</code></td>
+<td><code>protocol/rdma_staged_*.h</code></td>
+<td>D2H 到 CPU staging，再 RDMA Send</td>
+</tr>
+<tr>
+<td><code>TCPChannel</code></td>
+<td><code>protocol/tcp_channel.h</code></td>
+<td>CUDA copy kernel D2H + TCP</td>
+</tr>
+<tr>
+<td><code>ITransferServer</code></td>
+<td><code>include/server.h</code></td>
+<td>D 侧监听、注册 MR、处理 RPC（含 CRC）</td>
+</tr>
+<tr>
+<td><code>BarexCtx</code></td>
+<td><code>protocol/barex_protocol.h</code></td>
+<td>accl-barex 上下文、MR 池、RPC 回调</td>
+</tr>
+</tbody></table>
+<h3 id="3-4-服务发现（Naming）"><a href="#3-4-服务发现（Naming）" class="headerlink" title="3.4 服务发现（Naming）"></a>3.4 服务发现（Naming）</h3><table>
+<thead>
+<tr>
+<th>类型</th>
+<th>文件</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>INamingClient</code></td>
+<td><code>include/naming.h</code></td>
+<td>KV 存储：<code>store</code> / <code>get</code> / <code>search</code> / <code>list</code></td>
+</tr>
+<tr>
+<td><code>INamingWorkerClient</code></td>
+<td><code>naming.h</code></td>
+<td><code>register_worker</code> / <code>get_worker_info</code></td>
+</tr>
+<tr>
+<td><code>NamingManager</code></td>
+<td><code>naming.h</code></td>
+<td>URL 路由：<code>file:</code>、<code>eas:</code>、<code>fake:</code></td>
+</tr>
+<tr>
+<td><code>FileSysNaming</code></td>
+<td><code>naming/filesys_naming.h</code></td>
+<td>文件系统命名（常用本地/测试）</td>
+</tr>
+<tr>
+<td><code>EASNamingClient</code></td>
+<td><code>naming/eas_naming.h</code></td>
+<td>阿里云 EAS 命名服务</td>
+</tr>
+</tbody></table>
+<p>Naming 中两类 key 的语义：</p>
+<table>
+<thead>
+<tr>
+<th>Key 模式</th>
+<th>注册方</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>endpoint{dprank}</code></td>
+<td>P/D 的 <strong>Scheduler</strong>（RPC 控制面）</td>
+<td>对端发现 RPC 地址 <code>(addr, port)</code></td>
+</tr>
+<tr>
+<td><code>worker_{worker_id}</code></td>
+<td>D 的 <strong>Worker</strong>（数据面）</td>
+<td>P 发送 KV 时解析 RDMA/TCP 端点</td>
+</tr>
+</tbody></table>
+<h3 id="3-5-KV-布局解析（parse-block）"><a href="#3-5-KV-布局解析（parse-block）" class="headerlink" title="3.5 KV 布局解析（parse_block）"></a>3.5 KV 布局解析（parse_block）</h3><p>不同模型/后端的 KV cache 内存布局不同，通过 <strong>Cache Shape</strong> 选择解析器：</p>
+<table>
+<thead>
+<tr>
+<th>常量</th>
+<th>值</th>
+<th>源文件</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>RAGGED_FLASH_CACHE_SHAPE</code></td>
+<td>1</td>
+<td><code>parse_block_ragged.cpp</code></td>
+<td>旧 ragged 布局</td>
+</tr>
+<tr>
+<td><code>FLASH_CACHE_SHAPE</code></td>
+<td>2</td>
+<td><code>parse_block_flash.cpp</code></td>
+<td>vLLM 标准 <code>(2, blocks, ...)</code></td>
+</tr>
+<tr>
+<td><code>QWEN3_NEXT_FLASH_CACHE_SHAPE</code></td>
+<td>3</td>
+<td><code>parse_block_qwen3_next.cpp</code></td>
+<td>Hybrid GDN + indexer + attn</td>
+</tr>
+<tr>
+<td><code>DPSK_V32_SPARSE_MLA_SHAPE</code></td>
+<td>4</td>
+<td><code>parse_block_dpsk.cpp</code></td>
+<td>稀疏 MLA</td>
+</tr>
+<tr>
+<td><code>FLASHINFER_CACHE_SHAPE</code></td>
+<td>5</td>
+<td><code>parse_block_flashinfer.cpp</code></td>
+<td>HND head-major</td>
+</tr>
+<tr>
+<td><code>TURBOQUANT_CACHE_SHAPE</code></td>
+<td>6</td>
+<td><code>parse_block_turboquant.cpp</code></td>
+<td>TurboQuant</td>
+</tr>
+<tr>
+<td><code>QWEN3_NEXT_FLASHINFER_CACHE_SHAPE</code></td>
+<td>7</td>
+<td><code>parse_block_qwen3_next_flashinfer.cpp</code></td>
+<td>Qwen3.5 + FlashInfer</td>
+</tr>
+</tbody></table>
+<p>每个 shape 通常有 <strong>P==D</strong> (<code>PEQD</code>)、<strong>P&gt;D</strong> (<code>PGTD</code>)、<strong>P&lt;D</strong> (<code>PLTD</code>) 变体，由 <code>TaskContext::refresh_dst_info()</code> 根据源/目的 TP 大小选择。</p>
+<p><strong>新路径</strong>（<code>BLLM_KVTRANS_TX_PARSE_MODE=cache_spec</code>）：</p>
+<ul>
+<li><code>AttnLayoutDesc</code> + <code>build_transfer_plan()</code> + <code>generate_all_ipc_blocks()</code> 替代逐 shape 的函数指针，详见 <code>kvtransfer/docs/cache_transfer_spec.md</code>。</li>
+</ul>
+<h3 id="3-6-Python-层"><a href="#3-6-Python-层" class="headerlink" title="3.6 Python 层"></a>3.6 Python 层</h3><table>
+<thead>
+<tr>
+<th>模块</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>kv_transfer.py</code></td>
+<td><code>kvtransfer_ops</code> 缺失时提供 stub，避免 vLLM 启动失败</td>
+</tr>
+<tr>
+<td><code>kv_transfer_impl.py</code></td>
+<td>封装 C++ API；管理每层 CUDA Event；<code>send_done</code> RPC 通知调度器</td>
+</tr>
+<tr>
+<td><code>kvtransfer_pybind.cpp</code></td>
+<td>导出 <code>init_kv_transfer_client/server</code>、<code>connect_naming</code>、send API</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="4-数据面：KV-传输流程"><a href="#4-数据面：KV-传输流程" class="headerlink" title="4. 数据面：KV 传输流程"></a>4. 数据面：KV 传输流程</h2><h3 id="4-1-初始化"><a href="#4-1-初始化" class="headerlink" title="4.1 初始化"></a>4.1 初始化</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">sequenceDiagram</span><br><span class="line">    participant Py as Python (vLLM Worker)</span><br><span class="line">    participant Ops as kvtransfer_ops</span><br><span class="line">    participant Ctx as Context</span><br><span class="line">    participant Nam as NamingManager</span><br><span class="line"></span><br><span class="line">    alt Prefill (P)</span><br><span class="line">        Py-&gt;&gt;Ops: init_kv_transfer_client(layers, events, protocols)</span><br><span class="line">        Ops-&gt;&gt;Ctx: create_context + CUDA barrier</span><br><span class="line">        Py-&gt;&gt;Ops: connect_naming(inst_id, naming_url)</span><br><span class="line">    else Decode (D)</span><br><span class="line">        Py-&gt;&gt;Ops: init_kv_transfer_server(layers, protocols)</span><br><span class="line">        Ops-&gt;&gt;Ctx: create_context</span><br><span class="line">        Ops-&gt;&gt;Nam: register_worker_info → worker_{id}</span><br><span class="line">    end</span><br></pre></td></tr></table></figure>
+
+<h3 id="4-2-每个-Scheduler-Step-的发送（P-→-D）"><a href="#4-2-每个-Scheduler-Step-的发送（P-→-D）" class="headerlink" title="4.2 每个 Scheduler Step 的发送（P → D）"></a>4.2 每个 Scheduler Step 的发送（P → D）</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line">sequenceDiagram</span><br><span class="line">    participant Sched as PBackend Scheduler</span><br><span class="line">    participant Worker as PBackend Worker</span><br><span class="line">    participant Cli as KvTransferClient</span><br><span class="line">    participant Stub as KvSendStub</span><br><span class="line">    participant Ch as IChannel</span><br><span class="line">    participant Dec as D KVTransferServer</span><br><span class="line"></span><br><span class="line">    Sched-&gt;&gt;Sched: build_backend_meta → PReqMeta / KVTPMeta</span><br><span class="line">    Sched-&gt;&gt;Worker: bind_backend_metadata</span><br><span class="line">    Worker-&gt;&gt;Cli: submit_req_send2 / submit_delta_send</span><br><span class="line">    Worker-&gt;&gt;Cli: start_send_step(stepid)</span><br><span class="line">    loop 每层 forward</span><br><span class="line">        Worker-&gt;&gt;Cli: record_event(layer_idx)</span><br><span class="line">    end</span><br><span class="line">    Cli-&gt;&gt;Stub: send_batch (线程池)</span><br><span class="line">    Stub-&gt;&gt;Stub: parse_block / TransferPlan → IpcBlocks</span><br><span class="line">    Stub-&gt;&gt;Ch: connect + register_data</span><br><span class="line">    loop 每层</span><br><span class="line">        Stub-&gt;&gt;Ch: send_data(layer)</span><br><span class="line">        Ch-&gt;&gt;Dec: RDMA Write / TCP</span><br><span class="line">    end</span><br><span class="line">    Stub-&gt;&gt;Ch: flush()</span><br><span class="line">    Stub-&gt;&gt;Sched: send_done RPC (reach_last_token)</span><br><span class="line">    Worker-&gt;&gt;Cli: flush_send_step</span><br></pre></td></tr></table></figure>
+
+<h3 id="4-3-Block-解析决策树"><a href="#4-3-Block-解析决策树" class="headerlink" title="4.3 Block 解析决策树"></a>4.3 Block 解析决策树</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">env_cache_shape()  ← BLLM_KVTRANS_CACHE_SHAPE</span><br><span class="line">    │</span><br><span class="line">    ├─ TX_PARSE_MODE == cache_spec ?</span><br><span class="line">    │     └─ build_transfer_plan() → generate_all_ipc_blocks()</span><br><span class="line">    │</span><br><span class="line">    └─ Legacy: 按 P/D TP 比较</span><br><span class="line">          ├─ P == D  → *_p_eq_d  (TPKind::PEQD)</span><br><span class="line">          ├─ P &gt; D   → *_p_gt_d  (TPKind::PGTD)</span><br><span class="line">          └─ P &lt; D   → *_p_lt_d  (TPKind::PLTD)</span><br></pre></td></tr></table></figure>
+
+<p><code>compute_valid_ranks_pd()</code> 在 <code>num_kv_heads &lt; engine_tp_size</code> 时过滤哪些 P rank 参与发送。</p>
+<hr>
+<h2 id="5-与-vLLM-的对接"><a href="#5-与-vLLM-的对接" class="headerlink" title="5. 与 vLLM 的对接"></a>5. 与 vLLM 的对接</h2><h3 id="5-1-启用方式"><a href="#5-1-启用方式" class="headerlink" title="5.1 启用方式"></a>5.1 启用方式</h3><p>vLLM 通过 <strong>KV Connector</strong> 机制接入，需配置：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">{</span></span><br><span class="line">  <span class="attr">"kv_connector"</span><span class="punctuation">:</span> <span class="string">"HybridConnector"</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">"kv_role"</span><span class="punctuation">:</span> <span class="string">"kv_producer"</span><span class="punctuation">,</span>          <span class="comment">// P 节点</span></span><br><span class="line">  <span class="attr">"kv_connector_extra_config"</span><span class="punctuation">:</span> <span class="punctuation">{</span></span><br><span class="line">    <span class="attr">"backend"</span><span class="punctuation">:</span> <span class="string">"kvt"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"naming_url"</span><span class="punctuation">:</span> <span class="string">"file:/path/to/naming"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"kvt_inst_id"</span><span class="punctuation">:</span> <span class="string">"prefill-cluster-0"</span></span><br><span class="line">  <span class="punctuation">}</span></span><br><span class="line"><span class="punctuation">}</span></span><br></pre></td></tr></table></figure>
+
+<p>D 节点将 <code>kv_role</code> 设为 <code>kv_consumer</code>，<code>kvt_inst_id</code> 设为 decode 集群 ID。</p>
+<p>后端类选择逻辑（<code>vllm/v1/hybrid_connector/__init__.py</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># backend == "kvt"</span></span><br><span class="line"><span class="keyword">if</span> is_kv_consumer:</span><br><span class="line">    <span class="keyword">return</span> DBackend</span><br><span class="line"><span class="keyword">elif</span> is_kv_producer:</span><br><span class="line">    <span class="keyword">return</span> PBackend</span><br></pre></td></tr></table></figure>
+
+<h3 id="5-2-分层架构"><a href="#5-2-分层架构" class="headerlink" title="5.2 分层架构"></a>5.2 分层架构</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">EngineCore</span><br><span class="line">    │ on_add_req / step / schedule</span><br><span class="line">    ▼</span><br><span class="line">HybridConnector (__init__.py)</span><br><span class="line">    ├── HybridScheduler  → PBackend / DBackend (SCHEDULER 角色)</span><br><span class="line">    └── HybridWorker     → PBackend / DBackend (WORKER 角色)</span><br><span class="line">            │</span><br><span class="line">            ├── 控制面：RPC (PREFILL_REQ, TRANSFER_KV_REQ, ABORT_REQS_REQ)</span><br><span class="line">            └── 数据面：blade_kvt.KVTransferClient / KVTransferServer</span><br></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>文件</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>HybridConnector</code></td>
+<td><code>__init__.py</code></td>
+<td>vLLM <code>KVConnectorBase_V1</code> 门面</td>
+</tr>
+<tr>
+<td><code>HybridScheduler</code></td>
+<td><code>__init__.py</code></td>
+<td>请求队列 <code>_waiting/_loading/_loaded</code>、step、RPC 处理</td>
+</tr>
+<tr>
+<td><code>HybridWorker</code></td>
+<td><code>__init__.py</code></td>
+<td><code>bind_backend_metadata</code>、层 hook <code>async_save_kv_layer</code></td>
+</tr>
+<tr>
+<td><code>PBackend</code></td>
+<td><code>kvtbackend.py</code></td>
+<td>P：RPC 服务、KV 发送、Dash 远程 decode</td>
+</tr>
+<tr>
+<td><code>DBackend</code></td>
+<td><code>kvtbackend.py</code></td>
+<td>D：Peer 发现、向 P 发 prefill RPC、KV 接收</td>
+</tr>
+<tr>
+<td><code>engine_proxy.py</code></td>
+<td></td>
+<td><code>core_add_req</code>、<code>sched_add_req</code>、RPC server 端口</td>
+</tr>
+</tbody></table>
+<h3 id="5-3-Python-↔-C-绑定要点"><a href="#5-3-Python-↔-C-绑定要点" class="headerlink" title="5.3 Python ↔ C++ 绑定要点"></a>5.3 Python ↔ C++ 绑定要点</h3><p><strong>P Worker</strong> <code>PBackend.register_kv_caches()</code>：</p>
+<ul>
+<li>按模型类型设置 <code>BLLM_KVTRANS_CACHE_SHAPE</code>（见 <code>_set_worker_envs</code>）</li>
+<li>创建 <code>KVTransferClient</code>，在 <code>async_save_kv_layer</code> 中 <code>record_event</code></li>
+<li><code>connect_naming(inst_id, naming_url)</code>；P Scheduler 调用 <code>_reg_naming</code> 注册 <code>endpoint{dprank}</code></li>
+</ul>
+<p><strong>D Worker</strong> <code>DBackend.register_kv_caches()</code>：</p>
+<ul>
+<li>创建 <code>KVTransferServer</code></li>
+<li>将 <code>worker_{id}</code> 序列化 <code>WorkerInfo</code> 写入 naming；若无 naming，通过 RPC <code>_REGISTER_WORKER</code> 上报给 D Scheduler</li>
+</ul>
+<p><strong>每步发送</strong> <code>PBackend.bind_backend_metadata(KVTPMeta)</code>：</p>
+<ul>
+<li><code>freeze_metas</code> → <code>start_req_send</code></li>
+<li><code>abort_metas</code> → <code>submit_delta_send</code>（收尾）</li>
+<li><code>nonfreeze_metas</code> → <code>submit_req_send2</code> / <code>submit_delta_send</code></li>
+<li><code>start_send_step</code> + 各层 <code>record_event</code> + <code>flush_send_step</code></li>
+</ul>
+<p><strong>完成通知</strong>：C++ <code>KvSendStub::send_done()</code> 向 <code>BLLM_KVTRANS_SEND_DONE_ADDR</code>（默认 P Scheduler RPC 端口）发送 <code>SEND_DONE_REQ</code>，P 侧 <code>_mark_send_done</code> 后向等待中的 D RPC 返回 <code>KVTResp</code>。</p>
+<hr>
+<h2 id="6-P-D-实例发现"><a href="#6-P-D-实例发现" class="headerlink" title="6. P/D 实例发现"></a>6. P/D 实例发现</h2><p>发现分为 <strong>两层</strong>：控制面（RPC 端点）和数据面（KV worker 端点）。</p>
+<h3 id="6-1-实例-ID"><a href="#6-1-实例-ID" class="headerlink" title="6.1 实例 ID"></a>6.1 实例 ID</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># kvtbackend._get_inst_id()</span></span><br><span class="line">kvt_inst_id = kv_connector_extra_config[<span class="string">"kvt_inst_id"</span>]</span><br><span class="line">              <span class="keyword">or</span> POD_NAME</span><br><span class="line">              <span class="keyword">or</span> uuid</span><br><span class="line"></span><br><span class="line"><span class="comment"># 完整传输/RPC 身份（含 DP/TP）</span></span><br><span class="line">full_id = <span class="string">f"<span class="subst">{kvt_inst_id}</span>|<span class="subst">{data_parallel_rank}</span>|<span class="subst">{tensor_parallel_size}</span>"</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="6-2-控制面：D-如何找到-P（Prefill-RPC）"><a href="#6-2-控制面：D-如何找到-P（Prefill-RPC）" class="headerlink" title="6.2 控制面：D 如何找到 P（Prefill RPC）"></a>6.2 控制面：D 如何找到 P（Prefill RPC）</h3><p><strong>P 注册</strong>（Scheduler，<code>_reg_naming</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">PeerInfo(role=<span class="string">"prefill"</span>, tpsize, addr, port=rpc_port, dprank)</span><br><span class="line">naming_cli.store(<span class="string">f"endpoint<span class="subst">{dprank}</span>"</span>, info.serialize())</span><br></pre></td></tr></table></figure>
+
+<p><strong>D 发现</strong>（<code>DBackend</code> + <code>PeerManager</code>）：</p>
+<ul>
+<li>每 <strong>7 秒</strong> 轮询：<code>naming_cli.list()</code> → 对每个 instance <code>search(inst, "endpoint")</code></li>
+<li>过滤 <code>role == "prefill"</code></li>
+<li>维护 <code>PeerMap</code>：<code>peer_id = f"{kvt_inst_id}|{dprank}|{tpsize}"</code> → <code>(addr, port)</code></li>
+<li><code>get_peer(exclude=self.my_addr_port)</code> 随机选一个可用 P（避免选自己）</li>
+</ul>
+<p><strong>显式指定 P</strong>（Dash / 固定 P）：</p>
+<ul>
+<li>请求参数 <code>remote_host</code> + <code>remote_port</code> → <code>peer_hint</code></li>
+<li>abort 时记录 <code>D_PID = "{addr}:{port}"</code> 用于 <code>_abort_prefill</code></li>
+</ul>
+<h3 id="6-3-数据面：P-如何找到-D-Worker（KV-RDMA-TCP）"><a href="#6-3-数据面：P-如何找到-D-Worker（KV-RDMA-TCP）" class="headerlink" title="6.3 数据面：P 如何找到 D Worker（KV RDMA/TCP）"></a>6.3 数据面：P 如何找到 D Worker（KV RDMA/TCP）</h3><p><strong>D Worker 注册</strong>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">winfo = bladekv.current_worker_info(<span class="string">'server'</span>)</span><br><span class="line">naming_cli.store(<span class="string">f"worker_<span class="subst">{worker_id}</span>"</span>, winfo)</span><br></pre></td></tr></table></figure>
+
+<p><strong>经 RPC 传递给 P</strong>（<code>KVTDInfo</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">KVTDInfo(</span><br><span class="line">    instid=<span class="string">f"<span class="subst">{d_inst_id}</span>|<span class="subst">{dprank}</span>|<span class="subst">{tpsize}</span>"</span>,</span><br><span class="line">    blkids=...,           <span class="comment"># D 侧 block 映射</span></span><br><span class="line">    cached_tokens=...,</span><br><span class="line">    max_tokens=...,</span><br><span class="line">    d_workers_info=[...], <span class="comment"># 各 TP rank 的 WorkerInfo 序列化串</span></span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p><strong>P 侧映射</strong>（<code>_get_distinfo</code> / <code>_get_dist</code>）：</p>
+<ul>
+<li>解析 <code>d_inst_id</code> 得到 D 的 inst / dprank / tpsize</li>
+<li>按 P_tp 与 D_tp 计算 <code>dst_worker_id</code>（支持 P_tp &gt; D_tp 的多对一）</li>
+<li><code>PReqMeta</code> 携带 <code>d_workers_info</code> 时，C++ 可 <strong>跳过 naming 查询</strong> 直接使用</li>
+</ul>
+<p><strong>C++ 回退</strong>：<code>tx_stub.cpp</code> 中若未提供 <code>dst_worker_info</code>，则 <code>naming_-&gt;get_worker_info(dst_inst, dst_worker_id)</code>。</p>
+<h3 id="6-4-Fake-Naming-模式（naming-url-fake-）"><a href="#6-4-Fake-Naming-模式（naming-url-fake-）" class="headerlink" title="6.4 Fake Naming 模式（naming_url: &quot;fake://&quot;）"></a>6.4 Fake Naming 模式（<code>naming_url: "fake://"</code>）</h3><table>
+<thead>
+<tr>
+<th>组件</th>
+<th>行为</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>P</td>
+<td>无 naming；<code>inst_id = POD_NAME-rpc_port-ip</code></td>
+</tr>
+<tr>
+<td>D Scheduler</td>
+<td>无 <code>PeerManager</code>；请求必须带 <code>remote_host</code>/<code>remote_port</code></td>
+</tr>
+<tr>
+<td>D Worker</td>
+<td>RPC <code>_REGISTER_WORKER</code> 注册到 D Scheduler；阻塞直到所有 TP rank 就绪</td>
+</tr>
+</tbody></table>
+<h3 id="6-5-Naming-后端"><a href="#6-5-Naming-后端" class="headerlink" title="6.5 Naming 后端"></a>6.5 Naming 后端</h3><table>
+<thead>
+<tr>
+<th>Schema</th>
+<th>实现</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>file://</code></td>
+<td><code>filesys_naming.cpp</code>，目录 per instance，带 keepalive 时间戳</td>
+</tr>
+<tr>
+<td><code>eas://</code></td>
+<td><code>eas_naming.cpp</code>，HTTP</td>
+</tr>
+<tr>
+<td><code>fake://</code></td>
+<td>本地测试，无真实存储</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="7-请求生命周期与状态维护"><a href="#7-请求生命周期与状态维护" class="headerlink" title="7. 请求生命周期与状态维护"></a>7. 请求生命周期与状态维护</h2><h3 id="7-1-请求参数（kv-transfer-params）"><a href="#7-1-请求参数（kv-transfer-params）" class="headerlink" title="7.1 请求参数（kv_transfer_params）"></a>7.1 请求参数（kv_transfer_params）</h3><table>
+<thead>
+<tr>
+<th>Key</th>
+<th>常量</th>
+<th>设置方</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ali_llumnix_disagg</code></td>
+<td><code>D_DISAGG</code></td>
+<td>默认</td>
+<td>启用 PD 分离</td>
+</tr>
+<tr>
+<td><code>do_remote_prefill</code></td>
+<td><code>D_REMOTE_PREFILL</code></td>
+<td>Dash</td>
+<td>D 向指定 P prefill</td>
+</tr>
+<tr>
+<td><code>do_remote_decode</code></td>
+<td><code>P_REMOTE_DECODE</code></td>
+<td>Dash</td>
+<td>P prefill 后 KV 交给 D decode</td>
+</tr>
+<tr>
+<td><code>remote_host</code> / <code>remote_port</code></td>
+<td></td>
+<td>调用方</td>
+<td>固定 P 的 RPC 地址</td>
+</tr>
+<tr>
+<td><code>hbpkvtstate</code></td>
+<td><code>P_KVT_STATE</code></td>
+<td>P Scheduler</td>
+<td><code>KVTState(dinfo, maxtokens, untouched)</code></td>
+</tr>
+<tr>
+<td><code>hbpkvtdinfo</code></td>
+<td><code>P_KVTD_INFO</code></td>
+<td>D→P RPC</td>
+<td>目标 block、cached tokens、workers</td>
+</tr>
+<tr>
+<td><code>_hbkvtpid</code></td>
+<td><code>D_PID</code></td>
+<td>D</td>
+<td>abort 时用的 P 地址</td>
+</tr>
+<tr>
+<td><code>ignore_output</code></td>
+<td><code>P_IGNORE_OUTPUTS</code></td>
+<td>P</td>
+<td>远程 decode 时不向客户端输出</td>
+</tr>
+</tbody></table>
+<h3 id="7-2-D（Decode）标准-Disagg-流程"><a href="#7-2-D（Decode）标准-Disagg-流程" class="headerlink" title="7.2 D（Decode）标准 Disagg 流程"></a>7.2 D（Decode）标准 Disagg 流程</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">Client Request (disagg=true, prompt&gt;1)</span><br><span class="line">    │</span><br><span class="line">    ▼</span><br><span class="line">HybridConnector.on_add_req()</span><br><span class="line">    │ get_operations() → load=1</span><br><span class="line">    ▼</span><br><span class="line">HybridScheduler._waiting</span><br><span class="line">    │ sched_allocate_slots()</span><br><span class="line">    ▼</span><br><span class="line">_on_add_req() [disagg asyncio 线程]</span><br><span class="line">    │ async_get_num_new_matched_tokens()  → 需远程 prefill 的 token 数</span><br><span class="line">    │ async_update_state_after_alloc()</span><br><span class="line">    │   └─ _prefill_rpc(PREFILL_REQ) 或 _dash_prefill_rpc(TRANSFER_KV_REQ)</span><br><span class="line">    ▼</span><br><span class="line">mark_loaded() → _loaded</span><br><span class="line">    │ num_computed_tokens += cached</span><br><span class="line">    ▼</span><br><span class="line">sched_add_req() → 正常 vLLM decode 调度</span><br></pre></td></tr></table></figure>
+
+<p><strong>Hybrid 模型 token 切分</strong>：D 保留最后 <code>gamma+1</code> 个 token 本地计算（<code>gamma = num_speculative_tokens</code>），远程只 prefill 前面部分。</p>
+<h3 id="7-3-P（Prefill）两种模式"><a href="#7-3-P（Prefill）两种模式" class="headerlink" title="7.3 P（Prefill）两种模式"></a>7.3 P（Prefill）两种模式</h3><p><strong>模式 A：D 驱动 Prefill</strong>（<code>PREFILL_REQ</code>）</p>
+<ol>
+<li>D RPC 发送 <code>EngineCoreRequest</code> + <code>P_KVTD_INFO</code></li>
+<li>P 设置 <code>max_tokens=1</code>、<code>P_IGNORE_OUTPUTS=True</code>、<code>P_KVT_STATE</code></li>
+<li>P 本地 prefill forward</li>
+<li><code>build_backend_meta</code> → <code>PReqMeta</code> → Worker 经 <code>KVTransferClient</code> 发送到 D</li>
+<li><code>_wait_kvt_state</code> 返回 <code>KVTResp(cached=N)</code> 给 D</li>
+</ol>
+<p><strong>模式 B：Dash 远程 Decode</strong>（<code>do_remote_decode=True</code>）</p>
+<ol>
+<li>客户端请求直达 P</li>
+<li>P <code>max_tokens=1</code> prefill</li>
+<li>D 稍后发 <code>TRANSFER_KV_REQ</code>（<code>RKVTDInfo</code>）</li>
+<li>P 经 <code>_dinfoq</code> / <code>_dash_done</code> 匹配并发 KV</li>
+</ol>
+<h3 id="7-4-P-每步-KV-发送元数据"><a href="#7-4-P-每步-KV-发送元数据" class="headerlink" title="7.4 P 每步 KV 发送元数据"></a>7.4 P 每步 KV 发送元数据</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@dataclass</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">PReqMeta</span>:</span><br><span class="line">    reqid: <span class="built_in">str</span></span><br><span class="line">    d_inst_id: <span class="built_in">str</span>          <span class="comment"># "{inst}|{dprank}|{tpsize}"</span></span><br><span class="line">    p_block_ids / d_block_ids</span><br><span class="line">    new_tokens: <span class="built_in">int</span></span><br><span class="line">    has_last_token: <span class="built_in">bool</span></span><br><span class="line">    seen_tokens: <span class="built_in">int</span>        <span class="comment"># 0 → submit_req_send; &gt;0 → submit_delta_send</span></span><br><span class="line">    d_workers_info: <span class="built_in">list</span>[<span class="built_in">str</span>]</span><br><span class="line">    has_freeze: <span class="built_in">bool</span></span><br></pre></td></tr></table></figure>
+
+<p>Scheduler 每步产出 <code>KVTPMeta</code>：<code>stepid</code>, <code>substepid</code>, <code>freeze_metas</code>, <code>abort_metas</code>, <code>nonfreeze_metas</code>。</p>
+<h3 id="7-5-HybridScheduler-队列（请求维护）"><a href="#7-5-HybridScheduler-队列（请求维护）" class="headerlink" title="7.5 HybridScheduler 队列（请求维护）"></a>7.5 HybridScheduler 队列（请求维护）</h3><table>
+<thead>
+<tr>
+<th>结构</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>_waiting</code></td>
+<td>等待 KV 槽位分配与 load/save 设置</td>
+</tr>
+<tr>
+<td><code>_loading</code> / <code>_loaded</code></td>
+<td>D 侧 KV 加载中 / 完成</td>
+</tr>
+<tr>
+<td><code>_saving</code> / <code>_saved</code></td>
+<td>P 侧 KV 保存中 / 完成</td>
+</tr>
+<tr>
+<td><code>_sending</code> (P)</td>
+<td>等待 <code>KVTResp</code> 的 RPC</td>
+</tr>
+<tr>
+<td><code>_infly_kvt</code> (P)</td>
+<td>多步 delta 发送中的请求</td>
+</tr>
+<tr>
+<td><code>_dash_done</code> (P)</td>
+<td>Dash：等待 D 的 TRANSFER_KV</td>
+</tr>
+<tr>
+<td><code>_dinfoq</code> (P)</td>
+<td>来自 D 的 <code>RKVTDInfo</code> 队列</td>
+</tr>
+<tr>
+<td><code>_aborting</code></td>
+<td>跨队列的 abort 协调</td>
+</tr>
+</tbody></table>
+<h3 id="7-6-RPC-协议常量（节选）"><a href="#7-6-RPC-协议常量（节选）" class="headerlink" title="7.6 RPC 协议常量（节选）"></a>7.6 RPC 协议常量（节选）</h3><table>
+<thead>
+<tr>
+<th>常量</th>
+<th>值</th>
+<th>方向</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>PREFILL_REQ</code></td>
+<td>0x20181218</td>
+<td>D→P</td>
+<td>携带 <code>EngineCoreRequest</code></td>
+</tr>
+<tr>
+<td><code>PREFILL_RESP</code></td>
+<td>0x81218102</td>
+<td>P→D</td>
+<td><code>KVTResp</code></td>
+</tr>
+<tr>
+<td><code>TRANSFER_KV_REQ</code></td>
+<td>0x20210912</td>
+<td>D→P</td>
+<td>Dash：仅传 KV</td>
+</tr>
+<tr>
+<td><code>SEND_DONE_REQ</code></td>
+<td>0x20181219</td>
+<td>C++→P Sched</td>
+<td>KV 发送完成</td>
+</tr>
+<tr>
+<td><code>ABORT_REQS_REQ</code></td>
+<td>20250820</td>
+<td>D→P</td>
+<td>加载失败时 abort</td>
+</tr>
+</tbody></table>
+<h3 id="7-7-端到端时序（标准-Disagg）"><a href="#7-7-端到端时序（标准-Disagg）" class="headerlink" title="7.7 端到端时序（标准 Disagg）"></a>7.7 端到端时序（标准 Disagg）</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">sequenceDiagram</span><br><span class="line">    participant Client</span><br><span class="line">    participant D as D (Decode)</span><br><span class="line">    participant Nam as Naming</span><br><span class="line">    participant P as P (Prefill)</span><br><span class="line"></span><br><span class="line">    Client-&gt;&gt;D: Request (disagg=true)</span><br><span class="line">    D-&gt;&gt;D: Allocate KV blocks</span><br><span class="line">    D-&gt;&gt;Nam: PeerManager.get_peer()</span><br><span class="line">    Nam--&gt;&gt;D: P endpoint (addr, port)</span><br><span class="line">    D-&gt;&gt;P: PREFILL_REQ + KVTDInfo</span><br><span class="line">    P-&gt;&gt;P: core_add_req, prefill forward</span><br><span class="line">    P-&gt;&gt;D: KVTransfer RDMA/TCP (multi-layer)</span><br><span class="line">    P-&gt;&gt;D: KVTResp(cached=N)</span><br><span class="line">    D-&gt;&gt;D: sched_add_req, local decode</span><br><span class="line">    Client-&gt;&gt;D: Continue generation</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="8-实例与运行时状态"><a href="#8-实例与运行时状态" class="headerlink" title="8. 实例与运行时状态"></a>8. 实例与运行时状态</h2><h3 id="8-1-PeerManager-生命周期"><a href="#8-1-PeerManager-生命周期" class="headerlink" title="8.1 PeerManager 生命周期"></a>8.1 PeerManager 生命周期</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">每 7s:</span><br><span class="line">  list() 所有 naming instance</span><br><span class="line">  对每个 instance: search("endpoint*")</span><br><span class="line">  与 _running 对比:</span><br><span class="line">    - 消失 → 移除 peer + 关闭连接池</span><br><span class="line">    - ctime_us 变化 → 原地重启检测，更新 peer + 清连接</span><br><span class="line">    - 新增 → 加入 PeerMap</span><br></pre></td></tr></table></figure>
+
+<h3 id="8-2-P-侧单请求状态机"><a href="#8-2-P-侧单请求状态机" class="headerlink" title="8.2 P 侧单请求状态机"></a>8.2 P 侧单请求状态机</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">请求进入 P</span><br><span class="line">    │</span><br><span class="line">    ├─ do_remote_decode? → 进入 _dash_done，等待 TRANSFER_KV</span><br><span class="line">    │</span><br><span class="line">    ├─ P_KVT_STATE (来自 PREFILL_REQ)</span><br><span class="line">    │     untouched=True  → 等 scheduled tokens 达到 max 再发 KV</span><br><span class="line">    │     untouched=False → 立即 build PReqMeta 发送</span><br><span class="line">    │</span><br><span class="line">    └─ _infly_kvt 跟踪多步 delta</span><br><span class="line">          finished + new_tokens=0 → abort_metas (has_last_token)</span><br></pre></td></tr></table></figure>
+
+<p><code>KVTState.untouched</code> 控制首次 KV 传输是否等待 prefill 完全结束。</p>
+<h3 id="8-3-blade-kvt-C-侧状态"><a href="#8-3-blade-kvt-C-侧状态" class="headerlink" title="8.3 blade-kvt C++ 侧状态"></a>8.3 blade-kvt C++ 侧状态</h3><table>
+<thead>
+<tr>
+<th>状态</th>
+<th>所有者</th>
+<th>生命周期</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Context</code> / <code>WorkerInfo</code></td>
+<td>每进程 client 或 server</td>
+<td>进程级</td>
+</tr>
+<tr>
+<td><code>KV_CLIENT</code> / <code>KV_SERVER</code></td>
+<td>pybind 全局单例</td>
+<td>进程级</td>
+</tr>
+<tr>
+<td><code>targets_tasks_buf_</code></td>
+<td><code>KvTransferClient</code></td>
+<td>每次 <code>start_send</code> 清空</td>
+</tr>
+<tr>
+<td><code>coord_step_id_</code>, <code>pending_step_metas_</code></td>
+<td>Client</td>
+<td>Step/substep 协调</td>
+</tr>
+<tr>
+<td><code>Target</code> SendStub LRU</td>
+<td><code>TargetMgr</code></td>
+<td>容量 <code>env_txstub_cap()</code></td>
+</tr>
+<tr>
+<td><code>RequestInfo::state_</code></td>
+<td>原子 <code>ReqState</code></td>
+<td>INPROCESS → OK/FAILED</td>
+</tr>
+<tr>
+<td><code>TaskContext</code></td>
+<td><code>KvSendStub</code></td>
+<td>单次 <code>send_batch</code> 后清理</td>
+</tr>
+</tbody></table>
+<h3 id="8-4-失败与-Abort"><a href="#8-4-失败与-Abort" class="headerlink" title="8.4 失败与 Abort"></a>8.4 失败与 Abort</h3><ul>
+<li>D load 异常 → <code>IoRet.ex</code> → <code>AbortReq</code> → <code>_abort_prefill()</code> → <code>ABORT_REQS_REQ</code> 到 P</li>
+<li>Dash 模式 <code>CODE_REQNOTFOUND</code> → <code>_delay_s_list</code> 重试</li>
+<li><code>request_finished_all_groups</code>：远程 decode 时协调 <code>_PD_FINISH_REASON</code> 与 <code>_PD_SAVED</code> 顺序</li>
+</ul>
+<hr>
+<h2 id="9-配置与环境变量速查"><a href="#9-配置与环境变量速查" class="headerlink" title="9. 配置与环境变量速查"></a>9. 配置与环境变量速查</h2><h3 id="9-1-vLLM-kv-transfer-config"><a href="#9-1-vLLM-kv-transfer-config" class="headerlink" title="9.1 vLLM kv_transfer_config"></a>9.1 vLLM kv_transfer_config</h3><table>
+<thead>
+<tr>
+<th>字段</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>kv_connector</code></td>
+<td><code>"HybridConnector"</code></td>
+</tr>
+<tr>
+<td><code>kv_role</code></td>
+<td><code>"kv_producer"</code> (P) / <code>"kv_consumer"</code> (D)</td>
+</tr>
+<tr>
+<td><code>kv_connector_extra_config.backend</code></td>
+<td><code>"kvt"</code></td>
+</tr>
+<tr>
+<td><code>kv_connector_extra_config.naming_url</code></td>
+<td><code>"file:/path"</code> / <code>"eas:..."</code> / <code>"fake://"</code></td>
+</tr>
+<tr>
+<td><code>kv_connector_extra_config.kvt_inst_id</code></td>
+<td>逻辑集群名</td>
+</tr>
+</tbody></table>
+<h3 id="9-2-blade-kvt-环境变量（BLLM-KVTRANS-）"><a href="#9-2-blade-kvt-环境变量（BLLM-KVTRANS-）" class="headerlink" title="9.2 blade-kvt 环境变量（BLLM_KVTRANS_*）"></a>9.2 blade-kvt 环境变量（<code>BLLM_KVTRANS_*</code>）</h3><table>
+<thead>
+<tr>
+<th>变量</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CACHE_SHAPE</code></td>
+<td>选择 parse_block（1–7）</td>
+</tr>
+<tr>
+<td><code>TX_PARSE_MODE</code></td>
+<td><code>cache_spec</code> 启用 TransferPlan</td>
+</tr>
+<tr>
+<td><code>RDMA_STAGED</code></td>
+<td>Staged D2H+Send</td>
+</tr>
+<tr>
+<td><code>SEND_DONE_ADDR</code></td>
+<td>Scheduler RPC <code>ip:port</code></td>
+</tr>
+<tr>
+<td><code>CRC</code></td>
+<td>KV 完整性校验</td>
+</tr>
+<tr>
+<td><code>SEND_TPSIZE</code> / <code>TXSTUB_CAP</code></td>
+<td>发送线程池与 stub 池大小</td>
+</tr>
+<tr>
+<td><code>BF162FP8_CONV</code></td>
+<td>传输时 BF16→FP8</td>
+</tr>
+<tr>
+<td><code>PORT_BASE</code></td>
+<td>Server 监听端口基址</td>
+</tr>
+</tbody></table>
+<p><code>kvtbackend._set_worker_envs()</code> 会根据模型类型（MLA、Hybrid、FlashInfer、TurboQuant）自动设置默认 <code>CACHE_SHAPE</code>。</p>
+<h3 id="9-3-示例启动片段"><a href="#9-3-示例启动片段" class="headerlink" title="9.3 示例启动片段"></a>9.3 示例启动片段</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># P 节点</span></span><br><span class="line"><span class="built_in">export</span> BLLM_KVTRANS_CACHE_SHAPE=7   <span class="comment"># Qwen3.5 + FlashInfer</span></span><br><span class="line"><span class="comment"># 通常由 vLLM 根据模型自动设置</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># naming 目录需对 P/D 双方可见</span></span><br><span class="line"><span class="comment"># kv_connector_extra_config.naming_url=file:/shared/naming</span></span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="10-关键源码索引"><a href="#10-关键源码索引" class="headerlink" title="10. 关键源码索引"></a>10. 关键源码索引</h2><h3 id="blade-kvt"><a href="#blade-kvt" class="headerlink" title="blade-kvt"></a>blade-kvt</h3><table>
+<thead>
+<tr>
+<th>主题</th>
+<th>路径</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>公共类型</td>
+<td><code>kvtransfer/include/common.h</code></td>
+</tr>
+<tr>
+<td>Client 编排</td>
+<td><code>kvtransfer/include/client.h</code>, <code>src/client.cpp</code></td>
+</tr>
+<tr>
+<td>Send 执行</td>
+<td><code>kvtransfer/include/tx_stub.h</code>, <code>src/tx_stub.cpp</code></td>
+</tr>
+<tr>
+<td>Channel</td>
+<td><code>kvtransfer/include/channel.h</code>, <code>src/rdma_channel.cpp</code></td>
+</tr>
+<tr>
+<td>parse_block</td>
+<td><code>kvtransfer/include/parse_block_common.h</code>, <code>src/parse_block_*.cpp</code></td>
+</tr>
+<tr>
+<td>TransferPlan</td>
+<td><code>kvtransfer/docs/cache_transfer_spec.md</code></td>
+</tr>
+<tr>
+<td>pybind</td>
+<td><code>kvtransfer/kvtransfer_pybind.cpp</code></td>
+</tr>
+<tr>
+<td>Python API</td>
+<td><code>blade_kvt/kv_transfer_impl.py</code></td>
+</tr>
+</tbody></table>
+<h3 id="vLLM"><a href="#vLLM" class="headerlink" title="vLLM"></a>vLLM</h3><table>
+<thead>
+<tr>
+<th>主题</th>
+<th>路径</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>后端选择</td>
+<td><code>vllm/v1/hybrid_connector/__init__.py</code> → <code>_get_backend_cls</code></td>
+</tr>
+<tr>
+<td>P/D 实现</td>
+<td><code>vllm/v1/hybrid_connector/kvtbackend.py</code></td>
+</tr>
+<tr>
+<td>Peer 发现</td>
+<td><code>vllm/v1/hybrid_connector/utils.py</code> → <code>PeerManager</code></td>
+</tr>
+<tr>
+<td>Engine 桥接</td>
+<td><code>vllm/v1/hybrid_connector/engine_proxy.py</code></td>
+</tr>
+<tr>
+<td>Dash 示例</td>
+<td><code>vllm/examples/dash_proxy.py</code></td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="附录：当前分支说明"><a href="#附录：当前分支说明" class="headerlink" title="附录：当前分支说明"></a>附录：当前分支说明</h2><p>当前 git 分支 <code>support_3.5_flashinfer</code> 新增 **<code>QWEN3_NEXT_FLASHINFER_CACHE_SHAPE</code> (值 7)**，用于 Qwen3.5 混合模型在 FlashInfer HND 注意力布局下的 KV 解析，对应源文件 <code>parse_block_qwen3_next_flashinfer.cpp</code>。</p>
+<hr>
+<p><em>文档生成日期：2026-05-21</em></p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>blade-kvt 项目架构与 vLLM 对接指南</p><p><a href="https://llx-08.github.io/notes/2026/05/25/2026-05-25-project-architecture-and-vllm-integration/">https://llx-08.github.io/notes/2026/05/25/2026-05-25-project-architecture-and-vllm-integration/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-05-25</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-05-25</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/05/25/2026-05-25-learn-rabitq/"><span class="level-item">RabitQ 阅读笔记</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">13</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-project-architecture-and-vllm-integration/">blade-kvt 项目架构与 vLLM 对接指南</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-learn-rabitq/">RabitQ 阅读笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-rdma-learning-1/">RDMA学习笔记（1）</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-study-deepseek-r1-rl/">DeepSeek-R1 RL学习</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-vllm-hybrid-connector-vs-others/">vLLM HybridConnector 与其他 KV Connector 对比</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script></body></html>

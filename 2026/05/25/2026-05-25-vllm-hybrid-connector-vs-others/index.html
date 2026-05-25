@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>vLLM HybridConnector 与其他 KV Connector 对比 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="vLLM HybridConnector 与其他 KV Connector 对比 基于 vLLM 仓库 zero_decode_0_refcnt_block 分支源码整理（2026-05）。 1. 背景：什么是 KV Connector？ 在 vLLM v1 架构中， KV Connector 负责在 Scheduler 与 Worker 之间协调 KV Cache 的 跨进程&amp;#x2F;跨节点 加载与保存"><meta property="og:type" content="blog"><meta property="og:title" content="vLLM HybridConnector 与其他 KV Connector 对比"><meta property="og:url" content="https://llx-08.github.io/notes/2026/05/25/2026-05-25-vllm-hybrid-connector-vs-others/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="vLLM HybridConnector 与其他 KV Connector 对比 基于 vLLM 仓库 zero_decode_0_refcnt_block 分支源码整理（2026-05）。 1. 背景：什么是 KV Connector？ 在 vLLM v1 架构中， KV Connector 负责在 Scheduler 与 Worker 之间协调 KV Cache 的 跨进程&amp;#x2F;跨节点 加载与保存"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-05-25T00:00:00.000Z"><meta property="article:modified_time" content="2026-05-25T02:44:16.887Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/05/25/2026-05-25-vllm-hybrid-connector-vs-others/"},"headline":"vLLM HybridConnector 与其他 KV Connector 对比","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-05-25T00:00:00.000Z","dateModified":"2026-05-25T02:44:16.887Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"vLLM HybridConnector 与其他 KV Connector 对比 基于 vLLM 仓库 zero_decode_0_refcnt_block 分支源码整理（2026-05）。 1. 背景：什么是 KV Connector？ 在 vLLM v1 架构中， KV Connector 负责在 Scheduler 与 Worker 之间协调 KV Cache 的 跨进程&#x2F;跨节点 加载与保存"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/05/25/2026-05-25-vllm-hybrid-connector-vs-others/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-05-25T00:00:00.000Z" title="5/25/2026, 12:00:00 AM">2026-05-25</time>发表</span><span class="level-item"><time dateTime="2026-05-25T02:44:16.887Z" title="5/25/2026, 2:44:16 AM">2026-05-25</time>更新</span><span class="level-item">37 分钟读完 (大约5542个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">vLLM HybridConnector 与其他 KV Connector 对比</h1><div class="content"><h1 id="vLLM-HybridConnector-与其他-KV-Connector-对比"><a href="#vLLM-HybridConnector-与其他-KV-Connector-对比" class="headerlink" title="vLLM HybridConnector 与其他 KV Connector 对比"></a>vLLM HybridConnector 与其他 KV Connector 对比</h1><blockquote>
+<p>基于 vLLM 仓库 <code>zero_decode_0_refcnt_block</code> 分支源码整理（2026-05）。</p>
+</blockquote>
+<h2 id="1-背景：什么是-KV-Connector？"><a href="#1-背景：什么是-KV-Connector？" class="headerlink" title="1. 背景：什么是 KV Connector？"></a>1. 背景：什么是 KV Connector？</h2><p>在 vLLM v1 架构中，<strong>KV Connector</strong> 负责在 Scheduler 与 Worker 之间协调 KV Cache 的<strong>跨进程/跨节点</strong>加载与保存，是实现 <strong>PD 分离（Prefill-Decode Disaggregation）</strong>、<strong>KV Cache 复用</strong>、<strong>前缀缓存命中</strong> 等能力的基础设施。</p>
+<p>所有 Connector 都实现 <code>KVConnectorBase_V1</code>（<code>vllm/distributed/kv_transfer/kv_connector/v1/base.py</code>），分为两类角色：</p>
+<table>
+<thead>
+<tr>
+<th>角色</th>
+<th>进程</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>KVConnectorRole.SCHEDULER</code></td>
+<td>Scheduler</td>
+<td>匹配远程 token、分配 block、构建 metadata、管理请求生命周期</td>
+</tr>
+<tr>
+<td><code>KVConnectorRole.WORKER</code></td>
+<td>Worker</td>
+<td>根据 metadata 在 forward 中 load/save KV layer</td>
+</tr>
+</tbody></table>
+<p>工厂类 <code>KVConnectorFactory</code>（<code>factory.py</code>）注册了当前仓库中的主要 Connector：</p>
+<table>
+<thead>
+<tr>
+<th>Connector 名称</th>
+<th>模块路径</th>
+<th>典型用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>HybridConnector</strong></td>
+<td><code>vllm.v1.hybrid_connector</code></td>
+<td>生产级 PD 分离、多后端可插拔</td>
+</tr>
+<tr>
+<td>V6dObjectConnector</td>
+<td><code>vllm.distributed...v6d_object_connector</code></td>
+<td>V6D 对象存储 KV 持久化/共享</td>
+</tr>
+<tr>
+<td>NixlConnector</td>
+<td><code>...nixl_connector</code></td>
+<td>基于 NIXL/UCX 的高性能 P2P 传输</td>
+</tr>
+<tr>
+<td>MooncakeConnector</td>
+<td><code>...mooncake_connector</code></td>
+<td>基于 Mooncake 的 P2P 传输</td>
+</tr>
+<tr>
+<td>P2pNcclConnector</td>
+<td><code>...p2p_nccl_connector</code></td>
+<td>NCCL P2P KV 传输</td>
+</tr>
+<tr>
+<td>LMCacheConnectorV1 / LMCacheMPConnector</td>
+<td><code>...lmcache_*</code></td>
+<td>LMCache 外部 KV 缓存</td>
+</tr>
+<tr>
+<td>OffloadingConnector</td>
+<td><code>...offloading_connector</code></td>
+<td>GPU↔CPU/磁盘 KV offload</td>
+</tr>
+<tr>
+<td>MultiConnector</td>
+<td><code>...multi_connector</code></td>
+<td>组合多个 Connector</td>
+</tr>
+<tr>
+<td>ExampleConnector / DecodeBenchConnector</td>
+<td>测试/示例</td>
+<td></td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="2-HybridConnector-的定位：框架，而非单一传输实现"><a href="#2-HybridConnector-的定位：框架，而非单一传输实现" class="headerlink" title="2. HybridConnector 的定位：框架，而非单一传输实现"></a>2. HybridConnector 的定位：框架，而非单一传输实现</h2><p><strong>核心区别</strong>：<code>HybridConnector</code> 不是某一种固定的 KV 传输协议，而是一个<strong>面向生产的 PD 分离编排框架</strong>，内部通过 <code>backend</code> 配置选择具体的存储/传输实现。</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line">                ┌─────────────────────────────────────┐</span><br><span class="line">                │         HybridConnector             │</span><br><span class="line">                │  (KVConnectorBase_V1 + SupportsHMA)│</span><br><span class="line">                └──────────────┬──────────────────────┘</span><br><span class="line">                               │</span><br><span class="line">          ┌────────────────────┴────────────────────┐</span><br><span class="line">          │                                         │</span><br><span class="line">┌─────────▼─────────┐                    ┌──────────▼──────────┐</span><br><span class="line">│  HybridScheduler  │◄── RPC/ZMQ ───────►│    HybridWorker     │</span><br><span class="line">│  (asyncio loop)   │                    │  (asyncio loop)     │</span><br><span class="line">└─────────┬─────────┘                    └──────────┬──────────┘</span><br><span class="line">          │                                         │</span><br><span class="line">          └────────────────────┬────────────────────┘</span><br><span class="line">                               │</span><br><span class="line">                ┌──────────────▼──────────────┐</span><br><span class="line">                │      HybridBackend          │  ← 可插拔</span><br><span class="line">                │  (backend 配置选择)        │</span><br><span class="line">                └──────────────┬──────────────┘</span><br><span class="line">     ┌─────────┼─────────┬─────────┬──────────┼──────────┐</span><br><span class="line">     │         │         │         │          │          │</span><br><span class="line">PBackend   DBackend  FileBackend  V6dObject  KVS/Mooncake Migration</span><br><span class="line">(kvt)      (kvt)    (local_file)  Backend    Backend    Backend</span><br></pre></td></tr></table></figure>
+
+<h3 id="2-1-三层结构"><a href="#2-1-三层结构" class="headerlink" title="2.1 三层结构"></a>2.1 三层结构</h3><ol>
+<li><p><strong>HybridConnector</strong>（<code>__init__.py:1333</code>）<br>对外暴露标准 <code>KVConnectorBase_V1</code> 接口，根据 role 创建 <code>HybridScheduler</code> 或 <code>HybridWorker</code>。</p>
+</li>
+<li><p><strong>HybridScheduler / HybridWorker</strong>  </p>
+<ul>
+<li>独立 asyncio 事件循环（<code>get_hybrid_sched_loop()</code> / <code>get_hybrid_worker_loop()</code>）  </li>
+<li>维护请求队列：<code>_waiting</code> → <code>_loading</code> / <code>_saving</code> → <code>_loaded</code> / <code>_saved</code>  </li>
+<li>通过 RPC server 与 Worker 侧协调 save/load 完成信号  </li>
+<li>提供 <code>step()</code>、<code>has_requests()</code>、<code>on_add_req()</code> 等<strong>引擎级</strong>生命周期钩子</li>
+</ul>
+</li>
+<li><p><strong>HybridBackend</strong>（抽象基类 + 多种实现）<br>通过 <code>kv_connector_extra_config.backend</code> 选择：</p>
+<table>
+<thead>
+<tr>
+<th>backend 值</th>
+<th>实现类</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>kvt</code></td>
+<td><code>PBackend</code> / <code>DBackend</code></td>
+<td>blade_kvt，生产 PD 分离主力</td>
+</tr>
+<tr>
+<td><code>local_file</code></td>
+<td><code>FileBackend</code></td>
+<td>本地文件，调试/测试</td>
+</tr>
+<tr>
+<td><code>kvs</code></td>
+<td><code>VineyardKVSBackend</code></td>
+<td>Vineyard KVS</td>
+</tr>
+<tr>
+<td><code>mooncake</code></td>
+<td><code>MooncakeKVSBackend</code></td>
+<td>Mooncake KVS</td>
+</tr>
+<tr>
+<td><code>v6d_object</code></td>
+<td><code>V6dObjectBackend</code></td>
+<td>包装 V6dObjectConnector</td>
+</tr>
+<tr>
+<td><code>v6d_object+kvt</code></td>
+<td><code>V6dObjectKVTBackend</code></td>
+<td>V6D + KVT 混合</td>
+</tr>
+<tr>
+<td><code>migration</code> / <code>kvt+migration</code></td>
+<td><code>MigrationBackend</code> / <code>KVTMigration</code></td>
+<td>实例迁移</td>
+</tr>
+</tbody></table>
+</li>
+</ol>
+<p>配置示例（来自 <code>examples/online_serving/run_pd_kvt_serve.sh</code>）：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">{</span></span><br><span class="line">  <span class="attr">"kv_connector"</span><span class="punctuation">:</span> <span class="string">"HybridConnector"</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">"kv_role"</span><span class="punctuation">:</span> <span class="string">"kv_producer"</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">"kv_connector_extra_config"</span><span class="punctuation">:</span> <span class="punctuation">{</span></span><br><span class="line">    <span class="attr">"naming_url"</span><span class="punctuation">:</span> <span class="string">"file:/path/to/naming"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"kvt_inst_id"</span><span class="punctuation">:</span> <span class="string">"prefill"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"backend"</span><span class="punctuation">:</span> <span class="string">"kvt"</span></span><br><span class="line">  <span class="punctuation">}</span></span><br><span class="line"><span class="punctuation">}</span></span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="3-与其他-Connector-的逐项对比"><a href="#3-与其他-Connector-的逐项对比" class="headerlink" title="3. 与其他 Connector 的逐项对比"></a>3. 与其他 Connector 的逐项对比</h2><h3 id="3-1-vs-V6dObjectConnector"><a href="#3-1-vs-V6dObjectConnector" class="headerlink" title="3.1 vs V6dObjectConnector"></a>3.1 vs V6dObjectConnector</h3><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>HybridConnector</th>
+<th>V6dObjectConnector</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>架构</td>
+<td>框架 + 可插拔 Backend</td>
+<td>单体实现（Scheduler + Worker 内聚）</td>
+</tr>
+<tr>
+<td>存储介质</td>
+<td>取决于 backend（kvt/v6d/…）</td>
+<td>V6D 分布式对象存储</td>
+</tr>
+<tr>
+<td>HMA 支持</td>
+<td>✅ <code>SupportsHMA</code></td>
+<td>✅ <code>SupportsHMA</code></td>
+</tr>
+<tr>
+<td>PD 编排</td>
+<td>内置 waiting/loading/saving 状态机、block ref_cnt</td>
+<td>较薄，聚焦 store/load</td>
+</tr>
+<tr>
+<td>与引擎集成</td>
+<td><code>engine_proxy</code> 深度耦合 Scheduler</td>
+<td>标准 connector 接口</td>
+</tr>
+<tr>
+<td>关系</td>
+<td><code>backend=v6d_object</code> 时<strong>复用</strong> V6dObjectConnector 逻辑</td>
+<td>可独立使用，也可被 Hybrid 包装</td>
+</tr>
+</tbody></table>
+<p><code>V6dObjectBackend</code>（<code>v6d_object_backend.py</code>）内部直接持有 <code>V6dObjectConnectorScheduler</code> 和 <code>V6dObjectConnectorWorker</code>，在 Hybrid 的异步 RPC 框架下运行。</p>
+<p><strong>何时选 V6dObjectConnector 单独使用</strong>：只需 V6D 对象存储、不需要 blade_kvt PD 编排时。<br><strong>何时选 HybridConnector + v6d_object</strong>：需要 Hybrid 的请求生命周期管理、abort 协调、与 kvt 组合等。</p>
+<h3 id="3-2-vs-NixlConnector-MooncakeConnector-P2pNcclConnector"><a href="#3-2-vs-NixlConnector-MooncakeConnector-P2pNcclConnector" class="headerlink" title="3.2 vs NixlConnector / MooncakeConnector / P2pNcclConnector"></a>3.2 vs NixlConnector / MooncakeConnector / P2pNcclConnector</h3><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>HybridConnector</th>
+<th>Nixl / Mooncake / P2pNccl</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>传输层</td>
+<td>backend 决定（kvt=R DMA 等）</td>
+<td>各自专用库（NIXL/UCX、Mooncake、NCCL）</td>
+</tr>
+<tr>
+<td>HMA 支持</td>
+<td>✅</td>
+<td>❌（未实现 <code>SupportsHMA</code>）</td>
+</tr>
+<tr>
+<td><code>step()</code> 异步步进</td>
+<td>✅ 有独立 disagg 逻辑</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><code>on_add_req()</code></td>
+<td>✅</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><code>request_finished_all_groups</code></td>
+<td>✅（PD finish 协调）</td>
+<td>仅 <code>request_finished</code>（单组 block）</td>
+</tr>
+<tr>
+<td>生产配置</td>
+<td>大量 qwen/kimi 等 util 配置</td>
+<td>文档示例、社区场景</td>
+</tr>
+</tbody></table>
+<p>Nixl/Mooncake 更偏向<strong>通用 disaggregated prefilling demo</strong>：同一主机两 GPU、通过 side channel 握手传 KV。<br>HybridConnector 面向<strong>大规模在线服务</strong>：命名服务、实例 ID、gamma token、远程 decode 输出协调等。</p>
+<h3 id="3-3-vs-OffloadingConnector"><a href="#3-3-vs-OffloadingConnector" class="headerlink" title="3.3 vs OffloadingConnector"></a>3.3 vs OffloadingConnector</h3><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>HybridConnector</th>
+<th>OffloadingConnector</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>目标场景</td>
+<td>跨节点 PD、远程 KV 命中</td>
+<td>单节点 GPU 内存不足时 offload 到 CPU/磁盘</td>
+</tr>
+<tr>
+<td><code>prefer_cross_layer_blocks</code></td>
+<td>取决于 backend</td>
+<td>✅ True</td>
+</tr>
+<tr>
+<td>与 Prefix Cache</td>
+<td>通过 kvt/v6d 等</td>
+<td>通过 OffloadingManager + KV events</td>
+</tr>
+</tbody></table>
+<p>两者解决的问题不同：Offloading 是<strong>容量扩展</strong>，Hybrid 是<strong>算力分离 + KV 共享</strong>。</p>
+<h3 id="3-4-vs-LMCacheConnector"><a href="#3-4-vs-LMCacheConnector" class="headerlink" title="3.4 vs LMCacheConnector"></a>3.4 vs LMCacheConnector</h3><p>LMCache 对接外部 LMCache 服务做 KV 复用；HybridConnector 的 kvt backend 对接 blade_kvt（阿里内部 KV 传输栈）。<br>LMCache 无 HMA、无 PD 专用 <code>step()</code> 循环。</p>
+<h3 id="3-5-vs-MultiConnector"><a href="#3-5-vs-MultiConnector" class="headerlink" title="3.5 vs MultiConnector"></a>3.5 vs MultiConnector</h3><p><code>MultiConnector</code> 在<strong>多个已注册 Connector 之间</strong>做组合；<code>HybridConnector</code> 在<strong>单一 Connector 接口下</strong>组合多种 Backend。<br>MultiConnector 仍受 HMA 约束：若启用 HMA，子 connector 也必须支持 <code>SupportsHMA</code>。</p>
+<hr>
+<h2 id="4-HybridConnector-的核心机制"><a href="#4-HybridConnector-的核心机制" class="headerlink" title="4. HybridConnector 的核心机制"></a>4. HybridConnector 的核心机制</h2><h3 id="4-1-engine-proxy：与-Scheduler-深度集成"><a href="#4-1-engine-proxy：与-Scheduler-深度集成" class="headerlink" title="4.1 engine_proxy：与 Scheduler 深度集成"></a>4.1 engine_proxy：与 Scheduler 深度集成</h3><p><code>engine_proxy.py</code> 定义 HybridConnector 与 vLLM Engine 的<strong>唯一交互面</strong>：</p>
+<ul>
+<li><code>sched_allocate_slots()</code> — 为 load/save 分配 KV block</li>
+<li><code>sched_acquire_blocks()</code> / <code>sched_free_blocks()</code> — 传输期间 block 引用计数保护</li>
+<li><code>sched_add_req()</code> / <code>sched_finish_req()</code> — 请求入队/结束</li>
+<li><code>wakeup_core()</code> — 有异步工作时唤醒 EngineCore</li>
+</ul>
+<p>注释明确：BladeLLM/SGLang 只需实现该文件的接口即可对接 HybridConnector。</p>
+<h3 id="4-2-异步-PD-流水线"><a href="#4-2-异步-PD-流水线" class="headerlink" title="4.2 异步 PD 流水线"></a>4.2 异步 PD 流水线</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line">sequenceDiagram</span><br><span class="line">    participant Client</span><br><span class="line">    participant Scheduler as HybridScheduler</span><br><span class="line">    participant Backend as HybridBackend (kvt)</span><br><span class="line">    participant Worker as HybridWorker</span><br><span class="line"></span><br><span class="line">    Client-&gt;&gt;Scheduler: on_add_req(req)</span><br><span class="line">    Scheduler-&gt;&gt;Scheduler: _waiting 队列</span><br><span class="line">    Scheduler-&gt;&gt;Scheduler: sched_allocate_slots</span><br><span class="line">    alt save (Prefill)</span><br><span class="line">        Scheduler-&gt;&gt;Scheduler: _setup_save (ref_cnt++)</span><br><span class="line">        Scheduler-&gt;&gt;Worker: build_connector_meta</span><br><span class="line">        Worker-&gt;&gt;Backend: async_save_kv_layer</span><br><span class="line">        Backend--&gt;&gt;Scheduler: SAVE_DONE RPC</span><br><span class="line">        Scheduler-&gt;&gt;Scheduler: _try_teardown_save (ref_cnt--)</span><br><span class="line">    else load (Decode)</span><br><span class="line">        Scheduler-&gt;&gt;Worker: async_load_kv</span><br><span class="line">        Backend--&gt;&gt;Scheduler: LOAD_DONE RPC</span><br><span class="line">        Scheduler-&gt;&gt;Scheduler: num_external_tokens +=</span><br><span class="line">    end</span><br><span class="line">    Scheduler-&gt;&gt;Client: step() 输出 kv_transfer_done</span><br></pre></td></tr></table></figure>
+
+<p><code>_step_waiting</code> 注释：<strong>load = decode，save = prefill</strong>。</p>
+<h3 id="4-3-Block-生命周期与-ref-cnt"><a href="#4-3-Block-生命周期与-ref-cnt" class="headerlink" title="4.3 Block 生命周期与 ref_cnt"></a>4.3 Block 生命周期与 ref_cnt</h3><p>PD 传输期间，P 节点通过 <code>_setup_save</code> → <code>sched_acquire_blocks</code> 防止 KV block 被 scheduler 回收；传输完成后 <code>_try_teardown_save</code> → <code>sched_free_blocks</code> 释放。</p>
+<p>这与 standalone connector 的差异：Hybrid <strong>显式管理</strong> block 在异步 I/O 完成前的存活，并处理 abort、preempt 等边界（见仓库内 <code>docs/kvtbackend_block_leak_analysis.md</code>）。</p>
+<h3 id="4-4-HMA（Hybrid-Memory-Allocator）"><a href="#4-4-HMA（Hybrid-Memory-Allocator）" class="headerlink" title="4.4 HMA（Hybrid Memory Allocator）"></a>4.4 HMA（Hybrid Memory Allocator）</h3><p>当模型同时有 <strong>Attention KV</strong> 和 <strong>Mamba/GDN</strong> 等多种 KV cache group 时，需启用 HMA。工厂在创建 connector 时检查：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># factory.py</span></span><br><span class="line"><span class="keyword">if</span> hma_enabled <span class="keyword">and</span> <span class="keyword">not</span> supports_hma(connector_cls):</span><br><span class="line">    <span class="keyword">raise</span> ValueError(...)</span><br></pre></td></tr></table></figure>
+
+<p><code>SupportsHMA</code> 要求实现 <code>request_finished_all_groups(request, block_ids: tuple[list[int], ...])</code>，对每个 cache group 的 block 做统一收尾。</p>
+<p>HybridConnector 对 hybrid 模型（<code>is_hybrid=True</code>）还校验 mamba cache 仅支持 <code>light</code> 模式。</p>
+<h3 id="4-5-引擎侧特殊处理"><a href="#4-5-引擎侧特殊处理" class="headerlink" title="4.5 引擎侧特殊处理"></a>4.5 引擎侧特殊处理</h3><p>代码中对 <code>HybridConnector</code> 有多处专门分支，说明它是<strong>一等公民</strong>而非普通 connector：</p>
+<ul>
+<li><strong>Scheduler preempt</strong>（<code>scheduler.py:596</code>）：consumer 节点 preempt 时直接 abort，不走普通 preempt；producer 则保留请求。</li>
+<li><strong>EngineCore abort</strong>（<code>core.py:559</code>）：Hybrid 的 abort 由 connector 内部处理，不再调用 <code>scheduler.finish_requests</code>。</li>
+<li><strong>KVCacheManager</strong>（<code>kv_cache_manager.py:160</code>）：<code>is_hybrid_connector</code> 标志影响 block 管理逻辑。</li>
+</ul>
+<h3 id="4-6-扩展能力"><a href="#4-6-扩展能力" class="headerlink" title="4.6 扩展能力"></a>4.6 扩展能力</h3><ul>
+<li><strong>Bypass task</strong>（<code>VLLM_ENABLE_BYPASS_TASK</code>）：ZMQ pub/sub 向远程 substep 下发 metadata  </li>
+<li><strong>Migration backend</strong>：实例间 KV 迁移  </li>
+<li><strong>TurboQuant / FP8</strong>：kvtbackend 内对量化 KV 的支持  </li>
+<li><strong>远程 decode 输出</strong>（<code>P_REMOTE_DECODE</code>）：P 节点 finish 与 KV 保存完成的时序协调（<code>request_finished_all_groups</code>）</li>
+</ul>
+<hr>
+<h2 id="5-HybridConnector-的好处（总结）"><a href="#5-HybridConnector-的好处（总结）" class="headerlink" title="5. HybridConnector 的好处（总结）"></a>5. HybridConnector 的好处（总结）</h2><table>
+<thead>
+<tr>
+<th>好处</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>统一 PD 入口</strong></td>
+<td>一套 <code>HybridConnector</code> 配置覆盖 kvt、v6d、file、迁移等场景，运维与代码路径统一</td>
+</tr>
+<tr>
+<td><strong>生产级生命周期</strong></td>
+<td><code>step()</code>/<code>has_requests()</code> 驱动异步 I/O，与 EngineCore 事件循环协同，避免阻塞 scheduler</td>
+</tr>
+<tr>
+<td><strong>Block 安全</strong></td>
+<td>传输期 ref_cnt 保护 + abort/preempt 专门逻辑，降低 block 泄漏与 use-after-free</td>
+</tr>
+<tr>
+<td><strong>HMA / 混合模型</strong></td>
+<td>原生支持 Attention+Mamba/GDN 多 group KV，满足 Qwen3-Next 等架构</td>
+</tr>
+<tr>
+<td><strong>可插拔 Backend</strong></td>
+<td>新传输/存储只需实现 <code>HybridBackend</code> 接口，无需改 Scheduler/Worker 框架</td>
+</tr>
+<tr>
+<td><strong>深度引擎集成</strong></td>
+<td>engine_proxy 抽象使 BladeLLM 等 fork 可复用同一套 PD 逻辑</td>
+</tr>
+<tr>
+<td><strong>复用成熟组件</strong></td>
+<td><code>v6d_object</code> backend 直接包装 <code>V6dObjectConnector</code>，避免重复实现</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="6-何时选用哪种-Connector？"><a href="#6-何时选用哪种-Connector？" class="headerlink" title="6. 何时选用哪种 Connector？"></a>6. 何时选用哪种 Connector？</h2><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">需要 PD 分离在线服务（Prefill/Decode 分机）？</span><br><span class="line">├── 是 → HybridConnector + backend=kvt（生产默认）</span><br><span class="line">│        ├── 还要 V6D 持久化/共享？ → backend=v6d_object 或 v6d_object+kvt</span><br><span class="line">│        └── 调试/无网络？ → backend=local_file</span><br><span class="line">├── 只需 V6D 对象存储、标准 connector 流程？ → V6dObjectConnector</span><br><span class="line">├── 单机 demo / NIXL 生态？ → NixlConnector</span><br><span class="line">├── GPU 内存不够、单节点 offload？ → OffloadingConnector</span><br><span class="line">├── 对接 LMCache 服务？ → LMCacheConnectorV1</span><br><span class="line">└── 组合多种 connector？ → MultiConnector</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="7-关键源码索引"><a href="#7-关键源码索引" class="headerlink" title="7. 关键源码索引"></a>7. 关键源码索引</h2><table>
+<thead>
+<tr>
+<th>内容</th>
+<th>路径</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>HybridConnector 主类</td>
+<td><code>vllm/v1/hybrid_connector/__init__.py</code></td>
+</tr>
+<tr>
+<td>Backend 选择</td>
+<td><code>vllm/v1/hybrid_connector/__init__.py</code> → <code>_get_backend_cls()</code></td>
+</tr>
+<tr>
+<td>引擎接口</td>
+<td><code>vllm/v1/hybrid_connector/engine_proxy.py</code></td>
+</tr>
+<tr>
+<td>KVT PD 实现</td>
+<td><code>vllm/v1/hybrid_connector/kvtbackend.py</code></td>
+</tr>
+<tr>
+<td>V6D 包装</td>
+<td><code>vllm/v1/hybrid_connector/v6d_object_backend.py</code></td>
+</tr>
+<tr>
+<td>Connector 工厂</td>
+<td><code>vllm/distributed/kv_transfer/kv_connector/factory.py</code></td>
+</tr>
+<tr>
+<td>基类与 HMA</td>
+<td><code>vllm/distributed/kv_transfer/kv_connector/v1/base.py</code></td>
+</tr>
+<tr>
+<td>V6dObjectConnector</td>
+<td><code>vllm/distributed/kv_transfer/kv_connector/v1/v6d_object_connector.py</code></td>
+</tr>
+<tr>
+<td>Block 泄漏分析</td>
+<td><code>docs/kvtbackend_block_leak_analysis.md</code></td>
+</tr>
+<tr>
+<td>PD 部署示例</td>
+<td><code>examples/online_serving/run_pd_kvt_serve.sh</code></td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="8-配置速查"><a href="#8-配置速查" class="headerlink" title="8. 配置速查"></a>8. 配置速查</h2><p><strong>Prefill 节点（producer）</strong>：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">--kv-transfer-config <span class="string">'{</span></span><br><span class="line"><span class="string">  "kv_connector": "HybridConnector",</span></span><br><span class="line"><span class="string">  "kv_role": "kv_producer",</span></span><br><span class="line"><span class="string">  "kv_connector_extra_config": {</span></span><br><span class="line"><span class="string">    "naming_url": "file:/path/to/naming",</span></span><br><span class="line"><span class="string">    "kvt_inst_id": "prefill",</span></span><br><span class="line"><span class="string">    "backend": "kvt"</span></span><br><span class="line"><span class="string">  }</span></span><br><span class="line"><span class="string">}'</span></span><br></pre></td></tr></table></figure>
+
+<p><strong>Decode 节点（consumer）</strong>：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">--kv-transfer-config <span class="string">'{</span></span><br><span class="line"><span class="string">  "kv_connector": "HybridConnector",</span></span><br><span class="line"><span class="string">  "kv_role": "kv_consumer",</span></span><br><span class="line"><span class="string">  "kv_connector_extra_config": {</span></span><br><span class="line"><span class="string">    "naming_url": "file:/path/to/naming",</span></span><br><span class="line"><span class="string">    "kvt_inst_id": "decode",</span></span><br><span class="line"><span class="string">    "backend": "kvt"</span></span><br><span class="line"><span class="string">  }</span></span><br><span class="line"><span class="string">}'</span></span><br></pre></td></tr></table></figure>
+
+<p>启用 HMA 的混合模型<strong>不要</strong>加 <code>--disable-hybrid-kv-cache-manager</code>；若使用不支持 HMA 的 connector（如 NixlConnector），则必须禁用 HMA。</p>
+<hr>
+<h2 id="9-HybridConnector-与社区标准接口的差异（重点）"><a href="#9-HybridConnector-与社区标准接口的差异（重点）" class="headerlink" title="9. HybridConnector 与社区标准接口的差异（重点）"></a>9. HybridConnector 与社区标准接口的差异（重点）</h2><p>你的印象是对的：<strong>HybridConnector 虽然继承 <code>KVConnectorBase_V1</code>，但并没有完整走社区设计的 KV 传输闭环</strong>，而是在其之上叠加了一套独立的 PD 编排层（<code>HybridScheduler</code> / <code>HybridWorker</code> / <code>engine_proxy</code> / 私有 RPC）。</p>
+<p>下面按「社区约定」vs「Hybrid 实际行为」对照，并说明原因。</p>
+<h3 id="9-1-社区标准-KV-传输闭环（Nixl-V6dObject-Mooncake-等）"><a href="#9-1-社区标准-KV-传输闭环（Nixl-V6dObject-Mooncake-等）" class="headerlink" title="9.1 社区标准 KV 传输闭环（Nixl / V6dObject / Mooncake 等）"></a>9.1 社区标准 KV 传输闭环（Nixl / V6dObject / Mooncake 等）</h3><p>社区 Connector 的典型数据流：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line">sequenceDiagram</span><br><span class="line">    participant S as Scheduler</span><br><span class="line">    participant W as Worker (forward)</span><br><span class="line">    participant Ext as 外部 KV / P2P</span><br><span class="line"></span><br><span class="line">    Note over S: schedule() 内</span><br><span class="line">    S-&gt;&gt;S: get_num_new_matched_tokens()</span><br><span class="line">    S-&gt;&gt;S: allocate_slots + update_state_after_alloc()</span><br><span class="line">    alt load_kv_async</span><br><span class="line">        S-&gt;&gt;S: status = WAITING_FOR_REMOTE_KVS</span><br><span class="line">    end</span><br><span class="line">    S-&gt;&gt;W: build_connector_meta() → SchedulerOutput</span><br><span class="line"></span><br><span class="line">    Note over W: execute_model forward</span><br><span class="line">    W-&gt;&gt;W: bind_connector_metadata()</span><br><span class="line">    W-&gt;&gt;Ext: start_load_kv()</span><br><span class="line">    loop 每层</span><br><span class="line">        W-&gt;&gt;W: wait_for_layer_load(layer)</span><br><span class="line">        W-&gt;&gt;Ext: save_kv_layer(layer)</span><br><span class="line">    end</span><br><span class="line">    W-&gt;&gt;W: wait_for_save()</span><br><span class="line">    W-&gt;&gt;S: KVConnectorOutput (finished_recving/sending)</span><br><span class="line"></span><br><span class="line">    S-&gt;&gt;S: update_connector_output()</span><br><span class="line">    S-&gt;&gt;S: finished_recving → 回到 WAITING 再调度</span><br></pre></td></tr></table></figure>
+
+<p>关键契约：</p>
+<ul>
+<li><strong>匹配时机</strong>：在 <code>Scheduler.schedule()</code> 里同步调用 <code>get_num_new_matched_tokens</code>。</li>
+<li><strong>完成通知</strong>：Worker 在 forward 结束时通过 <code>get_finished()</code> 填入 <code>KVConnectorOutput</code>，Scheduler 用 <code>update_connector_output()</code> 更新 <code>finished_recving_kv_req_ids</code>。</li>
+<li><strong>异步加载状态</strong>：<code>load_kv_async=True</code> 时请求进入 <code>WAITING_FOR_REMOTE_KVS</code>，等 recv 完成再调度。</li>
+<li><strong>Block 延迟释放</strong>：<code>request_finished()</code> 返回 <code>True</code> 表示异步 save 未完成，block 等 <code>get_finished()</code> 里 <code>finished_sending</code> 再 free。</li>
+</ul>
+<h3 id="9-2-HybridConnector-实际走的通路"><a href="#9-2-HybridConnector-实际走的通路" class="headerlink" title="9.2 HybridConnector 实际走的通路"></a>9.2 HybridConnector 实际走的通路</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line">sequenceDiagram</span><br><span class="line">    participant EC as EngineCore</span><br><span class="line">    participant HS as HybridScheduler</span><br><span class="line">    participant BE as HybridBackend (kvt/v6d...)</span><br><span class="line">    participant HW as HybridWorker</span><br><span class="line">    participant S as vLLM Scheduler</span><br><span class="line"></span><br><span class="line">    EC-&gt;&gt;HS: on_add_req(req) 吞掉请求</span><br><span class="line">    HS-&gt;&gt;HS: _waiting 队列</span><br><span class="line">    HS-&gt;&gt;S: engine_proxy.sched_allocate_slots()</span><br><span class="line">    HS-&gt;&gt;BE: async_get_num_new_matched_tokens (disagg 线程)</span><br><span class="line">    HS-&gt;&gt;BE: async_load_kv / blade_kvt</span><br><span class="line">    BE--&gt;&gt;HS: RPC LOAD_DONE</span><br><span class="line">    HS-&gt;&gt;S: sched_add_req(req) 此时才进 Scheduler</span><br><span class="line"></span><br><span class="line">    Note over EC: 每个 engine step 先执行</span><br><span class="line">    EC-&gt;&gt;HS: connector.step()</span><br><span class="line">    HS--&gt;&gt;EC: EngineCoreOutput (kv_transfer_done 等)</span><br><span class="line"></span><br><span class="line">    Note over S,W: schedule + forward 仍发生，但：</span><br><span class="line">    Note over HS: get_num_new_matched_tokens 恒 (0, False)</span><br><span class="line">    W-&gt;&gt;HW: save_kv_layer → RPC SAVE_DONE</span><br><span class="line">    HS-&gt;&gt;HS: mark_backend_save_done → _try_teardown_save</span><br></pre></td></tr></table></figure>
+
+<p><strong>请求入口被改写</strong>：<code>EngineCore.add_request</code> 若 <code>on_add_req</code> 返回 <code>True</code>，则<strong>不会</strong>调用 <code>scheduler.add_request</code>，而是由 Hybrid 在 KV 就绪后通过 <code>sched_add_req()</code> 塞回 Scheduler（<code>engine_proxy.py:175</code>）。</p>
+<h3 id="9-3-接口逐项对照表"><a href="#9-3-接口逐项对照表" class="headerlink" title="9.3 接口逐项对照表"></a>9.3 接口逐项对照表</h3><table>
+<thead>
+<tr>
+<th>社区接口 (<code>KVConnectorBase_V1</code>)</th>
+<th>社区 Connector 典型行为</th>
+<th>HybridConnector 行为</th>
+<th>是否「标准」</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>get_num_new_matched_tokens</code></td>
+<td>schedule 时查询远程命中，可返回 <code>(None, _)</code> 表示待定</td>
+<td>**Scheduler 侧恒返回 <code>(0, False)</code>**；真实逻辑在 <code>HybridBackend.async_get_num_new_matched_tokens</code> + <code>_on_add_req</code></td>
+<td>❌ 桩函数</td>
+</tr>
+<tr>
+<td><code>update_state_after_alloc</code></td>
+<td>记录待加载 token / block 绑定</td>
+<td><strong>空实现</strong>；真实逻辑在 <code>async_update_state_after_alloc</code></td>
+<td>❌ 桩函数</td>
+</tr>
+<tr>
+<td><code>build_connector_meta</code></td>
+<td>从本轮 scheduled requests 收集 load/save 元数据</td>
+<td>构建 <code>HybridMetadata</code> + <code>HCSchedOutput</code>（含 <code>hc_aborted_*</code>、<code>hc_stepid</code> 等扩展字段）</td>
+<td>⚠️ 格式/语义不同</td>
+</tr>
+<tr>
+<td><code>on_add_req</code></td>
+<td>默认 <code>False</code>（不拦截）</td>
+<td><strong><code>True</code> 时吞请求</strong>，进入 <code>_waiting</code></td>
+<td>✅ 社区有定义，但只有 Hybrid 重度使用</td>
+</tr>
+<tr>
+<td><code>step()</code></td>
+<td>默认 <code>None</code></td>
+<td><strong>核心驱动</strong>：<code>_step_saved/_step_waiting/_step_loaded/_step_aborting</code></td>
+<td>✅ 社区有定义，Hybrid 依赖</td>
+</tr>
+<tr>
+<td><code>has_requests()</code></td>
+<td>默认 <code>False</code></td>
+<td>查询多条内部队列是否有活</td>
+<td>✅ Hybrid 用于 EngineCore 空转/阻塞逻辑</td>
+</tr>
+<tr>
+<td><code>on_abort_req</code></td>
+<td>可选</td>
+<td>完整 abort 状态机 + EngineCore 对 Hybrid <strong>不再</strong> <code>finish_requests</code></td>
+<td>⚠️ 语义更深</td>
+</tr>
+<tr>
+<td><code>request_finished</code></td>
+<td>单 KV group 结束回调</td>
+<td><strong>未实现</strong>（走 <code>SupportsHMA.request_finished_all_groups</code>）</td>
+<td>⚠️ HMA 扩展</td>
+</tr>
+<tr>
+<td><code>request_finished_all_groups</code></td>
+<td>HMA 多 group 结束</td>
+<td>实现但**恒 <code>delay_free_blocks=False</code>**，用 <code>sched_acquire_blocks</code> 管生命周期</td>
+<td>⚠️ 接口用了，语义不同</td>
+</tr>
+<tr>
+<td><code>update_connector_output</code></td>
+<td>消费 <code>KVConnectorOutput</code></td>
+<td><strong>继承基类空实现</strong>，不走 <code>finished_recving_kv_req_ids</code> 路径</td>
+<td>❌ 未用</td>
+</tr>
+<tr>
+<td><code>get_finished</code></td>
+<td>forward 结束返回 sending/recv 完成集</td>
+<td>**继承基类 <code>(None, None)</code>**；完成靠 Scheduler↔Worker <strong>私有 RPC</strong></td>
+<td>❌ 未用</td>
+</tr>
+<tr>
+<td><code>wait_for_layer_load</code></td>
+<td>层间流水线同步</td>
+<td><strong><code>pass</code>（空）</strong></td>
+<td>❌ 未用</td>
+</tr>
+<tr>
+<td><code>wait_for_save</code></td>
+<td>forward 退出前等待全部 save</td>
+<td><strong><code>pass</code>（空）</strong></td>
+<td>❌ 未用</td>
+</tr>
+<tr>
+<td><code>bind_connector_metadata</code></td>
+<td>设置 <code>_connector_metadata</code></td>
+<td>Worker 用自有 <code>_meta</code> + <code>bind_backend_metadata</code>；<strong>Scheduler 角色不 bind</strong></td>
+<td>⚠️ 部分一致</td>
+</tr>
+<tr>
+<td><code>start_load_kv</code> / <code>save_kv_layer</code></td>
+<td>在 forward 上下文触发传输</td>
+<td>有实现，但投递到 <strong>独立 asyncio 线程</strong> + RPC 回调 Scheduler</td>
+<td>⚠️ 触发点同，完成路径不同</td>
+</tr>
+<tr>
+<td><code>register_cross_layers_kv_cache</code></td>
+<td>统一跨层 KV 布局</td>
+<td><strong>HybridConnector 未暴露</strong>；<code>v6d_object</code> backend 内部可能用</td>
+<td>❌ 门面未实现</td>
+</tr>
+<tr>
+<td><code>set_host_xfer_buffer_ops</code></td>
+<td>Host 缓冲区拷贝（Nixl）</td>
+<td>未实现</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><code>get_handshake_metadata</code> / <code>set_xfer_handshake_metadata</code></td>
+<td>P/D 握手（Nixl）</td>
+<td>未实现；kvt 用 naming_url / blade_kvt</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><code>get_block_ids_with_load_errors</code></td>
+<td>上报加载失败 block</td>
+<td>默认空集；错误走 abort / <code>IoRet.ex</code></td>
+<td>❌</td>
+</tr>
+<tr>
+<td><code>take_events</code> / stats / prom metrics</td>
+<td>可观测性</td>
+<td>默认无</td>
+<td>❌</td>
+</tr>
+</tbody></table>
+<h3 id="9-4-代码证据（桩函数与空操作）"><a href="#9-4-代码证据（桩函数与空操作）" class="headerlink" title="9.4 代码证据（桩函数与空操作）"></a>9.4 代码证据（桩函数与空操作）</h3><p><strong>Scheduler 侧社区接口被短路</strong>（<code>HybridScheduler</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/__init__.py</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">get_num_new_matched_tokens</span>(<span class="params">self, request, num_computed_tokens</span>) -&gt; <span class="built_in">tuple</span>[<span class="built_in">int</span>, <span class="built_in">bool</span>]:</span><br><span class="line">    <span class="keyword">return</span> <span class="number">0</span>, <span class="literal">False</span>  <span class="comment"># 从不走 WAITING_FOR_REMOTE_KVS 社区路径</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">update_state_after_alloc</span>(<span class="params">self, request, blocks, num_external_tokens, **kwargs</span>):</span><br><span class="line">    <span class="keyword">assert</span> num_external_tokens == <span class="number">0</span></span><br><span class="line">    <span class="keyword">return</span>  <span class="comment"># no-op</span></span><br></pre></td></tr></table></figure>
+
+<p><strong>Worker 侧流水线同步被禁用</strong>（<code>HybridConnector</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">wait_for_layer_load</span>(<span class="params">self, layer_name: <span class="built_in">str</span></span>) -&gt; <span class="literal">None</span>:</span><br><span class="line">    <span class="keyword">return</span>  <span class="comment"># pass</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">wait_for_save</span>(<span class="params">self</span>):</span><br><span class="line">    <span class="keyword">return</span>  <span class="comment"># pass</span></span><br></pre></td></tr></table></figure>
+
+<p><strong>真实匹配在 disagg 线程</strong>（<code>HybridScheduler._on_add_req</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">rmt = <span class="keyword">await</span> <span class="variable language_">self</span>._backend.async_get_num_new_matched_tokens(req, local)</span><br><span class="line">ioret = <span class="keyword">await</span> <span class="variable language_">self</span>._backend.async_update_state_after_alloc(req, kvblks, rmt)</span><br><span class="line"><span class="comment"># ...</span></span><br><span class="line">sched_add_req(req)  <span class="comment"># KV 就绪后才进入社区 Scheduler</span></span><br></pre></td></tr></table></figure>
+
+<p><strong>社区 <code>get_finished</code> 闭环未使用</strong>（<code>kv_connector_model_runner_mixin.py</code> 仍会在 forward 后调用，但对 Hybrid 无效果）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># base.py 默认</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">get_finished</span>(<span class="params">self, finished_req_ids</span>) -&gt; <span class="built_in">tuple</span>[<span class="built_in">set</span> | <span class="literal">None</span>, <span class="built_in">set</span> | <span class="literal">None</span>]:</span><br><span class="line">    <span class="keyword">return</span> <span class="literal">None</span>, <span class="literal">None</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># scheduler.py 依赖 KVConnectorOutput 的路径</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">_update_from_kv_xfer_finished</span>(<span class="params">self, kv_connector_output</span>):</span><br><span class="line">    <span class="variable language_">self</span>.connector.update_connector_output(kv_connector_output)  <span class="comment"># Hybrid: no-op</span></span><br><span class="line">    <span class="keyword">for</span> req_id <span class="keyword">in</span> kv_connector_output.finished_recving <span class="keyword">or</span> ...:</span><br><span class="line">        <span class="variable language_">self</span>.finished_recving_kv_req_ids.add(req_id)</span><br></pre></td></tr></table></figure>
+
+<p>Hybrid 改用 RPC 头：<code>LOAD_DONE_REQ</code> / <code>SAVE_DONE_REQ</code>（<code>__init__.py</code> 中 <code>0x20181222</code> 等），在 <code>_on_load_done</code> / <code>_do_save_done</code> 里更新 <code>_loaded</code> / <code>_saved</code> 队列。</p>
+<h3 id="9-5-超出社区接口的「私有扩展」"><a href="#9-5-超出社区接口的「私有扩展」" class="headerlink" title="9.5 超出社区接口的「私有扩展」"></a>9.5 超出社区接口的「私有扩展」</h3><table>
+<thead>
+<tr>
+<th>扩展</th>
+<th>位置</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>engine_proxy.py</code></td>
+<td><code>sched_allocate_slots</code>, <code>sched_acquire_blocks</code>, <code>sched_free_blocks</code></td>
+<td><strong>绕过</strong> schedule 内的 alloc 流程，为 PD 单独分配/保护 block</td>
+</tr>
+<tr>
+<td><code>HybridBackend</code> 抽象</td>
+<td><code>async_*</code> + <code>get_operations</code> + <code>build_backend_meta</code></td>
+<td>社区只有同步 Scheduler API；Hybrid 在 backend 层定义第二套异步协议</td>
+</tr>
+<tr>
+<td><code>HCSchedOutput</code></td>
+<td>继承 <code>SchedulerOutput</code></td>
+<td>向 worker 传递 <code>hc_aborted_load/save</code>、<code>hc_stepid</code> 等</td>
+</tr>
+<tr>
+<td>全局单例</td>
+<td><code>_g_scheduler</code>, <code>_g_worker</code>, <code>_g_core</code></td>
+<td>跨线程/RPC 回调定位对象</td>
+</tr>
+<tr>
+<td><code>wakeup_core()</code></td>
+<td>向 input_queue 塞假 ABORT 请求</td>
+<td>在无 model step 时唤醒 EngineCore 执行 <code>connector.step()</code></td>
+</tr>
+<tr>
+<td><code>core_init</code> / <code>worker_init</code></td>
+<td>独立 asyncio 线程 + <code>RpcServer</code></td>
+<td>与 vLLM 主循环并行跑 KV I/O</td>
+</tr>
+<tr>
+<td><code>mark_backend_save_done</code></td>
+<td>kvtbackend 传输完成回调</td>
+<td>替代社区 <code>get_finished().finished_sending</code></td>
+</tr>
+<tr>
+<td><code>send_bypass_task</code> / bypass ZMQ</td>
+<td><code>VLLM_ENABLE_BYPASS_TASK</code></td>
+<td>跨实例 substep 下发 metadata</td>
+</tr>
+<tr>
+<td><code>hybridsched()</code> / <code>hybridworker()</code></td>
+<td>模块级 getter</td>
+<td>供 backend、migration 直接访问内部状态</td>
+</tr>
+</tbody></table>
+<h3 id="9-6-为什么故意不走社区接口？"><a href="#9-6-为什么故意不走社区接口？" class="headerlink" title="9.6 为什么故意不走社区接口？"></a>9.6 为什么故意不走社区接口？</h3><p>结合代码注释与工程上下文，原因可归纳为：</p>
+<p><strong>1. PD 与 Scheduler step 解耦</strong></p>
+<p>社区模型把「查远程 KV → 等加载完成 → 调度」绑在同一个 <code>schedule()</code> 循环里（<code>WAITING_FOR_REMOTE_KVS</code>）。生产 PD 需要：</p>
+<ul>
+<li>请求到达后<strong>立即</strong>在独立线程发起 blade_kvt / RDMA；</li>
+<li>GPU forward 与 KV 传输<strong>重叠</strong>；</li>
+<li>传输完成后再 <code>sched_add_req</code>，避免 Scheduler 被远程 I/O 阻塞。</li>
+</ul>
+<p>因此 <code>get_num_new_matched_tokens</code> 在 Scheduler 入口必须是桩，真实工作放在 <code>on_add_req</code> → <code>_waiting</code> → disagg 线程。</p>
+<p><strong>2. 完成通知机制与 blade_kvt 不匹配</strong></p>
+<p>kvt backend 完成后发的是 <code>SEND_DONE_REQ</code>，<strong>不会</strong>填充 <code>KVConnectorOutput.finished_sending</code>（见 <code>docs/kvtbackend_block_leak_analysis.md</code>）。若强行用社区 <code>get_finished</code> + <code>update_connector_output</code>，Scheduler 无法感知传输结束。</p>
+<p>故采用 <strong>Scheduler↔Worker 私有 RPC</strong> + <code>mark_backend_save_done</code> + <code>connector.step()</code> 产出 <code>EngineCoreOutput</code>。</p>
+<p><strong>3. Block 生命周期与 <code>delay_free_blocks</code> 不兼容</strong></p>
+<p>社区模式：<code>request_finished() → True</code> → 等 <code>get_finished</code> → <code>_free_blocks</code>。</p>
+<p>Hybrid 模式：<code>sched_acquire_blocks</code>（ref_cnt++）→ 传输完成 → <code>_try_teardown_save</code> → <code>sched_free_blocks</code>。</p>
+<p>注释明确说明对 remote decode <strong>故意不用</strong> <code>delay_free_blocks=True</code>，防止 <code>mark_saved</code> 未触发时泄漏（<code>__init__.py:1476</code>）。这与社区异步 free 假设冲突。</p>
+<p><strong>4. 远程 Decode / DashLLM 产品语义</strong></p>
+<p><code>request_finished_all_groups</code> 不用于延迟 free，而用于协调 <code>kv_transfer_done</code> / <code>kv_transfer_pending</code> 与 P 节点 finish 的时序（谁先谁后决定何时向客户端吐 output）。这是上层代理（如 <code>dash_proxy.py</code>）的需求，社区接口无对应字段。</p>
+<p><strong>5. 历史与多引擎移植</strong></p>
+<p><code>engine_proxy.py</code> 开头写明：与 Engine 的交互<strong>只</strong>通过该文件，便于 BladeLLM/SGLang 移植。社区 <code>KVConnectorBase_V1</code> 当时尚未覆盖：</p>
+<ul>
+<li><code>on_add_req</code> 吞请求；</li>
+<li><code>step()</code> 返回 <code>EngineCoreOutput</code>；</li>
+<li>HMA 多 group finish。</li>
+</ul>
+<p>Hybrid 在 vLLM 社区 API 之上「贴了一层」，而不是重写 backend 去完全适配社区闭环。</p>
+<p><strong>6. 层间流水线暂时放弃</strong></p>
+<p><code>wait_for_layer_load</code> / <code>wait_for_save</code> 为空，因 kvt 等 backend 按<strong>整请求或 blade 协议批次</strong>完成，且 save 完成信号走 RPC 而非 forward finally。社区层间流水线接口对当前 backend 无收益，实现成本高。</p>
+<h3 id="9-7-与「包装-V6dObjectConnector」的关系"><a href="#9-7-与「包装-V6dObjectConnector」的关系" class="headerlink" title="9.7 与「包装 V6dObjectConnector」的关系"></a>9.7 与「包装 V6dObjectConnector」的关系</h3><p><code>backend=v6d_object</code> 时，<code>V6dObjectBackend</code> <strong>内部</strong>使用 <code>V6dObjectConnectorScheduler/Worker</code> 的 <code>async_get_num_new_matched_tokens</code> 等，仍被 Hybrid 的 RPC/step 外壳包一层，<strong>不会</strong>变回纯社区 V6dObjectConnector 的 <code>KVConnectorOutput</code> 闭环。</p>
+<p>这也是 e2e 测试标题写「via HybridConnector」的原因：测的是 Hybrid 路径，不是 standalone <code>V6dObjectConnector</code>。</p>
+<h3 id="9-8-对开发的启示"><a href="#9-8-对开发的启示" class="headerlink" title="9.8 对开发的启示"></a>9.8 对开发的启示</h3><table>
+<thead>
+<tr>
+<th>如果你想…</th>
+<th>应该遵循…</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>写一个通用、可 upstream 的 Connector</td>
+<td>完整实现社区闭环：<code>get_num_new_matched_tokens</code> → <code>WAITING_FOR_REMOTE_KVS</code> → <code>get_finished</code> → <code>update_connector_output</code></td>
+</tr>
+<tr>
+<td>接入现有 Hybrid / kvt PD 集群</td>
+<td>实现 <code>HybridBackend</code> 的 <code>async_*</code> / <code>get_operations</code>，并保证 <code>mark_backend_save_done</code> 等回调</td>
+</tr>
+<tr>
+<td>从 NixlConnector 迁移到 Hybrid</td>
+<td><strong>不能</strong>只换 config：请求入口、完成通知、block free 三条路径都不同</td>
+</tr>
+<tr>
+<td>调试「加载完不进 Scheduler」</td>
+<td>查 <code>_waiting</code> → <code>_on_add_req</code> → <code>_loaded</code> → <code>sched_add_req</code>，而非 <code>finished_recving_kv_req_ids</code></td>
+</tr>
+</tbody></table>
+<h3 id="9-9-社区接口符合度小结"><a href="#9-9-社区接口符合度小结" class="headerlink" title="9.9 社区接口符合度小结"></a>9.9 社区接口符合度小结</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">社区 KVConnector 契约符合度（HybridConnector）:</span><br><span class="line"></span><br><span class="line">Scheduler 匹配/分配:  ░░░░░░░░░░  桩 + engine_proxy 替代</span><br><span class="line">Worker forward 传输:  ██████░░░░  有 load/save，完成路径非 KVConnectorOutput</span><br><span class="line">异步完成通知:        ░░░░░░░░░░  RPC + step() 替代 get_finished</span><br><span class="line">Block 延迟释放:        ░░░░░░░░░░  ref_cnt 替代 request_finished(True)</span><br><span class="line">HMA 多 group:          ████████░░  有 request_finished_all_groups，语义定制</span><br><span class="line">可观测性/握手:        ░░░░░░░░░░  基本未接</span><br></pre></td></tr></table></figure>
+
+<p><strong>结论</strong>：HybridConnector 是「<strong>继承社区类型 + 自建 PD 运行时</strong>」；社区接口更多是<strong>类型兼容与挂载点</strong>，而非实际 I/O 控制面。理解这一点后，读 kvt/v6d 代码应优先跟 <code>HybridScheduler</code> 状态和 RPC，而不是只跟 <code>KVConnectorModelRunnerMixin</code> 的 forward 钩子。</p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>vLLM HybridConnector 与其他 KV Connector 对比</p><p><a href="https://llx-08.github.io/notes/2026/05/25/2026-05-25-vllm-hybrid-connector-vs-others/">https://llx-08.github.io/notes/2026/05/25/2026-05-25-vllm-hybrid-connector-vs-others/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-05-25</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-05-25</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/05/25/2026-05-25-study-deepseek-r1-rl/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">DeepSeek-R1 RL学习</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/04/02/2026-04-02-kv-cache-fp8-quantization-notes/"><span class="level-item">和GPT-5.4 的KV Cache FP8 量化讨论记录</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">13</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-project-architecture-and-vllm-integration/">blade-kvt 项目架构与 vLLM 对接指南</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-learn-rabitq/">RabitQ 阅读笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-rdma-learning-1/">RDMA学习笔记（1）</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-study-deepseek-r1-rl/">DeepSeek-R1 RL学习</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-vllm-hybrid-connector-vs-others/">vLLM HybridConnector 与其他 KV Connector 对比</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script></body></html>

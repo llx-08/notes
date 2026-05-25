@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>vLLM 投机解码（Eagle / MTP）实现与运行流程 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="vLLM 投机解码（Eagle &amp;#x2F; MTP）实现与运行流程 原理解释：残差分布与拒绝采样 阅读时记录的问题 q(x) * min(1, p(x)&amp;#x2F;q(x)) &amp;#x3D; min(q(x), p(x))，其实这个公式就是说：第一个step生成token x的概率等于draft model生成token x 的概率q(x) 乘它被接收的概率，也就得到了min(q(x), p(x)) “如果 q(x) &amp;lt;"><meta property="og:type" content="blog"><meta property="og:title" content="vLLM 投机解码（Eagle / MTP）实现与运行流程"><meta property="og:url" content="https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="vLLM 投机解码（Eagle &amp;#x2F; MTP）实现与运行流程 原理解释：残差分布与拒绝采样 阅读时记录的问题 q(x) * min(1, p(x)&amp;#x2F;q(x)) &amp;#x3D; min(q(x), p(x))，其实这个公式就是说：第一个step生成token x的概率等于draft model生成token x 的概率q(x) 乘它被接收的概率，也就得到了min(q(x), p(x)) “如果 q(x) &amp;lt;"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/sps_formula.png"><meta property="article:published_time" content="2026-03-31T00:00:00.000Z"><meta property="article:modified_time" content="2026-04-02T04:48:27.302Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="vLLM"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/sps_formula.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/"},"headline":"vLLM 投机解码（Eagle / MTP）实现与运行流程","image":["https://llx-08.github.io/notes/imgs/sps_formula.png"],"datePublished":"2026-03-31T00:00:00.000Z","dateModified":"2026-04-02T04:48:27.302Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"vLLM 投机解码（Eagle &#x2F; MTP）实现与运行流程 原理解释：残差分布与拒绝采样 阅读时记录的问题 q(x) * min(1, p(x)&#x2F;q(x)) &#x3D; min(q(x), p(x))，其实这个公式就是说：第一个step生成token x的概率等于draft model生成token x 的概率q(x) 乘它被接收的概率，也就得到了min(q(x), p(x)) “如果 q(x) &lt;"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>vLLM 投机解码（Eagle / MTP）实现与运行流程 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="vLLM 投机解码（Eagle &amp;#x2F; MTP）实现与运行流程 原理解释：残差分布与拒绝采样 阅读时记录的问题 q(x) * min(1, p(x)&amp;#x2F;q(x)) &amp;#x3D; min(q(x), p(x))，其实这个公式就是说：第一个step生成token x的概率等于draft model生成token x 的概率q(x) 乘它被接收的概率，也就得到了min(q(x), p(x)) “如果 q(x) &amp;lt;"><meta property="og:type" content="blog"><meta property="og:title" content="vLLM 投机解码（Eagle / MTP）实现与运行流程"><meta property="og:url" content="https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="vLLM 投机解码（Eagle &amp;#x2F; MTP）实现与运行流程 原理解释：残差分布与拒绝采样 阅读时记录的问题 q(x) * min(1, p(x)&amp;#x2F;q(x)) &amp;#x3D; min(q(x), p(x))，其实这个公式就是说：第一个step生成token x的概率等于draft model生成token x 的概率q(x) 乘它被接收的概率，也就得到了min(q(x), p(x)) “如果 q(x) &amp;lt;"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-03-31T00:00:00.000Z"><meta property="article:modified_time" content="2026-05-25T02:44:16.890Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="vLLM"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/"},"headline":"vLLM 投机解码（Eagle / MTP）实现与运行流程","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-03-31T00:00:00.000Z","dateModified":"2026-05-25T02:44:16.890Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"vLLM 投机解码（Eagle &#x2F; MTP）实现与运行流程 原理解释：残差分布与拒绝采样 阅读时记录的问题 q(x) * min(1, p(x)&#x2F;q(x)) &#x3D; min(q(x), p(x))，其实这个公式就是说：第一个step生成token x的概率等于draft model生成token x 的概率q(x) 乘它被接收的概率，也就得到了min(q(x), p(x)) “如果 q(x) &lt;"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
   (function () {
       function switchTab() {
           if (!location.hash) {
@@ -141,21 +141,15 @@ mjx-container[display="true"] {
 mjx-container[display="true"] + br {
   display: none;
 }
-</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-03-31T00:00:00.000Z" title="3/31/2026, 12:00:00 AM">2026-03-31</time>发表</span><span class="level-item"><time dateTime="2026-04-02T04:48:27.302Z" title="4/2/2026, 4:48:27 AM">2026-04-02</time>更新</span><span class="level-item">1 小时读完 (大约9597个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">vLLM 投机解码（Eagle / MTP）实现与运行流程</h1><div class="content"><h1 id="vLLM-投机解码（Eagle-MTP）实现与运行流程"><a href="#vLLM-投机解码（Eagle-MTP）实现与运行流程" class="headerlink" title="vLLM 投机解码（Eagle / MTP）实现与运行流程"></a>vLLM 投机解码（Eagle / MTP）实现与运行流程</h1><h2 id="原理解释：残差分布与拒绝采样"><a href="#原理解释：残差分布与拒绝采样" class="headerlink" title="原理解释：残差分布与拒绝采样"></a>原理解释：残差分布与拒绝采样</h2><h3 id="阅读时记录的问题"><a href="#阅读时记录的问题" class="headerlink" title="阅读时记录的问题"></a>阅读时记录的问题</h3><p><img src="/notes/imgs/sps_formula.png"></p>
-<ol>
-<li><p>q(x) * min(1, p(x)/q(x)) = min(q(x), p(x))，其实这个公式就是说：第一个step生成token x的概率等于draft model生成token x 的概率q(x) 乘它被接收的概率，也就得到了min(q(x), p(x))</p>
-</li>
-<li><p>“如果 q(x) &lt;= p(x)，那 x 一定被接受，所以第一步给了它 q(x) 的概率质量”，一定被接受是因为按照P_accept(x)计算，得到1所以一定被接受，我理解的对吗？</p>
-</li>
-<li><p>为什么还要除以一个总和 这里我没看懂，为什么说这是一个条件分布？分母代表什么？</p>
-</li>
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-03-31T00:00:00.000Z" title="3/31/2026, 12:00:00 AM">2026-03-31</time>发表</span><span class="level-item"><time dateTime="2026-05-25T02:44:16.890Z" title="5/25/2026, 2:44:16 AM">2026-05-25</time>更新</span><span class="level-item">1 小时读完 (大约13389个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">vLLM 投机解码（Eagle / MTP）实现与运行流程</h1><div class="content"><h1 id="vLLM-投机解码（Eagle-MTP）实现与运行流程"><a href="#vLLM-投机解码（Eagle-MTP）实现与运行流程" class="headerlink" title="vLLM 投机解码（Eagle / MTP）实现与运行流程"></a>vLLM 投机解码（Eagle / MTP）实现与运行流程</h1><h2 id="原理解释：残差分布与拒绝采样"><a href="#原理解释：残差分布与拒绝采样" class="headerlink" title="原理解释：残差分布与拒绝采样"></a>原理解释：残差分布与拒绝采样</h2><h3 id="阅读时记录的问题"><a href="#阅读时记录的问题" class="headerlink" title="阅读时记录的问题"></a>阅读时记录的问题</h3><ol>
+<li>q(x) * min(1, p(x)/q(x)) = min(q(x), p(x))，其实这个公式就是说：第一个step生成token x的概率等于draft model生成token x 的概率q(x) 乘它被接收的概率，也就得到了min(q(x), p(x))</li>
+<li>“如果 q(x) &lt;= p(x)，那 x 一定被接受，所以第一步给了它 q(x) 的概率质量”，一定被接受是因为按照P_accept(x)计算，得到1所以一定被接受，我理解的对吗？</li>
+<li>为什么还要除以一个总和 这里我没看懂，为什么说这是一个条件分布？分母代表什么？</li>
 </ol>
 <p>看了后面的例子我大概理解了，是说需要对所有需要补概率的可选的token进行遍历，求和总的需要补的概率大小，并对当前token需要补的概率进行加权？</p>
-<ol start="4">
-<li><p>”只要发生拒绝，第二步就一定补 B。“我没太理解，以及“第一步接受总概率是 0.5+0.1+0.2=0.8，拒绝概率是 0.2。”，这是说明采样到A,B,C都有可能接受，但概率是0.8，如果拒绝了，那一定会生成B的意思吗？但是拒绝后的B是怎么生成的？由谁来生成？</p>
-</li>
-<li><p>好的，按你说的 “为什么接受率是 min(1, p/q)，以及它和残差分布一起如何严格保证无偏”，用更容易懂的“面积图/水桶补水”方式再解释一遍。</p>
-</li>
+<ol>
+<li>”只要发生拒绝，第二步就一定补 B。“我没太理解，以及“第一步接受总概率是 0.5+0.1+0.2=0.8，拒绝概率是 0.2。”，这是说明采样到A,B,C都有可能接受，但概率是0.8，如果拒绝了，那一定会生成B的意思吗？但是拒绝后的B是怎么生成的？由谁来生成？</li>
+<li>好的，按你说的 “为什么接受率是 min(1, p/q)，以及它和残差分布一起如何严格保证无偏”，用更容易懂的“面积图/水桶补水”方式再解释一遍。</li>
 </ol>
 <h3 id="回答"><a href="#回答" class="headerlink" title="回答"></a>回答</h3><p>先抓一句话：<strong>残差分布就是“第一步按 <code>q(x)</code> 提案并做接受/拒绝后，<code>p(x)</code> 还没被覆盖到的那部分概率，在第二步按缺口大小重新分配出来的分布”。</strong></p>
 <p>你这 5 个问题其实都围着这一个核心在转。下面我逐条回答。</p>
@@ -171,7 +165,7 @@ mjx-container[display="true"] + br {
 <li>如果 <code>q(x) &gt; p(x)</code>，那么接受率就是 <code>p(x)/q(x)</code>，所以<br><code>q(x) * p(x)/q(x) = p(x) = min(q(x), p(x))</code></li>
 </ul>
 <p>所以第一步对每个 token 实际“留下来”的概率质量，就是 <code>q</code> 和 <code>p</code> 的<strong>重叠部分</strong>。</p>
-<ol start="2">
+<ol>
 <li>对，你这里理解是对的。</li>
 </ol>
 <p>“如果 <code>q(x) &lt;= p(x)</code>，那 <code>x</code> 一定被接受”就是因为：</p>
@@ -180,7 +174,7 @@ mjx-container[display="true"] + br {
 <p>直觉上也很好理解：</p>
 <p>如果草稿模型给 <code>x</code> 的概率还<strong>不超过</strong>目标模型，那说明草稿并没有“高估” <code>x</code>，反而可能低估了它。既然没有高估，就没有理由把它拒掉，否则 <code>x</code> 的最终概率会更少，更达不到 <code>p(x)</code>。</p>
 <p>所以这时第一步会把 <code>q(x)</code> 这部分概率质量<strong>全部保留下来</strong>。</p>
-<ol start="3">
+<ol>
 <li>这里是关键点。你问“为什么还要除以一个总和”，答案是：</li>
 </ol>
 <p>因为 <code>max(0, p(x)-q(x))</code> 只是每个 token 的“缺口大小”，<strong>还不是一个概率分布</strong>。</p>
@@ -203,7 +197,7 @@ mjx-container[display="true"] + br {
 <p>需要对所有需要补概率的 token 求和，得到总共还要补多少；然后当前 token 按“它自己的缺口 / 总缺口”来分配第二步概率。</p>
 </blockquote>
 <p>这正是残差分布的含义。</p>
-<ol start="4">
+<ol>
 <li>“只要发生拒绝，第二步就一定补 B”这句话<strong>不是普遍规律</strong>，只是那个例子里恰好如此。</li>
 </ol>
 <p>我用一个最典型的 3-token 例子讲清楚：</p>
@@ -211,32 +205,32 @@ mjx-container[display="true"] + br {
 <thead>
 <tr>
 <th>token</th>
-<th align="right"><code>q(x)</code></th>
-<th align="right"><code>p(x)</code></th>
-<th align="right">第一步留下 <code>min(q,p)</code></th>
-<th align="right">缺口 <code>max(0,p-q)</code></th>
+<th><code>q(x)</code></th>
+<th><code>p(x)</code></th>
+<th>第一步留下 <code>min(q,p)</code></th>
+<th>缺口 <code>max(0,p-q)</code></th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0.5</td>
-<td align="right">0.5</td>
-<td align="right">0.5</td>
-<td align="right">0.0</td>
+<td>0.5</td>
+<td>0.5</td>
+<td>0.5</td>
+<td>0.0</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">0.1</td>
-<td align="right">0.3</td>
-<td align="right">0.1</td>
-<td align="right">0.2</td>
+<td>0.1</td>
+<td>0.3</td>
+<td>0.1</td>
+<td>0.2</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0.4</td>
-<td align="right">0.2</td>
-<td align="right">0.2</td>
-<td align="right">0.0</td>
+<td>0.4</td>
+<td>0.2</td>
+<td>0.2</td>
+<td>0.0</td>
 </tr>
 </tbody></table>
 <p>先看第一步：</p>
@@ -279,7 +273,7 @@ mjx-container[display="true"] + br {
 <p>所以最终：</p>
 <p><code>P_final(B) = 0.1 + 0.2 = 0.3 = p(B)</code></p>
 <p>这就严格对上目标分布了。</p>
-<ol start="5">
+<ol>
 <li>用“面积图 / 水桶补水”方式解释，最直观。</li>
 </ol>
 <p>把每个 token 看成一个水桶：</p>
@@ -329,7 +323,7 @@ mjx-container[display="true"] + br {
 <p><code>第一步保留的重叠部分 + 第二步补上的缺口</code><br>也就是</p>
 <p><code>min(q(x), p(x)) + max(0, p(x)-q(x)) = p(x)</code></p>
 <p>这就是“<strong>严格无偏</strong>”的意思：</p>
-<p>最终采样结果的分布，**恰好就是目标模型的 <code>p(x)</code>**，不多不少。</p>
+<p>最终采样结果的分布，**恰好就是目标模型的 <code>p(x)*</code>*，不多不少。</p>
 <h2 id="一句最浓缩的总结"><a href="#一句最浓缩的总结" class="headerlink" title="一句最浓缩的总结"></a>一句最浓缩的总结</h2><ul>
 <li><code>min(1, p/q)</code> 负责把第一步保留下来的概率质量，精确裁成 <code>q</code> 和 <code>p</code> 的重叠部分。</li>
 <li>残差分布负责把第一步没覆盖到的“缺口部分”，按比例补回去。</li>
@@ -337,10 +331,11 @@ mjx-container[display="true"] + br {
 </ul>
 <h3 id="关于-bonus-token-与-NO-DRAFT-PROBS-的问答"><a href="#关于-bonus-token-与-NO-DRAFT-PROBS-的问答" class="headerlink" title="关于 bonus token 与 NO_DRAFT_PROBS 的问答"></a>关于 bonus token 与 NO_DRAFT_PROBS 的问答</h3><h4 id="问题"><a href="#问题" class="headerlink" title="问题"></a>问题</h4><ol>
 <li>bonus token 是怎么来的，原理是什么？</li>
-<li>“这意味着当前这条路径不会走“显式 max(p-q, 0)”那个分支，而是走 NO_DRAFT_PROBS 分支。那个分支里 recovered token 的候选概率是：<br>用 target_probs<br>但把“刚被拒绝的 draft token”排除掉” 这句话是什么意思，这样采样的概率分布是正确的吗？</li>
+<li>“这意味着当前这条路径不会走“显式 max(p-q, 0)”那个分支，而是走 NO_DRAFT_PROBS 分支。那个分支里 recovered token 的候选概率是：</li>
 </ol>
+<p>用 target_probs<br>但把“刚被拒绝的 draft token”排除掉” 这句话是什么意思，这样采样的概率分布是正确的吗？</p>
 <h4 id="回答-1"><a href="#回答-1" class="headerlink" title="回答"></a>回答</h4><h3 id="1-bonus-token-是怎么来的，原理是什么？"><a href="#1-bonus-token-是怎么来的，原理是什么？" class="headerlink" title="1. bonus token 是怎么来的，原理是什么？"></a>1. <code>bonus token</code> 是怎么来的，原理是什么？</h3><p>先说结论：</p>
-<p><strong><code>bonus token</code> 是“当本轮所有 draft token 都被 target 接受时，顺手再从 target 模型的下一个位置多采 1 个 token”。</strong></p>
+<p><code>**bonus token</code> 是“当本轮所有 draft token 都被 target 接受时，顺手再从 target 模型的下一个位置多采 1 个 token”。**</p>
 <p>它的作用不是“补偿拒绝”，而是：</p>
 <ul>
 <li>如果这一轮 draft 全通过了，说明这几个 speculative token 都已经被 target 验证为有效前缀</li>
@@ -434,10 +429,8 @@ mjx-container[display="true"] + br {
 </ul>
 <p>所以这两种情况要区分：</p>
 <ol>
-<li><p><strong>完整 draft 分布可得</strong><br>用显式 <code>max(p-q,0)</code></p>
-</li>
-<li><p><strong>只有 draft token id，没有完整 draft 分布</strong><br>把 proposal 视为 delta 分布，残差就退化成“从 <code>p</code> 里排除这个 token 再重采样”</p>
-</li>
+<li><strong>完整 draft 分布可得</strong><br>  用显式 <code>max(p-q,0)</code></li>
+<li><strong>只有 draft token id，没有完整 draft 分布</strong><br>  把 proposal 视为 delta 分布，残差就退化成“从 <code>p</code> 里排除这个 token 再重采样”</li>
 </ol>
 <hr>
 <h2 id="一句话直觉版"><a href="#一句话直觉版" class="headerlink" title="一句话直觉版"></a>一句话直觉版</h2><ul>
@@ -452,7 +445,7 @@ mjx-container[display="true"] + br {
 <h3 id="关于-4-token-小例子的问答"><a href="#关于-4-token-小例子的问答" class="headerlink" title="关于 4-token 小例子的问答"></a>关于 4-token 小例子的问答</h3><h4 id="问题-1"><a href="#问题-1" class="headerlink" title="问题"></a>问题</h4><p>好的好的，请“把这两件事画成一个 4-token 小例子表格”来说明一下</p>
 <h4 id="回答-2"><a href="#回答-2" class="headerlink" title="回答"></a>回答</h4><p>下面我用两个 <strong>4-token 小例子</strong>来讲：</p>
 <ol>
-<li><code>bonus token</code> 到底是什么  </li>
+<li><code>bonus token</code> 到底是什么</li>
 <li><code>NO_DRAFT_PROBS</code> 时，为什么“拒绝后排除 draft token 再重采样”是对的</li>
 </ol>
 <hr>
@@ -529,24 +522,24 @@ mjx-container[display="true"] + br {
 <thead>
 <tr>
 <th>token</th>
-<th align="right">target 概率</th>
+<th>target 概率</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0.10</td>
+<td>0.10</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">0.20</td>
+<td>0.20</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0.30</td>
+<td>0.30</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0.40</td>
+<td>0.40</td>
 </tr>
 </tbody></table>
 <p>那 <code>bonus token</code> 就按这个分布采样，可能是 <code>D</code>，也可能是 <code>C/B/A</code>。</p>
@@ -621,24 +614,24 @@ mjx-container[display="true"] + br {
 <thead>
 <tr>
 <th>token</th>
-<th align="right">draft 分布 <code>q(x)</code></th>
+<th>draft 分布 <code>q(x)</code></th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">1</td>
+<td>1</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 </tbody></table>
 <p>也就是“draft 100% 提议 B”。</p>
@@ -647,24 +640,24 @@ mjx-container[display="true"] + br {
 <thead>
 <tr>
 <th>token</th>
-<th align="right">target 概率 <code>p(x)</code></th>
+<th>target 概率 <code>p(x)</code></th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0.10</td>
+<td>0.10</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">0.20</td>
+<td>0.20</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0.30</td>
+<td>0.30</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0.40</td>
+<td>0.40</td>
 </tr>
 </tbody></table>
 <hr>
@@ -685,34 +678,34 @@ mjx-container[display="true"] + br {
 <thead>
 <tr>
 <th>token</th>
-<th align="right"><code>p(x)</code></th>
-<th align="right"><code>q(x)</code></th>
-<th align="right"><code>max(p-q,0)</code></th>
+<th><code>p(x)</code></th>
+<th><code>q(x)</code></th>
+<th><code>max(p-q,0)</code></th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0.10</td>
-<td align="right">0</td>
-<td align="right">0.10</td>
+<td>0.10</td>
+<td>0</td>
+<td>0.10</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">0.20</td>
-<td align="right">1</td>
-<td align="right">0</td>
+<td>0.20</td>
+<td>1</td>
+<td>0</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0.30</td>
-<td align="right">0</td>
-<td align="right">0.30</td>
+<td>0.30</td>
+<td>0</td>
+<td>0.30</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0.40</td>
-<td align="right">0</td>
-<td align="right">0.40</td>
+<td>0.40</td>
+<td>0</td>
+<td>0.40</td>
 </tr>
 </tbody></table>
 <p>你会发现：</p>
@@ -725,24 +718,24 @@ mjx-container[display="true"] + br {
 <thead>
 <tr>
 <th>token</th>
-<th align="right">recovered 权重</th>
+<th>recovered 权重</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0.10</td>
+<td>0.10</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0.30</td>
+<td>0.30</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0.40</td>
+<td>0.40</td>
 </tr>
 </tbody></table>
 <p>归一化之后：</p>
@@ -751,24 +744,24 @@ mjx-container[display="true"] + br {
 <thead>
 <tr>
 <th>token</th>
-<th align="right">recovered 概率</th>
+<th>recovered 概率</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0.10 / 0.80 = 0.125</td>
+<td>0.10 / 0.80 = 0.125</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0.30 / 0.80 = 0.375</td>
+<td>0.30 / 0.80 = 0.375</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0.40 / 0.80 = 0.500</td>
+<td>0.40 / 0.80 = 0.500</td>
 </tr>
 </tbody></table>
 <p>这就正好等价于：</p>
@@ -803,135 +796,135 @@ mjx-container[display="true"] + br {
 <thead>
 <tr>
 <th>token</th>
-<th align="right"><code>p(x)</code></th>
+<th><code>p(x)</code></th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0.10</td>
+<td>0.10</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">0.20</td>
+<td>0.20</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0.30</td>
+<td>0.30</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0.40</td>
+<td>0.40</td>
 </tr>
 </tbody></table>
 <h3 id="draft-退化分布"><a href="#draft-退化分布" class="headerlink" title="draft 退化分布"></a>draft 退化分布</h3><table>
 <thead>
 <tr>
 <th>token</th>
-<th align="right"><code>q(x)</code></th>
+<th><code>q(x)</code></th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">1</td>
+<td>1</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 </tbody></table>
 <h3 id="第一步接受部分"><a href="#第一步接受部分" class="headerlink" title="第一步接受部分"></a>第一步接受部分</h3><table>
 <thead>
 <tr>
 <th>token</th>
-<th align="right">第一阶段贡献</th>
+<th>第一阶段贡献</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">0.20</td>
+<td>0.20</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0</td>
+<td>0</td>
 </tr>
 </tbody></table>
 <h3 id="第二步-recovered-部分"><a href="#第二步-recovered-部分" class="headerlink" title="第二步 recovered 部分"></a>第二步 recovered 部分</h3><table>
 <thead>
 <tr>
 <th>token</th>
-<th align="right">拒绝后条件概率</th>
-<th align="right">乘上拒绝概率 0.80 后的贡献</th>
+<th>拒绝后条件概率</th>
+<th>乘上拒绝概率 0.80 后的贡献</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0.125</td>
-<td align="right">0.10</td>
+<td>0.125</td>
+<td>0.10</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">0</td>
-<td align="right">0</td>
+<td>0</td>
+<td>0</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0.375</td>
-<td align="right">0.30</td>
+<td>0.375</td>
+<td>0.30</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0.500</td>
-<td align="right">0.40</td>
+<td>0.500</td>
+<td>0.40</td>
 </tr>
 </tbody></table>
 <h3 id="最终总概率"><a href="#最终总概率" class="headerlink" title="最终总概率"></a>最终总概率</h3><table>
 <thead>
 <tr>
 <th>token</th>
-<th align="right">第一阶段</th>
-<th align="right">第二阶段</th>
-<th align="right">最终</th>
+<th>第一阶段</th>
+<th>第二阶段</th>
+<th>最终</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>A</td>
-<td align="right">0</td>
-<td align="right">0.10</td>
-<td align="right">0.10</td>
+<td>0</td>
+<td>0.10</td>
+<td>0.10</td>
 </tr>
 <tr>
 <td>B</td>
-<td align="right">0.20</td>
-<td align="right">0</td>
-<td align="right">0.20</td>
+<td>0.20</td>
+<td>0</td>
+<td>0.20</td>
 </tr>
 <tr>
 <td>C</td>
-<td align="right">0</td>
-<td align="right">0.30</td>
-<td align="right">0.30</td>
+<td>0</td>
+<td>0.30</td>
+<td>0.30</td>
 </tr>
 <tr>
 <td>D</td>
-<td align="right">0</td>
-<td align="right">0.40</td>
-<td align="right">0.40</td>
+<td>0</td>
+<td>0.40</td>
+<td>0.40</td>
 </tr>
 </tbody></table>
 <p>最终恰好恢复成 target 分布 <code>p(x)</code>。</p>
@@ -1005,7 +998,7 @@ mjx-container[display="true"] + br {
 </thead>
 <tbody><tr>
 <td><code>vllm/v1/spec_decode/eagle.py</code></td>
-<td>**<code>EagleProposer</code>**：Eagle 和 MTP 共用的 draft 提议器</td>
+<td><code>**EagleProposer</code>**：Eagle 和 MTP 共用的 draft 提议器</td>
 </tr>
 <tr>
 <td><code>vllm/v1/spec_decode/utils.py</code></td>
@@ -1113,7 +1106,7 @@ mjx-container[display="true"] + br {
 <ol>
 <li><code>SpeculativeConfig.__post_init__</code> 构建 <code>draft_model_config</code></li>
 <li>自动检测 method 类型（<code>eagle</code> / <code>eagle3</code> / <code>mtp</code>）</li>
-<li><strong>Eagle</strong>：用 <code>EAGLEConfig</code> 重写 HF config 的 <code>architectures</code>，映射到 vLLM 的 <code>Eagle*</code> 模型类</li>
+<li><strong>Eagle</strong>：用 <code>EAGLEConfig</code> 重写 HF config 的 <code>architectures</code>，映射到 vLLM 的 <code>Eagle</code>* 模型类</li>
 <li><strong>MTP</strong>：重写 <code>model_type</code> / <code>architectures</code>（如 <code>qwen3_next</code> → <code>qwen3_next_mtp</code>）</li>
 </ol>
 <figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/config/speculative.py</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.method <span class="keyword">in</span> (<span class="string">"eagle"</span>, <span class="string">"eagle3"</span>):</span><br><span class="line">    eagle_config = EAGLEConfig(</span><br><span class="line">        <span class="variable language_">self</span>.draft_model_config.hf_config,</span><br><span class="line">        method=<span class="variable language_">self</span>.method,</span><br><span class="line">        model_type=<span class="string">"eagle"</span>,</span><br><span class="line">    )</span><br><span class="line">    <span class="variable language_">self</span>.draft_model_config.hf_config = eagle_config</span><br></pre></td></tr></table></figure>
@@ -1311,8 +1304,217 @@ mjx-container[display="true"] + br {
 <figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">final_norm(hidden_states, residual):</span><br><span class="line">    residual_sum = hidden_states + residual   ← 把最后 MLP 输出加回</span><br><span class="line">    normed = RMSNorm(residual_sum)            ← 归一化</span><br><span class="line">    return (normed, residual_sum)</span><br><span class="line"></span><br><span class="line">hidden_states, _ = self.norm(hidden_states, residual)</span><br><span class="line">                 ↑ 取归一化后的结果，丢弃 residual_sum</span><br></pre></td></tr></table></figure>
 
 <h3 id="为什么分开传递-hidden-states-和-residual"><a href="#为什么分开传递-hidden-states-和-residual" class="headerlink" title="为什么分开传递 hidden_states 和 residual"></a>为什么分开传递 hidden_states 和 residual</h3><p>性能优化——将加法和归一化融合到一个 kernel 里（fused add + norm），减少 GPU 上的中间 tensor 分配和内存读写。代价是需要同时传递 <code>hidden_states</code> 和 <code>residual</code> 两个 tensor。</p>
+<hr>
+<p>  一、Gamma 个额外 mamba block 的分配机制</p>
+<p>  1.1 概念：num_speculative_blocks = gamma</p>
+<p>  MambaSpec 上有一个字段 num_speculative_blocks，它就是 MTP 时多出来的 mamba block 数量。</p>
+<p>  定义（vllm/v1/kv_cache_interface.py:341-347）：<br>  @dataclass(frozen=True)<br>  class MambaSpec(KVCacheSpec):<br>      shapes: tuple[tuple[int, …], …]<br>      dtypes: tuple[torch.dtype]<br>      page_size_padded: int | None = None<br>      mamba_type: str = “mamba2”<br>      mamba_cache_mode: str = “none”<br>      num_speculative_blocks: int = 0</p>
+<p>  赋值入口（vllm/model_executor/layers/mamba/abstract.py:60-71），在每个 mamba/GDN 层构造自己的 MambaSpec 时：<br>  return MambaSpec(<br>      …,<br>      mamba_cache_mode=vllm_config.cache_config.mamba_cache_mode,<br>      num_speculative_blocks=(<br>          vllm_config.speculative_config.num_speculative_tokens<br>          if vllm_config.speculative_config<br>          else 0<br>      ),<br>  )<br>  也就是说 gamma == speculative_config.num_speculative_tokens（MTP 配置里的 draft 步数）。</p>
+<p>  1.2 一次请求要多分配多少块</p>
+<p>  vllm/v1/kv_cache_interface.py:359-367 — 单条请求最大占用：</p>
+<p>  def max_memory_usage_bytes(self, vllm_config):<br>      if vllm_config.cache_config.mamba_cache_mode == “all”:<br>          return cdiv(max_model_len, self.block_size) * self.page_size_bytes<br>      elif vllm_config.cache_config.mamba_cache_mode == “light”:<br>          return self.page_size_bytes * (3 + self.num_speculative_blocks)<br>      else:  # “none”<br>          return self.page_size_bytes * (1 + self.num_speculative_blocks)</p>
+<p>  vllm/v1/worker/gpu_model_runner.py:7498-7514 — 设置 max_num_blocks_per_req：</p>
+<p>  if isinstance(kv_cache_group.kv_cache_spec, MambaSpec):<br>      if self.cache_config.mamba_cache_mode == “light”:<br>          # 1 个 prefix-hit + (1+gamma) 个 runtime + 其它 state-cache<br>          mamba_blocks_per_req = (<br>              2 + kv_cache_group.kv_cache_spec.num_speculative_blocks<br>              + max_num_blocks_per_req<br>          )<br>      else:<br>          mamba_blocks_per_req = (<br>              max_num_blocks_per_req if self.cache_config.enable_prefix_caching else 1<br>          ) + kv_cache_group.kv_cache_spec.num_speculative_blocks</p>
+<p>  1.3 块表实际布局（MambaManager）</p>
+<p>  vllm/v1/core/single_type_kv_cache_manager.py:710-722：<br>  class MambaManager(SingleTypeKVCacheManager):<br>      def <strong>init</strong>(self, kv_cache_spec, block_pool, **kwargs):<br>          …<br>          self.num_speculative_blocks = kv_cache_spec.num_speculative_blocks<br>          if self.mamba_cache_mode == “light”:<br>              self._num_prefix_hit_blocks  = 1<br>              self._num_runtime_blocks     = 1 + self.num_speculative_blocks   # ← gamma+1<br>              self._num_state_cache_blocks = 1</p>
+<p>  get_num_blocks_to_allocate / allocate_new_blocks（single_type_kv_cache_manager.py:847-868, 927-940）：</p>
+<ul>
+<li><p>非 light（”none”/“all”）：在 num_tokens 上额外加 gamma * block_size 个 token，让上层多分配 gamma 个 block</p>
+</li>
+<li><p>light：在请求首次进来时一次性分 _num_runtime_blocks + _num_state_cache_blocks，其中 runtime 段大小就是 1+gamma</p>
+<p>因此每个 mamba/GDN 层的 block_table 形如：</p>
+</li>
+<li><p>mamba_cache_mode=”none”：[runtime_0, runtime_1, …, runtime_gamma]，共 1+gamma 个块</p>
+</li>
+<li><p>mamba_cache_mode=”light”：[prefix_block, runtime_0, runtime_1, …, runtime_gamma, state_cache_block]，共 3+gamma 个块</p>
+<p>1.4 为什么需要这些额外的块</p>
+<p>mamba/GDN 是 recurrent 状态：状态是按 token 顺序累积演化的。一旦你把状态向前推了 k 步，没有办法廉价地回退到第 j &lt; k 步的状态。</p>
+<p>MTP/spec decoding 的核心需求是：</p>
+</li>
+</ul>
+<ol>
+<li>一次 verify 会让主模型在 1 + gamma 个 token 上做 forward；</li>
+<li>但 sampler 可能只接受其中前 n_accept 个（剩下要丢弃）；</li>
+<li>下一轮要从「最后一个被接受的位置」的状态开始继续。</li>
+</ol>
+<p>  所以 GDN/mamba 必须为这 1+gamma 个位置都保留一个 SSM/conv state 的快照，verify 完之后按 num_accepted_tokens<br>  选出正确的快照作为下一轮的”当前状态”。这就是这些额外块存在的意义。</p>
+<hr>
+<p>  二、这些额外 block 何时、如何被使用</p>
+<p>  2.1 块表切片：传给 kernel 的实际索引</p>
+<p>  vllm/v1/attention/backends/utils.py:1248-1270，mamba_get_block_table_tensor：</p>
+<ul>
+<li><p>“all”:   返回原始 block_table</p>
+</li>
+<li><p>“none”:  返回原始 block_table，形状 (#req, 1+gamma)</p>
+</li>
+<li><p>“light”: 返回 block_table[:, 1 : 2+gamma]，即跳过 prefix_block，取 runtime 段</p>
+<p>也就是说，无论哪种模式，GDN/mamba kernel 拿到的”可用 state 槽”都是 1+gamma 个。</p>
+<p>2.2 GDN 后端构造 metadata</p>
+<p>vllm/v1/attention/backends/gdn_attn.py:80-101：<br>self.num_spec       = speculative_config.num_speculative_tokens   # = gamma<br>self.use_spec_decode = self.num_spec &gt; 0<br>self.spec_state_indices_tensor = torch.empty(<br>(self.decode_cudagraph_max_bs, self.num_spec + 1), dtype=torch.int32, device=device,<br>)<br>build 时（gdn_attn.py:230-260）切出：<br>spec_state_indices_tensor    = block_table_tensor[:, : self.num_spec + 1]   # 形状 (B, 1+gamma)<br>non_spec_state_indices_tensor = block_table_tensor[:, 0]                    # 形状 (B,)<br>并把 num_accepted_tokens（形状 (B,)，每个请求上轮被接受的 draft 数）一同打包进 GDNAttentionMetadata。</p>
+<p>num_accepted_tokens 的传入位置在 vllm/v1/worker/gpu_model_runner.py:2222-2241：<br>if use_spec_decode and isinstance(builder, GDNAttentionMetadataBuilder):<br>num_accepted_tokens = self.num_accepted_tokens.gpu[:num_reqs_padded]<br>…<br>extra_attn_metadata_args = dict(<br>    num_accepted_tokens=num_accepted_tokens,<br>    num_decode_draft_tokens_cpu=num_decode_draft_tokens_cpu,<br>)<br>2.3 GDN kernel 内部如何用这 gamma+1 槽</p>
+<p>vllm/model_executor/models/qwen3_next.py:930-1080（Qwen3.5 的 Qwen3_5GatedDeltaNet 继承自这里）：</p>
+<p>conv 部分（qwen3_next.py:957-974）：<br>mixed_qkv_spec = causal_conv1d_update(<br>mixed_qkv_spec, conv_state, conv_weights, …,<br>conv_state_indices=spec_state_indices_tensor[:, 0][:num_spec_decodes],<br>num_accepted_tokens=num_accepted_tokens,<br>query_start_loc=spec_query_start_loc,<br>max_query_len=spec_state_indices_tensor.size(-1),  # = 1+gamma<br>retrieve_parent_token=attn_metadata.retrieve_parent_token,<br>)</p>
+<p>SSM/recurrent 部分（qwen3_next.py:1041-1056）：<br>core_attn_out_spec, last_recurrent_state = fused_recurrent_gated_delta_rule(<br>q=query_spec, k=key_spec, v=value_spec, g=g_spec, beta=beta_spec,<br>initial_state=ssm_state,<br>inplace_final_state=True,<br>cu_seqlens=spec_query_start_loc[: num_spec_decodes + 1],<br>ssm_state_indices=spec_state_indices_tensor,   # 形状 (B, 1+gamma)<br>num_accepted_tokens=num_accepted_tokens,<br>retrieve_parent_token=attn_metadata.retrieve_parent_token,<br>)</p>
+<p>具体的 triton kernel 逻辑：</p>
+</li>
+<li><p>vllm/model_executor/layers/mamba/ops/mamba_ssm.py:138：num_accepted = tl.load(num_accepted_tokens_ptr + pid_b).to(tl.int64) —<br>从上一轮接受数中算出”基准状态”在哪个槽</p>
+</li>
+<li><p>vllm/model_executor/layers/mamba/ops/causal_conv1d.py:870：同理，用 num_accepted_tokens 选 base conv-state 槽</p>
+<p>每次 verify forward 时：</p>
+</li>
+<li><p>对每个 spec 请求遍历 1+gamma 个 query token</p>
+</li>
+<li><p>每处理完一个 token 就把当前 SSM/conv state 写入 ssm_state[spec_state_indices_tensor[req, position]] 对应的槽</p>
+</li>
+<li><p>下一轮 forward 进来时，kernel 用 num_accepted_tokens 选出「真正应该作为初始状态的那个槽」，相当于完成了状态回退</p>
+<p>2.4 light 模式下的 prefix-cache 拷贝</p>
+<p>vllm/v1/worker/mamba_utils.py（GPU 上的辅助操作）：</p>
+</li>
+<li><p>preprocess_mamba_for_light_mode（line 47-125）：每次 step 前把 block_ids[0]（命中的 prefix 块）拷到 block_ids[1]（runtime base 槽），确保 GDN<br>forward 看到的初始状态正确。注意 assert len(new_block_ids) &gt;= 2 + mamba_spec.num_speculative_blocks（line 112）就是要求 runtime 段已经分到了 1+gamma<br>块。</p>
+</li>
+<li><p>postprocess_mamba_for_light_mode（line 128-178）：forward 结束后，把当前 runtime block 拷到末尾的 state-cache 块（line 147-152），供后续<br>prefix-cache 命中使用。assert len(block_ids) == 3 + num_speculative_blocks 就是要求总块数是 prefix + (1+gamma) runtime + state_cache。</p>
+<p>调用点在 gpu_model_runner.py:4585-4594（preprocess）和 gpu_model_runner.py:4762-4769（postprocess）。</p>
+</li>
+</ul>
+<hr>
+<p>  三、Qwen3.5 MTP 完整流程</p>
+<p>  3.1 模型结构（关键前提）</p>
+<p>  Qwen3.5 主模型是混合架构（vllm/model_executor/models/qwen3_5.py:224-267, 417-420）：</p>
+<ul>
+<li><p>每一层根据 config.layer_types[layer_idx] 选择是 “linear_attention”（GDN/mamba）还是 “full_attention”</p>
+</li>
+<li><p>Qwen3_5GatedDeltaNet 继承自 Qwen3NextGatedDeltaNet，forward 走 torch.ops.vllm.gdn_attention_core（qwen3_5.py:163-222）</p>
+<p>Qwen3_5 MTP 模块（vllm/model_executor/models/qwen3_5_mtp.py）：</p>
+</li>
+<li><p>Qwen3_5MultiTokenPredictor.<strong>init</strong>（line 113-225）：</p>
+<ul>
+<li>mtp_start_layer_idx = config.num_hidden_layers，MTP 层序号接在主模型后面</li>
+<li>num_mtp_layers = getattr(config, “mtp_num_hidden_layers”, 1)</li>
+<li>self.fc = ColumnParallelLinear(hidden_size*2, hidden_size) — 把 [embed | last_hidden] 投影回 hidden_size</li>
+<li>self.layers = ModuleList([Qwen3_5DecoderLayer(…, layer_type=”full_attention”, …)])（line 207-220）</li>
+<li>MTP 模块本身全部是 full attention 层，没有 GDN/mamba</li>
+</ul>
+</li>
+<li><p>forward（line 233-265）：<br>a. inputs_embeds = embed_tokens(input_ids) （input_ids 已经被 shift 过）<br>b. inputs_embeds = pre_fc_norm_embedding(inputs_embeds)<br>c. hidden_states = pre_fc_norm_hidden(hidden_states) （hidden_states 来自主模型最后一层）<br>d. hidden_states = fc(concat([inputs_embeds, hidden_states], dim=-1))<br>e. hidden_states, residual = self.layers[step_idx](positions, hidden_states, residual)<br>f. return norm(hidden_states, residual)</p>
+<p>注册关系（vllm/config/speculative.py:265-272, vllm/model_executor/models/registry.py:503-504）：</p>
+</li>
+<li><p>model_type == “qwen3_5_mtp” → 走 Qwen3_5MTP / Qwen3_5MoeMTP</p>
+</li>
+<li><p>MTP 在 vLLM 中复用 EagleProposer（spec_config.method == “mtp”）</p>
+<p>3.2 单 step 的完整流程</p>
+<p>vllm/v1/worker/gpu_model_runner.py:execute_model（line 4406+）：</p>
+<p>阶段 A：Verify（主模型对上轮 draft 做验证）</p>
+<p>输入：每个 spec 请求带 1+gamma 个 token（上一轮被接受的 1 个 + gamma 个 draft）。</p>
+</li>
+</ul>
+<ol>
+<li>Mamba 预处理（line 4585-4594，light 模式）<br>  mamba_utils.preprocess_mamba_for_light_mode 把 prefix 块拷到 runtime base 块。</li>
+<li>构造 attention metadata（line 4617-4636）<br>  _build_attention_metadata 同时为 full attention 和 GDN 构造 metadata。对 GDN 走 GDNAttentionMetadataBuilder.build，构造出：</li>
+</ol>
+<ul>
+<li>spec_state_indices_tensor[:, :gamma+1] —— 1+gamma 个 SSM state 槽</li>
+<li>non_spec_state_indices_tensor —— prefill / 纯 decode 请求只用 1 个槽</li>
+<li>num_accepted_tokens —— 上轮各请求接受了几个 draft</li>
+</ul>
+<ol start="3">
+<li>主模型 forward（line 4700+）<br>  主模型在 1+gamma token 上跑一遍：</li>
+</ol>
+<ul>
+<li>各 full_attention 层写各位置的 KV cache</li>
+<li>各 linear_attention（GDN）层用 gamma+1 个状态槽分别记录每个位置之后的 SSM/conv state；kernel 内部用 num_accepted_tokens 决定从哪个槽继续</li>
+</ul>
+<ol start="4">
+<li>Sampler / 拒绝采样（line 3870-3889）<br>  weighted = …   # rejection sampling<br>  num_accepted_tokens = weighted.max(dim=-1).values<br>  num_accepted_tokens.add_(1)   # +1 for the bonus token</li>
+<li>得到每条请求本轮真正接受了多少 token。</li>
+<li>Mamba 后处理（line 4762-4769，light 模式）<br>  把当前 runtime block 拷到 state_cache 槽，供未来 prefix 命中。</li>
+</ol>
+<p>  阶段 B：Propose（用 MTP 模块草拟下一轮 gamma 个 token）</p>
+<p>  入口 gpu_model_runner.py:5335 propose_draft_token_ids → vllm/v1/spec_decode/eagle.py:266 EagleProposer.propose：</p>
+<ol>
+<li>输入准备（eagle.py:301-305）<br>  self.input_ids[: num_tokens - 1] = target_token_ids[1:]<br>  self.input_ids[last_token_indices] = next_token_ids</li>
+<li>把 input_ids 整体左移 1，再用刚 sample 出的 next_token_ids 替换每条序列的最后一位。</li>
+<li>构造 MTP 的 attn metadata（eagle.py:337-356）<br>  只为 MTP 的 full attention 层（以及可选的 indexer 层）构造，不涉及 GDN/mamba。</li>
+<li>MTP forward（eagle.py:430-447）<br>  ret_hidden_states = self.model(<br> input_ids=input_ids,<br> positions=…,<br> hidden_states=self.hidden_states[:num_input_tokens],   # 主模型 last layer 输出<br> inputs_embeds=…,<br>  )</li>
+<li>MTP 模块内部：concat(embed, hidden) → fc → 1 个 full-attention decoder layer → norm。</li>
+<li>采 draft token（eagle.py:451-455）<br>  logits = compute_logits(…) ; draft_token_ids = logits.argmax(-1)。</li>
+<li>多步 draft：若 num_speculative_tokens &gt; 1（即 gamma &gt; 1），循环：把刚出的 draft token + 新的 hidden state 喂回 MTP 再 forward 一次，循环 gamma<br>  次产出 gamma 个 draft。每一步用 layers[spec_step_idx % num_mtp_layers]（qwen3_5_mtp.py:248）。</li>
+<li>写回 _draft_token_ids，调度器下一轮把它们附在 prompt/output 之后再送进 verify。</li>
+</ol>
+<p>  3.3 主模型 ↔ MTP ↔ 状态块 三者关系一图概览</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line">┌────────────────────────────────────────────────┐</span><br><span class="line">│ Main model (hybrid: GDN layers + full-attn layers)</span><br><span class="line">│  - 验 1+gamma 个 token</span><br><span class="line">│  - GDN layer 把每个位置的 state 写到</span><br><span class="line">│    block_table[req, i]，i ∈ [0..gamma]   ←─ 这就是 “gamma 个额外 mamba block”</span><br><span class="line">│  - 输出 hidden_states (传给 MTP)</span><br><span class="line">└────────────────────────────────────────────────┘</span><br><span class="line">                │ 接受 num_accepted_tokens 个</span><br><span class="line">                ▼</span><br><span class="line">┌────────────────────────────────────────────────┐</span><br><span class="line">│ MTP module (单/多层 full-attention)</span><br><span class="line">│  - 只用 attention KV cache，不动 mamba block</span><br><span class="line">│  - 输入：上轮接受的 token + 它们的 hidden states</span><br><span class="line">│  - 输出：gamma 个 draft token，附在请求上</span><br><span class="line">└────────────────────────────────────────────────┘</span><br><span class="line">                │</span><br><span class="line">                ▼</span><br><span class="line">      下一轮 verify 又回到主模型，</span><br><span class="line">      kernel 用 num_accepted_tokens 选回</span><br><span class="line">      正确的 mamba state 槽继续推进</span><br></pre></td></tr></table></figure>
+
+<hr>
+<p>  关键引用一览</p>
+<ul>
+<li>MambaSpec 定义：vllm/v1/kv_cache_interface.py:341-367</li>
+<li>num_speculative_blocks 来源：vllm/model_executor/layers/mamba/abstract.py:60-71</li>
+<li>MambaManager（块分配）：vllm/v1/core/single_type_kv_cache_manager.py:710-940</li>
+<li>每请求 mamba 块数：vllm/v1/worker/gpu_model_runner.py:7498-7514</li>
+<li>块表切片：vllm/v1/attention/backends/utils.py:1248-1270</li>
+<li>GDN attention metadata builder：vllm/v1/attention/backends/gdn_attn.py:71-260</li>
+<li>GDN forward 使用状态槽：vllm/model_executor/models/qwen3_next.py:930-1080</li>
+<li>mamba block 预 / 后处理：vllm/v1/worker/mamba_utils.py:47-178</li>
+<li>Qwen3.5 主模型混合层：vllm/model_executor/models/qwen3_5.py:122-267, 417-420</li>
+<li>Qwen3.5 MTP 模块：vllm/model_executor/models/qwen3_5_mtp.py:113-265, 472+</li>
+<li>MTP 注册：vllm/config/speculative.py:265-272, vllm/model_executor/models/registry.py:503-504</li>
+<li>EagleProposer.propose（MTP 复用）：vllm/v1/spec_decode/eagle.py:266-490</li>
+<li>主模型 verify 入口 + spec/verify 衔接：vllm/v1/worker/gpu_model_runner.py:2222-2241, 4406+, 4585-4769, 5335+</li>
+</ul>
+<p>⏺ 一句话总结：num_speculative_blocks 就是 speculative_config.num_speculative_tokens（gamma），给每个请求的 mamba/GDN 层多分 gamma 块，让主模型 verify<br>  1+gamma 个 token 时能在每个位置都存一份 SSM/conv state 快照；GDN kernel 用 num_accepted_tokens 在下一轮挑出”最后被接受位置”的那份快照作为起点，实现<br>  recurrent 状态的回退。Qwen3.5 MTP 模块本身只是一个 full-attention 的 decoder layer（拼 [embed | last_hidden] → fc → attn），不动 mamba block，gamma<br>  块完全是给主模型 GDN 层准备的。  </p>
+<p>我理解一下，mtp相当于是主模型forward了1步，然后小模型（head）又forward了gamma步，主模型forward的1步是肯定会被accept的，所以n_accept 至少为1，对吗</p>
+<p>⏺ 结论是对的（num_accepted_tokens &gt;= 1），但把”主模型只 forward 1 步”这个说法稍微纠一下会更准确。实际机制是这样的：</p>
+<p>  真实的 verify 是 1+gamma 并行 forward</p>
+<p>  主模型在 verify 阶段是一次性把 1+gamma 个 token 并行喂进去 forward 一次，而不是”forward 1 步”。这 1+gamma 个 token 是：</p>
+<ul>
+<li><p>1 个：上一轮最终被接受的最后一个 token（context 里的最后一个 already-committed token）</p>
+</li>
+<li><p>gamma 个：上一轮 MTP 草拟的 draft</p>
+</li>
+</ul>
+<p>  forward 完得到 1+gamma 个位置的分布 p_1, p_2, …, p_{gamma+1}：</p>
+<ul>
+<li><p>p_i 是「以前面 i-1 个 token 为条件的下一个 token 分布」</p>
+</li>
+<li><p>然后用 rejection sampling 把 draft 一个个跟 p_i 对比</p>
+</li>
+</ul>
+<p>  为什么 n_accept &gt;= 1：bonus token 机制</p>
+<p>  不是因为”主模型 forward 的 1 步肯定接受”，而是因为 spec decoding 的 bonus token 规则：</p>
+<ul>
+<li><p>如果 draft d_i 被拒：用 (p_i - q_i)_+ 重采一个 token 作为本轮最后一个输出，后面的 draft 全部丢弃 → 至少产出 1 个</p>
+</li>
+<li><p>如果所有 gamma 个 draft 都被接受：再从 p_{gamma+1} 里多采一个 token 作为 bonus → 产出 gamma+1 个</p>
+</li>
+</ul>
+<p>  所以无论如何，主模型那次 forward 至少能产出 1 个新 token。这也是为什么代码里你能看到（gpu_model_runner.py:3886-3889）：</p>
+<p>  num_accepted_tokens = weighted.max(dim=-1).values</p>
+<p>  num_accepted_tokens.add_(1)   # ← 这个 +1 就是 bonus token</p>
+<p>  最终 num_accepted_tokens ∈ [1, gamma+1]。</p>
+<p>  时序：MTP 的 gamma 步发生在 verify 之后</p>
+<p>  你说的”主模型 forward 1 步，然后小模型（head）forward gamma 步”——这两者的先后顺序在一次迭代里其实是反过来的：</p>
+<p>  iter k:</p>
+<pre><code>┌─ verify: 主模型并行 forward 1+gamma 个 token，rejection sampling
+
+│   → 提交 n_accept 个 token (n_accept ∈ [1, gamma+1])
+
+│
+
+└─ propose: MTP 模块（head）从「最后一个被接受 token 的 hidden state」
+
+            出发，自回归 forward gamma 步，产出 gamma 个 draft
+</code></pre>
+<p>  iter k+1:</p>
+<pre><code>┌─ verify: 主模型并行 forward 1+gamma 个 token (上轮的 1 bonus + gamma drafts)
+
+...
+</code></pre>
+<p>  一次迭代内：主模型 1 次并行 forward（覆盖 1+gamma 个位置） + MTP 模块 gamma 次自回归 forward。</p>
+<p>  对额外 mamba block 的影响</p>
+<p>  这也回答了「为什么是 1+gamma 个 mamba state 槽」：因为主模型那一次 forward 要经过 1+gamma 个 token 的 GDN 状态演化，kernel</p>
+<p>  在每个位置都要存一份快照；verify 完之后用 num_accepted_tokens（∈ [1, gamma+1]）作为索引选出”真正应该留下的那份状态”作为下一轮的起点——所以是 gamma+1</p>
+<p>  个槽，而不是 gamma 个。  </p>
 <p>Ref:<br><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/2020161669217658288">https://zhuanlan.zhihu.com/p/2020161669217658288</a></p>
-</div><div class="article-licensing box"><div class="licensing-title"><p>vLLM 投机解码（Eagle / MTP）实现与运行流程</p><p><a href="https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/">https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-03-31</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-04-02</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/vLLM/">vLLM</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/03/31/2026-03-31-vllm-quantization-rotate/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">量化中的 Rotate（旋转变换）技术及 vLLM 实现</span></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">8</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-04-02T00:00:00.000Z">2026-04-02</time></p><p class="title"><a href="/notes/2026/04/02/2026-04-02-kv-cache-fp8-quantization-notes/">和GPT-5.4 的KV Cache FP8 量化讨论记录</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-04-01T00:00:00.000Z">2026-04-01</time></p><p class="title"><a href="/notes/2026/04/01/2026-04-01-turboquant/">和GPT-5.4一起的TurboQuant 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-03-31T00:00:00.000Z">2026-03-31</time></p><p class="title"><a href="/notes/2026/03/31/2026-03-31-kl-divergence/">KL 散度简介与 PPO 中的应用</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-03-31T00:00:00.000Z">2026-03-31</time></p><p class="title"><a href="/notes/2026/03/31/2026-03-31-ppo/">PPO（Proximal Policy Optimization）学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-03-31T00:00:00.000Z">2026-03-31</time></p><p class="title"><a href="/notes/2026/03/31/2026-03-31-vllm-gdn-computation/">GDN (GatedDeltaNet) 在 vLLM 中的计算流程</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+</div><div class="article-licensing box"><div class="licensing-title"><p>vLLM 投机解码（Eagle / MTP）实现与运行流程</p><p><a href="https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/">https://llx-08.github.io/notes/2026/03/31/2026-03-31-vllm-speculative-decoding/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-03-31</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-05-25</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/vLLM/">vLLM</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/03/31/2026-03-31-vllm-quantization-rotate/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">量化中的 Rotate（旋转变换）技术及 vLLM 实现</span></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">13</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-project-architecture-and-vllm-integration/">blade-kvt 项目架构与 vLLM 对接指南</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-learn-rabitq/">RabitQ 阅读笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-rdma-learning-1/">RDMA学习笔记（1）</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-study-deepseek-r1-rl/">DeepSeek-R1 RL学习</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-vllm-hybrid-connector-vs-others/">vLLM HybridConnector 与其他 KV Connector 对比</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
             article: {
                 highlight: {
                     clipboard: true,
