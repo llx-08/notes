@@ -3,6 +3,7 @@ title: blade-kvt 项目架构与 vLLM 对接指南
 date: 2026-05-25
 tags: []
 ---
+
 # blade-kvt 项目架构与 vLLM 对接指南
 
 本文档基于仓库源码与 `/mnt/data/llx/vllm` 中 `kvtbackend` 集成代码整理，用于理解 **blade-kvt** 自身结构、组件抽象，以及 **Prefill (P) / Decode (D)** 分离场景下如何与 vLLM 协同工作。

@@ -3,6 +3,7 @@ title: RDMA学习笔记（1）
 date: 2026-05-25
 tags: []
 ---
+
 # RDMA学习笔记（1）
 
 DMA(Direct-Memory-Access): 让硬件组件能够在不涉及CPU的情况下直接读写主存，避免占用CPU。实际上GPU也包括这种操作。
