@@ -141,18 +141,23 @@ vllm/v1/hybrid_connector/
 
 | 类型 | 文件 | 职责 |
 |------|------|------|
-| `INamingClient` | `include/naming.h` | KV 存储：`store` / `get` / `search` / `list` |
-| `INamingWorkerClient` | `naming.h` | `register_worker` / `get_worker_info` |
-| `NamingManager` | `naming.h` | URL 路由：`file:`、`eas:`、`fake:` |
-| `FileSysNaming` | `naming/filesys_naming.h` | 文件系统命名（常用本地/测试） |
-| `EASNamingClient` | `naming/eas_naming.h` | 阿里云 EAS 命名服务 |
+| `INamingClient` | `include/naming.h` | 抽象 KV 存储：`store` / `get` / `search` / `list` / `remove` |
+| `INamingWorkerClient` | `naming.h` | `register_worker` / `get_worker_info`（围绕 `WorkerInfo` 包一层） |
+| `GeneralNamingClient` | `naming.h` | `shared_ptr` 包装、可拷贝；pybind 暴露给 Python 的具体类 |
+| `WorkerNamingClient` | `naming.h` | `INamingWorkerClient` 默认实现，key=`worker_{worker_id}`，value=`WorkerInfo::to_string()` |
+| `NamingManager` | `naming.h` + `naming.cpp` | 全局工厂，按 `schema:path` 解析 URL，并按 URL 缓存已连接 client（同 URL 复用） |
+| `FileSysNaming` | `naming/filesys_naming.h` | `file:` 文件系统命名（默认/测试场景，跨进程共享目录） |
+| `EASNamingClient` | `naming/eas_naming.h` | `eas:` 阿里云 EAS HTTP，带 version 增量缓存 |
+| `TCPStoreNaming` | `naming/tcpstore_naming.h` | `tcpstore:` torch TCPStore（仅 `ENABLE_TORCH` 时编译，不支持 list/search） |
+| `FakeNamingWorkerClient` | `naming/fake_naming.h` | 旁路：当上层把 `dst_worker_info` 直接塞进 `ReqMeta`，跳过任何真实查询 |
 
 Naming 中两类 key 的语义：
 
 | Key 模式 | 注册方 | 用途 |
 |----------|--------|------|
-| `endpoint{dprank}` | P/D 的 **Scheduler**（RPC 控制面） | 对端发现 RPC 地址 `(addr, port)` |
-| `worker_{worker_id}` | D 的 **Worker**（数据面） | P 发送 KV 时解析 RDMA/TCP 端点 |
+| `endpoint{dprank}` | P/D 的 **Scheduler**（RPC 控制面） | 对端发现 RPC 地址 `(addr, port)`；value 是 `PeerInfo.serialize()`：`role:tpsize:ctime_us:addr:port:dprank` |
+| `worker_{worker_id}` | D 的 **Worker**（数据面） | P 发送 KV 时解析 RDMA/TCP 端点；value 是 `WorkerInfo::to_string()` |
+| `_timestamp_` | `FileSysNaming` 内部 | keepalive 心跳，`list()` 用它判活 |
 
 ### 3.5 KV 布局解析（parse_block）
 
@@ -411,7 +416,235 @@ KVTDInfo(
 |--------|------|
 | `file://` | `filesys_naming.cpp`，目录 per instance，带 keepalive 时间戳 |
 | `eas://` | `eas_naming.cpp`，HTTP |
+| `tcpstore://` | `tcpstore_naming.cpp`，基于 torch TCPStore（不支持 list/search） |
 | `fake://` | 本地测试，无真实存储 |
+
+### 6.6 Naming 子系统实现细节
+
+本节自下而上拆解 `kvtransfer/include/naming.h` + `kvtransfer/src/naming.cpp` 及三个后端的真实代码逻辑，配合上层 vLLM 的调用点。
+
+#### 6.6.1 接口分层
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ Python (vLLM)                                                    │
+│   blade_kvt.kv_transfer.connect_naming(inst, url) → NamingClient │
+│   naming_cli.store / get / search / list / remove                │
+└────────────────────┬─────────────────────────────────────────────┘
+                     │ pybind11
+┌────────────────────▼─────────────────────────────────────────────┐
+│ GeneralNamingClient (可拷贝 shared_ptr 包装)                      │
+│   .connect()  // 第二次调用会 throw                                │
+│   .{store,get,search,remove,list}()                              │
+│   .create_naming_worker_client() → WorkerNamingClient            │
+└────────────────────┬─────────────────────────────────────────────┘
+                     │
+┌────────────────────▼─────────────────────────────────────────────┐
+│ INamingClient (纯虚)                                             │
+│   const inst_id;                                                  │
+│   virtual store/get/search/remove/list/connect/get_schema = 0    │
+└────────────────────┬─────────────────────────────────────────────┘
+       ┌─────────────┼─────────────────┬────────────────────┐
+       ▼             ▼                 ▼                    ▼
+  FileSysNaming  EASNamingClient  TCPStoreNaming    (旁路)
+  (file:)        (eas:)           (tcpstore:)
+                                                  FakeNamingWorkerClient
+                                                  (持有静态 WorkerInfo)
+```
+
+`INamingWorkerClient` 是 worker 维度的便捷封装，唯一默认实现：
+
+```cpp
+// naming.h
+void WorkerNamingClient::register_worker(const WorkerInfo& w) {
+  client_->store("worker_" + std::to_string(w.worker_id), w.to_string());
+}
+std::optional<WorkerInfo> WorkerNamingClient::get_worker_info(
+    const InstanceId& inst, WorkerId wid) {
+  auto v = client_->get(inst, "worker_" + std::to_string(wid));
+  return v ? std::optional{WorkerInfo::from_string(*v)} : std::nullopt;
+}
+```
+
+#### 6.6.2 全局 NamingManager 与 connect_naming
+
+`NAMING_MANAGER` 在 `kvtransfer_pybind.cpp` 作为进程级单例：
+
+```cpp
+static NamingManager *NAMING_MANAGER = new NamingManager();
+GeneralNamingClient connect_naming(const InstanceId& name, const std::string& url) {
+  return NAMING_MANAGER->connect_naming(name, url);
+}
+```
+
+`NamingManager` 在构造时注册内置 schema 工厂（`EAS_NAMING_SCHEMA`、`FILESYS_NAMING_SCHEMA`），`connect_naming` 流程：
+
+1. **缓存命中**：用 `url` 整串作为 key 在 `naming_clients_` 中查找。同一 URL 在进程内只 connect 一次，所有 worker / migration / kvt 模块复用同一个底层 client。
+2. **解析 schema**：以 `:` 切分，例如 `file:/shared/naming` → schema=`file`, content=`/shared/naming`。
+3. **工厂创建**：`factories_[schema]->create(myname)` 拿到具体实现，然后调用 `connect(schema, content)` 完成真正的初始化（建目录、记录 EAS endpoint、连 TCPStore 等）。
+4. **未知 schema**：不抛错，返回空壳 `GeneralNamingClient()`，仅打印支持列表。配合 vLLM 侧 `naming_url="fake://"` 走"无 naming"分支。
+
+> 注意 `GeneralNamingClient::connect()` 直接抛 `runtime_error`：上层不应该再 connect 二次，这条路径只服务于 NamingManager 内部。
+
+#### 6.6.3 inst_id 与 myname
+
+`NamingManager::connect_naming(myname, url)` 传入的 `myname` 会被存入 `INamingClient::inst_id`，作用：
+
+- **写**侧：自己的所有 `store(k,v)` 都隐式写到自己的命名空间（file: → 自己的目录；eas: → 自己 pod 的 KV）。
+- **读**侧：`get(inst, k)` / `search(inst, prefix)` 显式指定要查的实例 ID，可读他人。
+
+`myname` 在 vLLM 侧的构造规则（`kvtbackend._get_inst_id()`）：
+
+- 真实 naming：`kvt_inst_id`（来自 extra_config，或 POD_NAME，或 uuid）。
+- `fake://`：附加 `rpc_port` 和本机 IP 形成唯一字符串，避免单机自连。
+
+#### 6.6.4 FileSysNaming（file:）
+
+`FileSysNaming::connect(path)` 校验目录存在后：
+
+```
+<naming_path>/                       # 共享目录
+├── <inst_A>/                        # 由 inst_A 创建
+│   ├── _timestamp_                  # keepalive
+│   ├── endpoint0                    # PeerInfo for dp_rank=0
+│   ├── worker_0                     # WorkerInfo
+│   └── worker_1
+└── <inst_B>/
+    └── ...
+```
+
+关键点：
+
+- **建目录 + 启 keepalive 线程**：首次 connect 创建 `instance_path_`，启动后台线程每 `BLLM_KVTRANS_FSNAMING_KEEPALIVE_S`（默认 3s）写一次 `_timestamp_`。
+- **原子写**（`write_file`）：用 `mkstemp` 在同目录建 `xxx.tmpXXXXXX`，写完 `rename` 替换。注释里明确解释这是为了规避在 XPU EAS 上观测到的 "prefill 读到空 `_timestamp_`" 问题；同时绕开 pre-cxx11 ABI 下 `std::string::data()` 可能不稳定的问题（用 `vector<char>` 持有临时路径）。
+- **store key 限制**：禁止 key 包含 `/`，避免穿越到其它目录。
+- **get / search**：直接读文件首行作为 value（`std::getline`），所以单条 value 不能跨行。
+- **list 判活**：`list()` 遍历 `naming_path_`，对每个子目录读 `_timestamp_`，只有 `now - last_report < BLLM_KVTRANS_FSNAMING_TOLERATE_S`（默认 9s）才纳入；结果有 **2s 短缓存**减少 FS 压力。
+- **生命周期**：析构时 stop 标志置位 + join keepalive 线程，但**不会删自己的目录**——靠 `_timestamp_` 过期被对端自动剔除。
+
+#### 6.6.5 EASNamingClient（eas:）
+
+适配阿里云 EAS 私域命名服务，HTTP 接口：
+
+| 路径 | 用途 |
+|------|------|
+| `POST /api/message` | store；body 是 `{"key":"value"}` |
+| `GET /api/messages/<pod>` | 取某个 pod 的全量 KV |
+| `GET /api/instances` | list 所有 pod，附带每个 pod 的 `__timestamp__`（version）|
+
+关键点：
+
+- **value 上限** `EAS_MAX_VALUE_LENGTH = 2048`，超过抛错；这就是为什么 `WorkerInfo::to_string()` 在 inst_id / addr 上有 `MAX_INSTANCE_NAME_LEN` / `MAX_ADDRESS_LEN` 校验。
+- **不支持 `remove`**：直接抛 `eas naming not support remove;`。
+- **两级缓存**：
+  - `EASNamingClient.pods_`：`pod_name → EASNamingCache`，每个 cache 独立 RW 锁 + version。
+  - 顶层 `time_watch_`：list/load 节流。两次 `load()` 之间间隔不到 `cache_expire_seconds_`（默认 1ms，可由 `EAS_NAMING_CACHE_EXPIRE_TIME` 调大）则直接复用。
+- **增量更新**：`load()` 拉 `/api/instances`，对每个 pod 比对 `__timestamp__`；version 升高则 `set_outdated()`，后续 `get_pod_kv` 才会再 `GET /api/messages/<pod>` 拉全量；新 pod / 消失 pod 也在 `load()` 里维护到 `instance_list_`。
+- **store 注意**：写自己时 EAS 端点写死本地 `http://127.0.0.1:9900`（`EAS_LOCAL_ENDPOINT`），相当于 sidecar 模式；读时走 `connect()` 传入的 `service_endpoint_`。
+
+#### 6.6.6 TCPStoreNaming（tcpstore:，可选）
+
+仅在 `ENABLE_TORCH` 编译开关打开时存在。URL 形如 `tcpstore://ip:port`（注意 `connect` 拿到的是 `//ip:port`）：
+
+- 用 `c10d::TCPStore(addr, opts)` 连接（不创建服务端）。
+- 内部 key 自动加前缀 `inst_id + "/" + key`，所以同一个 TCPStore 上多个 inst 共享。
+- 仅支持点查 `get / store / remove`；**不支持 `list / search`**——会直接抛 `unsupported`。这意味着用 TCPStore 时上层必须自己知道全部 peer，常用于固定双机点对点场景或测试。
+
+#### 6.6.7 FakeNamingWorkerClient（旁路）
+
+定义在 `naming/fake_naming.h`，只有 `get_worker_info` 是有效的：
+
+```cpp
+class FakeNamingWorkerClient : public INamingWorkerClient {
+  WorkerInfo dst_info_;   // 构造时塞进来
+  std::optional<WorkerInfo> get_worker_info(...) override { return dst_info_; }
+  void register_worker(...) override { throw runtime_error("..."); }
+};
+```
+
+触发点在 `KvSendStubFactory::create_stub`（`src/tx_stub.cpp`）：
+
+```cpp
+if (dst_info) {
+  naming_worker = std::make_shared<FakeNamingWorkerClient>(*dst_info);
+} else {
+  naming_worker = naming_worker_;   // 回落到真实 WorkerNamingClient
+}
+```
+
+`dst_info` 来源就是 `ReqMeta::dst_worker_info`，由 vLLM 侧 `PReqMeta.d_workers_info`（D 通过 `KVTDInfo` RPC 带过来的字符串）反序列化得到。**这条旁路是性能关键**：它让 fake_naming / 慢 EAS 场景下的 P 进程不必每个请求都去外部命名服务查 worker，每个 D worker 的 `WorkerInfo` 随 PrefillReq 直发即可。
+
+`TaskContext::refresh_dst_info()` 仍会调用 `naming_->get_worker_info(...)`，但对 fake_naming_worker 来说只是返回缓存好的 `dst_info_`。
+
+#### 6.6.8 WorkerInfo 序列化
+
+`worker_*` key 的 value 由 `WorkerInfo::to_string()` 生成（`src/common.cpp`），逗号分隔 12～13 个字段：
+
+```
+inst_id,worker_id,engine_tp_size,worker_tp_rank,
+block_sizes(|分隔),token_sizes(|分隔),
+layer_num_blocks,num_layers,transfer_protocols,
+attn_kernel_blk_ntpb,indexer_blk_ntpb,attn_pack_size[,addr]
+```
+
+`from_string` 显式做了向后兼容（11/12/13 字段三套解析路径，且用 `is_numeric_token` 区分老 `addr` 和新 `attn_pack_size`）。**滚动升级 P/D 时同一集群可能存在多版本 WorkerInfo**，这个兼容层是必需的。
+
+#### 6.6.9 KvSendStubFactory 的共享语义
+
+`KvSendStubFactory` 构造时一次性 `create_naming_worker_client()` 得到 `unique_ptr<WorkerNamingClient>`，转成 `shared_ptr` 后所有 `KvSendStub` 复用：
+
+```cpp
+KvSendStubFactory(Context *ctx, GeneralNamingClient &&naming) {
+  naming_ = std::move(naming);                                  // 持有 client 本身
+  naming_worker_ = std::shared_ptr<INamingWorkerClient>(        // worker 视图
+      naming_.create_naming_worker_client());
+}
+```
+
+这意味着：
+
+1. `KvSendStubFactory` 与所有衍生 `KvSendStub` 共享同一个底层 `INamingClient`（线程安全由 backend 自己保证：file backend 用 mutex 锁 `list_cache_`，eas backend 用 `shared_mutex`）。
+2. 进程内同 URL 的 `connect_naming` 会复用 `GeneralNamingClient`（见 6.6.2），所以 **`KvTransferClient` 与 vLLM 侧 `PeerManager` / `MigrationBackend` 拿到的 naming_cli 其实是同一份**，缓存共享。
+3. `FakeNamingWorkerClient` 不复用 `naming_worker_`，**每个请求独立 new 一份**，避免污染共享路径。
+
+#### 6.6.10 P / D 两侧 naming 调用全景
+
+```
+P 启动 (scheduler 角色)                  D 启动 (scheduler 角色)
+  connect_naming(myinst, url)              connect_naming(myinst, url)
+  _reg_naming → store endpoint{dprank}     PeerManager._main 每 7s:
+                                             list()                       (查 P)
+                                             search(P, "endpoint")
+                                             过滤 role=="prefill"
+                                             更新 PeerMap
+
+P worker:                                D worker (register_kv_caches):
+  init_kv_transfer_client(naming_url)      init_kv_transfer_server(naming_url)
+    → connect_naming + KvSendStubFactory   bladekv.current_worker_info('server')
+                                           if naming_cli:
+                                             store(f"worker_{worker_id}", winfo)
+                                           else:
+                                             RPC _REGISTER_WORKER → D Sched
+
+发送 KV 时 (tx_stub):                    
+  if ReqMeta.dst_worker_info:            
+    FakeNamingWorkerClient → 直接用       
+  else:
+    WorkerNamingClient.get_worker_info
+      → file: 读 <naming_path>/<dst_inst>/worker_{wid}
+      → eas: 命中 pods_[dst_inst] 缓存（必要时 GET /api/messages/dst_inst）
+```
+
+#### 6.6.11 故障模式与限制
+
+| 现象 | 原因 | 处理 |
+|------|------|------|
+| `list()` 看不到某个对端 | file: `_timestamp_` 距今 ≥ 9s（默认） | 检查 keepalive 线程是否被 sigsegv 杀掉，或调 `BLLM_KVTRANS_FSNAMING_TOLERATE_S` |
+| `get` 读到空字符串 | file: 不再发生（rename 原子化）；老版本可能读到中间态 | 如果遇到老 commit，把 `BLLM_KVTRANS_FSNAMING_KEEPALIVE_S` 调大降频 |
+| `eas store too large value` | `WorkerInfo.to_string()` 超过 2048B | 减少字段，或换 backend |
+| `tcpstore list/search` throw | TCPStore 协议不支持 | 用 file/eas，或上层显式知道对端 |
+| `unknown naming schema: xxx` | URL 拼写错或未编译该 backend（如 tcpstore 未开 ENABLE_TORCH） | 回退到 `fake://` |
+| P 找不到 D worker | `dst_worker_info` 未带 + naming 上还没看到 `worker_{id}` | tx_stub 抛 `can't find target worker`；上层依赖 D 已注册完成，常因 D worker 还在启动 |
 
 ---
 
@@ -610,6 +843,14 @@ sequenceDiagram
 | `SEND_TPSIZE` / `TXSTUB_CAP` | 发送线程池与 stub 池大小 |
 | `BF162FP8_CONV` | 传输时 BF16→FP8 |
 | `PORT_BASE` | Server 监听端口基址 |
+| `FSNAMING_KEEPALIVE_S` | file naming 心跳间隔（默认 3s）|
+| `FSNAMING_TOLERATE_S` | file naming `list()` 判活窗口（默认 9s）|
+
+非 `BLLM_KVTRANS_` 前缀但与 naming 相关：
+
+| 变量 | 作用 |
+|------|------|
+| `EAS_NAMING_CACHE_EXPIRE_TIME` | EAS naming 顶层 list/load 缓存毫秒（默认 1） |
 
 `kvtbackend._set_worker_envs()` 会根据模型类型（MLA、Hybrid、FlashInfer、TurboQuant）自动设置默认 `CACHE_SHAPE`。
 
@@ -636,6 +877,8 @@ export BLLM_KVTRANS_CACHE_SHAPE=7   # Qwen3.5 + FlashInfer
 | Client 编排 | `kvtransfer/include/client.h`, `src/client.cpp` |
 | Send 执行 | `kvtransfer/include/tx_stub.h`, `src/tx_stub.cpp` |
 | Channel | `kvtransfer/include/channel.h`, `src/rdma_channel.cpp` |
+| Naming 接口/工厂 | `kvtransfer/include/naming.h`, `src/naming.cpp` |
+| Naming 后端 | `kvtransfer/include/naming/{filesys,eas,tcpstore,fake}_naming.h`, `src/{filesys,eas,tcpstore}_naming.cpp` |
 | parse_block | `kvtransfer/include/parse_block_common.h`, `src/parse_block_*.cpp` |
 | TransferPlan | `kvtransfer/docs/cache_transfer_spec.md` |
 | pybind | `kvtransfer/kvtransfer_pybind.cpp` |
@@ -659,4 +902,4 @@ export BLLM_KVTRANS_CACHE_SHAPE=7   # Qwen3.5 + FlashInfer
 
 ---
 
-*文档生成日期：2026-05-21*
+*文档生成日期：2026-05-21（2026-05-25 补充 6.6 节 Naming 子系统实现细节）*
