@@ -3,6 +3,7 @@ title: Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm →
 date: 2026-06-01
 tags: []
 ---
+
 # Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离）
 
 > 整理自代码级溯源；所有引用都附 file:line。围绕实时音频流 + PD 分离场景。
