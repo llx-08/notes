@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离） - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离） 整理自代码级溯源；所有引用都附 file:line。围绕实时音频流 + PD 分离场景。 0. 一图概览 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30"><meta property="og:type" content="blog"><meta property="og:title" content="Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离）"><meta property="og:url" content="https://llx-08.github.io/notes/2026/06/01/2026-06-01-vllm-omni-multimodal-pipeline/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离） 整理自代码级溯源；所有引用都附 file:line。围绕实时音频流 + PD 分离场景。 0. 一图概览 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-06-01T00:00:00.000Z"><meta property="article:modified_time" content="2026-06-01T02:33:57.273Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/06/01/2026-06-01-vllm-omni-multimodal-pipeline/"},"headline":"Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离）","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-06-01T00:00:00.000Z","dateModified":"2026-06-01T02:33:57.273Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离） 整理自代码级溯源；所有引用都附 file:line。围绕实时音频流 + PD 分离场景。 0. 一图概览 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/06/01/2026-06-01-vllm-omni-multimodal-pipeline/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-06-01T00:00:00.000Z" title="6/1/2026, 12:00:00 AM">2026-06-01</time>发表</span><span class="level-item"><time dateTime="2026-06-01T02:33:57.273Z" title="6/1/2026, 2:33:57 AM">2026-06-01</time>更新</span><span class="level-item">33 分钟读完 (大约4911个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离）</h1><div class="content"><h1 id="Qwen3-5-Omni-多模态数据全流程（dashscope-serving-→-dashllm-→-vLLM，含-PD-分离）"><a href="#Qwen3-5-Omni-多模态数据全流程（dashscope-serving-→-dashllm-→-vLLM，含-PD-分离）" class="headerlink" title="Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离）"></a>Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离）</h1><blockquote>
+<p>整理自代码级溯源；所有引用都附 file:line。围绕实时音频流 + PD 分离场景。</p>
+</blockquote>
+<hr>
+<h2 id="0-一图概览"><a href="#0-一图概览" class="headerlink" title="0. 一图概览"></a>0. 一图概览</h2><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line">client ──HTTP──▶ dashscope-serving</span><br><span class="line">                  │  1. 解协议（image_url/video_url/input_audio）</span><br><span class="line">                  │  2. download URL（global_lru_cache）</span><br><span class="line">                  │  3. image_process/audio_process/video_process</span><br><span class="line">                  │  4. dump 出 multi_modal_data + mm_processor_kwargs</span><br><span class="line">                  ▼</span><br><span class="line">              dashllm._backend_vllm.generate</span><br><span class="line">                  │</span><br><span class="line">                  ├──omni PD──▶ _call_prefill ─▶ P engine</span><br><span class="line">                  │                              │  input_preprocessor（HF processor + placeholder 展开）</span><br><span class="line">                  │                              │  add_request(max_tokens=1, do_remote_decode=True)</span><br><span class="line">                  │                              │  model runner: encoder → KV 写入 P GPU</span><br><span class="line">                  │                              │  prefill 完 → _dash_done[reqid] 等 D 来取 KV</span><br><span class="line">                  │                              ▼</span><br><span class="line">                  │                          (P abort/timeout 时清 _dash_done</span><br><span class="line">                  │                            ↑↑↑ 这就是加 _gone_reqs 的位置)</span><br><span class="line">                  │</span><br><span class="line">                  └──────────▶ _call_decode  ─▶ D engine</span><br><span class="line">                                              │ StreamInfer: input_ids + extra_params (无 multi_modal_data)</span><br><span class="line">                                              │ KVT 控制面 _dash_prefill_rpc(reqid) ──RPC──▶ P._step_dinfoq</span><br><span class="line">                                              │   ↑                                          │</span><br><span class="line">                                              │   └─ 0: 拉 KV ───────────────────────────┐</span><br><span class="line">                                              │   └─ 410 CODE_REQGONE: 立即 raise        │</span><br><span class="line">                                              │      → release loading slot              │</span><br><span class="line">                                              │                                          │</span><br><span class="line">                                              │ KVT 数据面: P GPU KV blocks  ──RDMA──▶ D GPU</span><br><span class="line">                                              │ model runner: encoder 跳过（mm 段已在 KV 里）</span><br><span class="line">                                              │ 走正常 decode 出 token</span><br><span class="line">                                              ▼</span><br><span class="line">                                          回给 dashllm → dashscope-serving → client</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="一、HTTP-入口-→-dashscope-serving-预处理"><a href="#一、HTTP-入口-→-dashscope-serving-预处理" class="headerlink" title="一、HTTP 入口 → dashscope-serving 预处理"></a>一、HTTP 入口 → dashscope-serving 预处理</h2><h3 id="1-1-协议层把-image-video-audio-解成内部-dict"><a href="#1-1-协议层把-image-video-audio-解成内部-dict" class="headerlink" title="1.1 协议层把 image/video/audio 解成内部 dict"></a>1.1 协议层把 image/video/audio 解成内部 dict</h3><p>入口在 <code>aquila_stream_server_for_vl.py</code>（挂 <code>/mm</code>）。OpenAI 风格 content 由 <code>openai_protocol_tool.py</code> 分发：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/schema/protocol_tool/openai_protocol_tool.py:1034</span></span><br><span class="line"><span class="keyword">elif</span> content_type == <span class="string">'input_audio'</span>:</span><br><span class="line">    <span class="keyword">return</span> <span class="variable language_">self</span>._process_input_audio_content(contents, msg_index)</span><br><span class="line"><span class="keyword">elif</span> content_type == <span class="string">'image_url'</span>:</span><br><span class="line">    <span class="keyword">return</span> <span class="variable language_">self</span>._process_image_url_content(contents, msg_index)</span><br><span class="line"><span class="keyword">elif</span> content_type == <span class="string">'video_url'</span>:</span><br><span class="line">    <span class="keyword">return</span> <span class="variable language_">self</span>._process_video_url_content(contents, msg_index)</span><br></pre></td></tr></table></figure>
+
+<p><code>image_url</code> 直接拿 URL 字段，<code>video_url</code> 类似，<code>input_audio</code> 把 base64/路径包进 <code>AudioData</code>。</p>
+<h3 id="1-2-三段式-step：collect-→-download-→-process"><a href="#1-2-三段式-step：collect-→-download-→-process" class="headerlink" title="1.2 三段式 step：collect → download → process"></a>1.2 三段式 step：collect → download → process</h3><p>总管线在 <code>preprocessor.py</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/preprocessor/preprocessor.py:978</span></span><br><span class="line"><span class="meta">@step_log(<span class="params">step=<span class="string">'preprocessor_process'</span></span>)</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">__call__</span>(<span class="params">self, inputs: MultiModalInput, parameters: MultiModalParameters,</span></span><br><span class="line"><span class="params">             step_log_params: StepLogParameters, encoder_cache=<span class="literal">None</span>,</span></span><br><span class="line"><span class="params">             safety_params=<span class="literal">None</span></span>) -&gt; Result:</span><br><span class="line">    <span class="keyword">for</span> step <span class="keyword">in</span> <span class="variable language_">self</span>.steps:</span><br><span class="line">        step(inputs, context)</span><br></pre></td></tr></table></figure>
+
+<p><code>step_log</code> 装饰器会写 <code>{step}_start</code> / <code>{step}_end</code> 日志。注意：<strong>没有</strong> <code>download_start</code> / <code>multimodal_data_process_start</code> 这两个 step 名，实际是 <code>preprocessor_process_start</code>、<code>image_process_start</code>、<code>audio_process_start</code> 等。</p>
+<p><strong>下载</strong>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/preprocessor/multimodal_data/multimodal_data_list_preprocessor.py:157</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">process</span>(<span class="params">self, step_input: MultiModalInput, context: ProcessingContext</span>):</span><br><span class="line">    global_loop.run_coroutine(<span class="variable language_">self</span>._download(multimodal_data_list, parameters, step_log_params))</span><br><span class="line">        <span class="keyword">for</span> data <span class="keyword">in</span> multimodal_data_list.<span class="built_in">all</span>:</span><br><span class="line">            all_task.append(multimodal_data_download_wrapper(data, parameters, step_log_params, session))</span><br><span class="line">        <span class="keyword">await</span> asyncio.gather(*all_task)</span><br></pre></td></tr></table></figure>
+
+<p>OSS 私链命中 <code>global_lru_cache</code>（<strong>maxsize 仅 8</strong>）可跳过下载，但 <strong>omni 视频被显式排除</strong>（要从 video 抽音频，缓存会破坏这一步）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/preprocessor/multimodal_data/multimodal_data_preprocessor.py:465</span></span><br><span class="line"><span class="keyword">if</span> original_oss_link <span class="keyword">and</span> <span class="keyword">not</span> mm_conf.QWEN3_OMNI:</span><br><span class="line">    global_lru_cache.put(original_oss_link, multimodal_data.result)</span><br></pre></td></tr></table></figure>
+
+<p><strong>预处理</strong>（按模态分发）：</p>
+<table>
+<thead>
+<tr>
+<th>模态</th>
+<th>step 名</th>
+<th>产物</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>image</td>
+<td><code>image_process_start/end</code></td>
+<td>RGB <code>np.ndarray</code>（OpenCV resize）</td>
+</tr>
+<tr>
+<td>audio</td>
+<td><code>audio_process_start/end</code></td>
+<td><code>np.float32</code> waveform <code>[-1, 1]</code></td>
+</tr>
+<tr>
+<td>video</td>
+<td><code>video_file_process_*</code></td>
+<td>frame tensor / 帧列表</td>
+</tr>
+</tbody></table>
+<p>omni 的 audio token 数算法（每秒 7 token）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/preprocessor/multimodal_data/audio/audio_data_preprocessor.py:80</span></span><br><span class="line"><span class="keyword">if</span> mm_conf.QWEN3_5_OMNI:</span><br><span class="line">    <span class="keyword">return</span> audio.shape[<span class="number">0</span>] // <span class="number">16000</span> * <span class="number">7</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="1-3-最终装出来给-vLLM-的-prompt-dict"><a href="#1-3-最终装出来给-vLLM-的-prompt-dict" class="headerlink" title="1.3 最终装出来给 vLLM 的 prompt dict"></a>1.3 最终装出来给 vLLM 的 prompt dict</h3><p><code>MultimodalDataList.dump()</code> 产出三块：<code>multi_modal_data</code> / <code>mm_processor_kwargs</code> / <code>mm_extra_kwargs</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/schema/multimodal_data.py:196</span></span><br><span class="line">data_map = {</span><br><span class="line">    k: v</span><br><span class="line">    <span class="keyword">for</span> k, v <span class="keyword">in</span> <span class="built_in">dict</span>(audio=[x.data <span class="keyword">for</span> x <span class="keyword">in</span> <span class="variable language_">self</span>.audios],</span><br><span class="line">                     image=[x.data <span class="keyword">for</span> x <span class="keyword">in</span> <span class="variable language_">self</span>.images],</span><br><span class="line">                     video=[x.data <span class="keyword">for</span> x <span class="keyword">in</span> <span class="variable language_">self</span>.videos]).items() <span class="keyword">if</span> v</span><br><span class="line">}</span><br><span class="line"><span class="keyword">if</span> mm_conf.QWEN3_OMNI:</span><br><span class="line">    data_map[<span class="string">'use_audio_in_video'</span>] = <span class="variable language_">self</span>.use_audio_in_video</span><br></pre></td></tr></table></figure>
+
+<p><code>mm_processor_kwargs</code> 里典型字段：<code>fps</code>、<code>do_sample_frames=False</code>、<code>use_audio_in_video</code>、<code>dependent_audio</code>。</p>
+<p>dashllm 本地模式直接把这堆字段透传到引擎：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashllm/dashllm/core/backend/engine/_vllm_omni_rpc.py:499</span></span><br><span class="line">prompt = TokensPrompt(</span><br><span class="line">    prompt_token_ids=input_ids,</span><br><span class="line">    multi_modal_data=multi_modal_data,</span><br><span class="line">    mm_processor_kwargs=mm_processor_kwargs,</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="二、vLLM-引擎入口：input-preprocessor"><a href="#二、vLLM-引擎入口：input-preprocessor" class="headerlink" title="二、vLLM 引擎入口：input_preprocessor"></a>二、vLLM 引擎入口：input_preprocessor</h2><p>omni 的 thinker engine 在 <code>add_request()</code> 里决定是否跑 <code>input_processor.process_inputs()</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/engine/omni3_5_thinker_engine.py:2564</span></span><br><span class="line">is_prefill_node = <span class="variable language_">self</span>.kv_role == <span class="string">"kv_producer"</span></span><br><span class="line">need_preprocess_and_transfer = use_t2t <span class="keyword">and</span> (<span class="keyword">not</span> thinker_only <span class="keyword">or</span> is_prefill_node)</span><br><span class="line">need_prepare_v6d = use_t2t <span class="keyword">and</span> <span class="keyword">not</span> thinker_only</span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> need_preprocess_and_transfer:</span><br><span class="line">    logger.info(<span class="string">"Thinker: request %s input_preprocessor start"</span>, request_id)</span><br><span class="line">    processed_request = <span class="variable language_">self</span>.thinker_engine.input_processor.process_inputs(...)</span><br><span class="line">    logger.info(<span class="string">"Thinker: request %s input_preprocessor finished, cost:%.1f"</span>, ...)</span><br></pre></td></tr></table></figure>
+
+<p><strong>关键点（PD 模式下的差异）</strong>：D 节点 (<code>thinker_only=True</code> 且 <code>kv_role != kv_producer</code>) 走 <code>else</code> 分支，<strong>完全跳过</strong> <code>input_preprocessor</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/engine/omni3_5_thinker_engine.py:2622</span></span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    <span class="keyword">async</span> <span class="keyword">def</span> <span class="title function_">run_output_handler_and_add_request</span>():</span><br><span class="line">        <span class="variable language_">self</span>.thinker_engine._run_output_handler()</span><br><span class="line">        <span class="keyword">return</span> <span class="keyword">await</span> <span class="variable language_">self</span>.thinker_engine.add_request(</span><br><span class="line">            request_id=request_id,</span><br><span class="line">            prompt=prompt,</span><br><span class="line">            params=params,</span><br><span class="line">            ...</span><br><span class="line">        )</span><br></pre></td></tr></table></figure>
+
+<p><code>input_processor.process_inputs()</code> 做的事：</p>
+<ul>
+<li>调 HF processor 把 <code>multi_modal_data</code> 转成 <code>MultiModalKwargsItem</code>（含 <code>pixel_values</code>、<code>audio_features</code> 等）</li>
+<li>把 prompt 中的 modality 占位符（<code>&lt;image&gt;</code>、<code>&lt;video&gt;</code>、<code>&lt;audio&gt;</code>）展开成 vision/audio pad token 串</li>
+<li>算出 <code>mrope_position_delta</code>、<code>mm_prompt_len</code> 等元数据</li>
+</ul>
+<p>omni 模型侧把字符串占位拼成正式 token 串的位置：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/model_executor/models/qwen3_omni_next_thinker.py:717</span></span><br><span class="line"><span class="keyword">if</span> envs.VLLM_OMNI_USE_V35_RTC_PROMPT_STYLE:</span><br><span class="line">    <span class="keyword">if</span> metadata[<span class="string">"video_backend"</span>] == <span class="string">"rtc_first_frame"</span>:</span><br><span class="line">        video_token_str = audio_bos_token + video_token_str</span><br></pre></td></tr></table></figure>
+
+<p>预热时给出参考形态：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/engine/omni3_5_thinker_engine.py:589</span></span><br><span class="line">audio_placeholder = (</span><br><span class="line">    <span class="string">"&lt;|vision_start|&gt;&lt;|video_pad|&gt;"</span></span><br><span class="line">    <span class="string">"&lt;|vision_end|&gt;&lt;|audio_start|&gt;"</span></span><br><span class="line">    <span class="string">"&lt;|audio_pad|&gt;&lt;|audio_end|&gt;"</span></span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<h3 id="中间的-MediaWithPath-优化"><a href="#中间的-MediaWithPath-优化" class="headerlink" title="中间的 MediaWithPath 优化"></a>中间的 <code>MediaWithPath</code> 优化</h3><p><code>VLLM_USE_FILE_PATH_MMD_CACHE=True</code> 时，<code>ImageLoader</code> 不再以图像内容做 hash，而是用文件路径，避免每次都 blake3 几 MB 的图像：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/multimodal/base.py:42</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">MediaWithPath</span>(<span class="type">Generic</span>[_T]):</span><br><span class="line">    <span class="string">"""</span></span><br><span class="line"><span class="string">    Wrapper that couples a media object with its original file path.</span></span><br><span class="line"><span class="string">    This enables fast path-based hashing while keeping the media object</span></span><br><span class="line"><span class="string">    intact for HF Processor compatibility.</span></span><br><span class="line"><span class="string">    """</span></span><br><span class="line">    media: _T</span><br><span class="line">    original_path: <span class="built_in">str</span></span><br></pre></td></tr></table></figure>
+
+<p>⚠️ <strong>坑</strong>：RTC 反复复用同一路径但内容不同会错误命中缓存，omni 实时场景下要确认 dashscope-serving 那边不会复用 path。</p>
+<hr>
+<h2 id="三、GPU-model-runner：MM-encoder-执行-拼回-embeddings"><a href="#三、GPU-model-runner：MM-encoder-执行-拼回-embeddings" class="headerlink" title="三、GPU model runner：MM encoder 执行 + 拼回 embeddings"></a>三、GPU model runner：MM encoder 执行 + 拼回 embeddings</h2><p>只有 <strong>first PP rank + supports_mm_inputs</strong> 才会跑 encoder：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/worker/gpu_model_runner.py:3589</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.supports_mm_inputs <span class="keyword">and</span> is_first_rank <span class="keyword">and</span> <span class="keyword">not</span> is_encoder_decoder:</span><br><span class="line">    <span class="keyword">with</span> <span class="variable language_">self</span>.maybe_get_ec_connector_output(...) <span class="keyword">as</span> ec_connector_output:</span><br><span class="line">        <span class="variable language_">self</span>._execute_mm_encoder(scheduler_output)</span><br><span class="line">        mm_embeds, is_mm_embed = <span class="variable language_">self</span>._gather_mm_embeddings(scheduler_output)</span><br><span class="line">    inputs_embeds_scheduled = <span class="variable language_">self</span>.model.embed_input_ids(</span><br><span class="line">        <span class="variable language_">self</span>.input_ids.gpu[:num_scheduled_tokens],</span><br><span class="line">        multimodal_embeddings=mm_embeds,</span><br><span class="line">        is_multimodal=is_mm_embed,</span><br><span class="line">    )</span><br></pre></td></tr></table></figure>
+
+<p><code>VLLM_OMNI_ENABLE_ENCODER_BATCH</code> 控制 batch 化逻辑：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/worker/gpu_model_runner.py:2782</span></span><br><span class="line"><span class="keyword">if</span> envs.VLLM_OMNI_ENABLE_ENCODER_BATCH:</span><br><span class="line">    logger.info(<span class="string">"resort mm input to enable encoder batch input"</span>)</span><br><span class="line">    indexed_kwargs = [(i, item) <span class="keyword">for</span> i, item <span class="keyword">in</span> <span class="built_in">enumerate</span>(mm_kwargs)]</span><br><span class="line">    sorted_indexed = <span class="built_in">sorted</span>(indexed_kwargs, key=<span class="keyword">lambda</span> x: (x[<span class="number">1</span>].modality, x[<span class="number">0</span>]))</span><br></pre></td></tr></table></figure>
+
+<p>Encoder 出来的 embedding 按 <code>mm_hash</code> 写入 <code>encoder_cache</code>，再 scatter 回 placeholder token 的位置：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/worker/gpu_model_runner.py:2984</span></span><br><span class="line"><span class="keyword">if</span> start_pos + num_encoder_tokens &lt;= num_computed_tokens:</span><br><span class="line">    <span class="comment"># The encoder output is already processed and stored</span></span><br><span class="line">    <span class="comment"># in the decoder's KV cache.</span></span><br><span class="line">    <span class="keyword">continue</span></span><br><span class="line">encoder_output = <span class="variable language_">self</span>.encoder_cache.get(mm_hash, <span class="literal">None</span>)</span><br><span class="line"><span class="keyword">assert</span> encoder_output <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>, <span class="string">f"Encoder cache miss for <span class="subst">{mm_hash}</span>."</span></span><br></pre></td></tr></table></figure>
+
+<p>非常重要的一句：**<code>already processed and stored in the decoder's KV cache → continue</code><strong>。也就是说，</strong>MM embedding 一旦走完 prefill 进了 KV，对 D 来说它就是 KV 的一部分，不再需要 encoder 重跑**。</p>
+<hr>
+<h2 id="四、PD-分离下-P-D-的分工与跨节点传输"><a href="#四、PD-分离下-P-D-的分工与跨节点传输" class="headerlink" title="四、PD 分离下 P/D 的分工与跨节点传输"></a>四、PD 分离下 P/D 的分工与跨节点传输</h2><h3 id="4-1-P-节点：做完整的-encoder-prefill"><a href="#4-1-P-节点：做完整的-encoder-prefill" class="headerlink" title="4.1 P 节点：做完整的 encoder + prefill"></a>4.1 P 节点：做完整的 encoder + prefill</h3><p>P 是 <code>kv_producer</code>，<code>_call_prefill</code> 显式带 <code>multi_modal_data</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashllm/dashllm/core/backend/engine/_disaggregated_prefilling.py:92</span></span><br><span class="line"><span class="keyword">return</span> <span class="variable language_">self</span>._prefill_engine.generate(</span><br><span class="line">    ...</span><br><span class="line">    multi_modal_data=multi_modal_data,</span><br><span class="line">    mm_processor_kwargs=mm_processor_kwargs,</span><br><span class="line">    ...</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p>引擎层强制把 <code>max_tokens</code> 改成 1（只跑 1 步 prefill）并打上 <code>do_remote_decode</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/engine/omni3_5_thinker_engine.py:2512</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.kv_role == <span class="string">"kv_producer"</span>:</span><br><span class="line">    params.max_tokens = <span class="number">1</span></span><br><span class="line">    extra_args[<span class="string">"kv_transfer_params"</span>] = {<span class="string">"do_remote_decode"</span>: <span class="literal">True</span>}</span><br><span class="line">    logger.info(</span><br><span class="line">        <span class="string">"Thinker disagg P: request %s max_tokens=1, do_remote_decode=True"</span>,</span><br><span class="line">        request_id,</span><br><span class="line">    )</span><br></pre></td></tr></table></figure>
+
+<p>跑完一步 prefill，MM tower 的 embedding 已经在 transformer 每层产生了对应的 K/V，<strong>全部以 token 维度连续写在 P 的 GPU KV 缓冲里</strong>。</p>
+<h3 id="4-2-D-节点：StreamInfer-调用，不传-raw-MM"><a href="#4-2-D-节点：StreamInfer-调用，不传-raw-MM" class="headerlink" title="4.2 D 节点：StreamInfer 调用，不传 raw MM"></a>4.2 D 节点：StreamInfer 调用，<strong>不传 raw MM</strong></h3><p><code>_call_decode()</code> 给 P→D handshake、KV transfer、生成都只发 <code>input_ids + sampling_params + extra_params</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashllm/dashllm/core/backend/engine/_disaggregated_prefilling.py:166</span></span><br><span class="line">decode_iter = cli.StreamInfer(input_ids=new_input_ids, sampling_params=sampling_params, extra_params=new_extra_params)</span><br></pre></td></tr></table></figure>
+
+<p>omni 的 PD <code>extra_params</code> 里只有控制信息：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashllm/dashllm/core/backend/engine/_disaggregated_prefilling.py:131</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>._is_omni:</span><br><span class="line">    new_extra_params[<span class="string">"omni_prefill_remote_endpoint"</span>] = <span class="variable language_">self</span>._prefill_engine._thinker_engine.get_remote_endpoint()</span><br><span class="line">    new_extra_params[<span class="string">"thinker_only"</span>] = <span class="built_in">int</span>(sampling_params.get(<span class="string">"thinker_only"</span>, <span class="literal">False</span>))</span><br></pre></td></tr></table></figure>
+
+<p>D 侧到了 model runner 后：</p>
+<ul>
+<li><code>scheduled_encoder_inputs</code> 是空（KV 已覆盖 MM 段）</li>
+<li><code>_gather_mm_embeddings</code> 进入 <code>continue</code> 分支</li>
+<li>D 上 <strong>MM tower 完全不会跑</strong></li>
+</ul>
+<h3 id="4-3-跨节点真正传输的是什么"><a href="#4-3-跨节点真正传输的是什么" class="headerlink" title="4.3 跨节点真正传输的是什么"></a>4.3 跨节点真正传输的是什么</h3><table>
+<thead>
+<tr>
+<th>字段</th>
+<th>是否跨 P→D 传输</th>
+<th>通道</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>prompt_token_ids</code>（含 pad token）</td>
+<td>部分</td>
+<td>StreamInfer 主包</td>
+<td>external_router 路径会 pop 完整 ids，只传 <code>prompt_token_ids_len</code> 让 D 用 pad token 补齐（omni 不走这套）</td>
+</tr>
+<tr>
+<td><code>mrope_position_delta</code></td>
+<td>是</td>
+<td>handshake <code>pd_context</code></td>
+<td>D 计算 mrope 用</td>
+</tr>
+<tr>
+<td><code>mm_prompt_len</code></td>
+<td>是</td>
+<td>extra_params / handshake</td>
+<td>talker 用</td>
+</tr>
+<tr>
+<td><code>thinker_only</code></td>
+<td>是</td>
+<td>extra_params</td>
+<td>D 是否启 talker / code2wav</td>
+</tr>
+<tr>
+<td><code>multi_modal_data</code>（raw PIL/np）</td>
+<td><strong>否</strong></td>
+<td>—</td>
+<td>完全不传</td>
+</tr>
+<tr>
+<td>Vision/audio encoder 输出</td>
+<td><strong>否（单独传）</strong></td>
+<td>隐式融在 KV 里</td>
+<td>经 <code>kvtbackend.py</code> 的 KVT</td>
+</tr>
+<tr>
+<td>K/V blocks</td>
+<td>是</td>
+<td>KVT 数据面（RDMA / NCCL）</td>
+<td><code>_dash_prefill_rpc</code> / <code>_step_dinfoq</code></td>
+</tr>
+<tr>
+<td>Block 列表 + token 计数</td>
+<td>是</td>
+<td>KVT 控制面 RPC</td>
+<td><code>KVTDInfo</code> / <code>PReqMeta</code></td>
+</tr>
+</tbody></table>
+<p>handshake 里塞 mm 元数据：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashllm/dashllm/core/backend/engine/_disaggregated_prefilling.py:842</span></span><br><span class="line">multimodal_decode_request = {}</span><br><span class="line">processed_prompt_len = process_extra.get(<span class="string">"processed_prompt_token_ids_len"</span>)</span><br><span class="line"><span class="keyword">if</span> processed_prompt_len <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>:</span><br><span class="line">    multimodal_decode_request[<span class="string">"prompt_token_ids_len"</span>] = <span class="built_in">int</span>(processed_prompt_len)</span><br><span class="line"><span class="keyword">if</span> <span class="string">"mrope_position_delta"</span> <span class="keyword">in</span> process_extra:</span><br><span class="line">    multimodal_decode_request[<span class="string">"mrope_position_delta"</span>] = <span class="built_in">int</span>(process_extra[<span class="string">"mrope_position_delta"</span>])</span><br><span class="line"><span class="keyword">if</span> multimodal_decode_request:</span><br><span class="line">    handshake_extra[<span class="string">"pd_context"</span>] = json.dumps({<span class="string">"multimodal_decode_request"</span>: multimodal_decode_request}, ...)</span><br></pre></td></tr></table></figure>
+
+<h3 id="4-4-KVT-控制面里也确实没有-MM-字段"><a href="#4-4-KVT-控制面里也确实没有-MM-字段" class="headerlink" title="4.4 KVT 控制面里也确实没有 MM 字段"></a>4.4 KVT 控制面里也确实没有 MM 字段</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/hybrid_connector/kvtbackend.py:335</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">KVTDInfo</span>(...):</span><br><span class="line">    instid: <span class="built_in">str</span></span><br><span class="line">    blkids: <span class="built_in">list</span>[<span class="built_in">list</span>[<span class="built_in">int</span>]]</span><br><span class="line">    cached_tokens: <span class="built_in">int</span></span><br><span class="line">    max_tokens: <span class="built_in">int</span></span><br><span class="line">    d_workers_info: <span class="built_in">list</span>[<span class="built_in">str</span>]</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/hybrid_connector/kvtbackend.py:521</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">PReqMeta</span>:</span><br><span class="line">    reqid: <span class="built_in">str</span></span><br><span class="line">    d_inst_id: <span class="built_in">str</span></span><br><span class="line">    p_block_ids: <span class="built_in">list</span>[<span class="built_in">list</span>[<span class="built_in">int</span>]]</span><br><span class="line">    d_block_ids: <span class="built_in">list</span>[<span class="built_in">list</span>[<span class="built_in">int</span>]]</span><br><span class="line">    new_tokens: <span class="built_in">int</span></span><br><span class="line">    has_last_token: <span class="built_in">bool</span></span><br><span class="line">    seen_tokens: <span class="built_in">int</span></span><br></pre></td></tr></table></figure>
+
+<p>仅 block id + token 计数；MM 语义完全在 P prefill KV 里。</p>
+<hr>
+<h2 id="五、三层-MM-缓存"><a href="#五、三层-MM-缓存" class="headerlink" title="五、三层 MM 缓存"></a>五、三层 MM 缓存</h2><table>
+<thead>
+<tr>
+<th>层</th>
+<th>位置</th>
+<th>Key</th>
+<th>Value</th>
+<th>容量</th>
+<th>TTL</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>dashscope <code>global_lru_cache</code></td>
+<td><code>multimodal_data_preprocessor.py:465</code></td>
+<td>OSS 私链 URL</td>
+<td><code>MultimodalResult</code>（已处理 raw）</td>
+<td><strong>8</strong></td>
+<td>无</td>
+</tr>
+<tr>
+<td>chat-serving v6d encoder cache</td>
+<td>mm_key 内</td>
+<td><code>mm_key</code>（md5 of attrs + md5_hashes）</td>
+<td>encoder 结果 path handle</td>
+<td>GB 级</td>
+<td>由 v6d 管</td>
+</tr>
+<tr>
+<td>vLLM <code>MultiModalProcessorCache</code></td>
+<td><code>vllm/multimodal/cache.py</code></td>
+<td><code>mm_hash</code>（path or blake3）</td>
+<td><code>MultiModalKwargsItem + prompt_updates</code></td>
+<td>GB 级 LRU</td>
+<td>无</td>
+</tr>
+<tr>
+<td>vLLM <code>ImageLoader</code> LRU</td>
+<td><code>image_loader.py</code></td>
+<td>路径 or PIL hash</td>
+<td><code>PIL.Image</code> / <code>MediaWithPath</code></td>
+<td>4 GiB</td>
+<td>无</td>
+</tr>
+<tr>
+<td>vLLM worker <code>MMMetaInfoCache</code></td>
+<td><code>worker_base.py:230</code></td>
+<td><code>mm_feature.identifier</code> (= mm_hash)</td>
+<td>mm metainfo（grid_thw 等，非 raw）</td>
+<td><strong>10000</strong> 项</td>
+<td>无</td>
+</tr>
+<tr>
+<td>vLLM GPU <code>encoder_cache</code></td>
+<td>model runner 内</td>
+<td><code>mm_hash</code></td>
+<td>encoder 输出 tensor（vision/audio embedding）</td>
+<td>调度器管</td>
+<td>scheduler-evict</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="六、五个深入问题"><a href="#六、五个深入问题" class="headerlink" title="六、五个深入问题"></a>六、五个深入问题</h2><h3 id="6-1-VLLM-OMNI-ENABLE-ENCODER-BATCH-的-sort-与还原"><a href="#6-1-VLLM-OMNI-ENABLE-ENCODER-BATCH-的-sort-与还原" class="headerlink" title="6.1 VLLM_OMNI_ENABLE_ENCODER_BATCH 的 sort 与还原"></a>6.1 <code>VLLM_OMNI_ENABLE_ENCODER_BATCH</code> 的 sort 与还原</h3><p>**排序 key 是 <code>(modality_str, original_index)</code>**。同 modality 内保留原序，目的不是优先 image/audio/video 谁先跑，而是为了让 <code>group_mm_kwargs_by_modality</code> 能用 <code>itertools.groupby</code> 把同 modality 的 item 沿 batch 维拼成一次 <code>embed_multimodal</code> 调用。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/worker/gpu_model_runner.py:2786</span></span><br><span class="line"><span class="keyword">if</span> envs.VLLM_OMNI_ENABLE_ENCODER_BATCH:</span><br><span class="line">    logger.info(<span class="string">"resort mm input to enable encoder batch input"</span>)</span><br><span class="line"></span><br><span class="line">    indexed_kwargs = [(i, item) <span class="keyword">for</span> i, item <span class="keyword">in</span> <span class="built_in">enumerate</span>(mm_kwargs)]</span><br><span class="line">    sorted_indexed = <span class="built_in">sorted</span>(indexed_kwargs, key=<span class="keyword">lambda</span> x: (x[<span class="number">1</span>].modality, x[<span class="number">0</span>]))</span><br><span class="line">    sorted_mm_kwargs = [item <span class="keyword">for</span> _, item <span class="keyword">in</span> sorted_indexed]</span><br><span class="line">    sorted_indices = [idx <span class="keyword">for</span> idx, _ <span class="keyword">in</span> sorted_indexed]</span><br><span class="line"></span><br><span class="line">    <span class="keyword">for</span> modality, num_items, mm_kwargs_group <span class="keyword">in</span> group_mm_kwargs_by_modality(</span><br><span class="line">        sorted_mm_kwargs,</span><br><span class="line">        device=<span class="variable language_">self</span>.device,</span><br><span class="line">        pin_memory=<span class="variable language_">self</span>.pin_memory,</span><br><span class="line">    ):</span><br><span class="line">        ...</span><br><span class="line">            curr_group_outputs = model.embed_multimodal(**mm_kwargs_group)</span><br><span class="line">        ...</span><br><span class="line">        encoder_outputs_sorted.extend(curr_group_outputs)</span><br><span class="line"></span><br><span class="line">    encoder_outputs = [<span class="literal">None</span>] * <span class="built_in">len</span>(mm_kwargs)</span><br><span class="line">    <span class="keyword">for</span> out_idx, original_idx <span class="keyword">in</span> <span class="built_in">enumerate</span>(sorted_indices):</span><br><span class="line">        encoder_outputs[original_idx] = encoder_outputs_sorted[out_idx]</span><br></pre></td></tr></table></figure>
+
+<p><strong>Batch 内部</strong>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/multimodal/utils.py:410</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">group_mm_kwargs_by_modality</span>(<span class="params">...</span>):</span><br><span class="line">    <span class="keyword">for</span> modality, items <span class="keyword">in</span> groupby(mm_kwargs, key=<span class="keyword">lambda</span> item: item.modality):</span><br><span class="line">        items_lst = <span class="built_in">list</span>(items)</span><br><span class="line">        mm_kwargs_items = MultiModalKwargsItems.from_seq(items_lst)</span><br><span class="line">        mm_kwargs_data = mm_kwargs_items.get_data(</span><br><span class="line">            device=device,</span><br><span class="line">            pin_memory=pin_memory,</span><br><span class="line">        )</span><br><span class="line">        <span class="keyword">yield</span> modality, <span class="built_in">len</span>(items_lst), mm_kwargs_data</span><br></pre></td></tr></table></figure>
+
+<p><strong>还原</strong>：<code>sorted_indices[k] = 排序后第 k 个对应原始的哪个位置</code>，逆映射写回，无额外搜索成本。</p>
+<p><strong>例子</strong>：5 张图 + 3 段音频，不开 batch 跑 8 次 encoder forward；开 batch 跑 2 次（image group 1 次 batch=5，audio group 1 次 batch=3）。Video EVS 开启 + <code>num_items &gt; 1</code> 是例外，会被强制拆成 micro-batch=1。</p>
+<h3 id="6-2-mp3-mp4-jpg-的解码与”放进请求”"><a href="#6-2-mp3-mp4-jpg-的解码与”放进请求”" class="headerlink" title="6.2 mp3/mp4/jpg 的解码与”放进请求”"></a>6.2 mp3/mp4/jpg 的解码与”放进请求”</h3><p><strong>Image</strong>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/preprocessor/multimodal_data/image/image_data_preprocessor.py:77</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">image_data_load_bgr_image</span>(<span class="params">image_data: ImageData</span>) -&gt; np.ndarray:</span><br><span class="line">    nparr = np.frombuffer(image_data.raw, np.uint8)</span><br><span class="line">    img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)</span><br><span class="line">    <span class="keyword">return</span> img</span><br></pre></td></tr></table></figure>
+
+<p>resize 用 Qwen-VL 的 <code>smart_resize</code>（H/W 是 16 的倍数）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/preprocessor/multimodal_data/image/image_data_preprocessor.py:101</span></span><br><span class="line">resized_height, resized_width = smart_resize(h, w,</span><br><span class="line">    factor=mm_conf.QWEN_VL_SIZE_FACTOR,</span><br><span class="line">    min_pixels=image_data.min_pixels,</span><br><span class="line">    max_pixels=image_data.max_pixels)</span><br><span class="line">resize_img = cv2.resize(img, (resized_width, resized_height))</span><br><span class="line">rgb_image = cv2.cvtColor(resize_img, cv2.COLOR_BGR2RGB)</span><br></pre></td></tr></table></figure>
+
+<p><strong>Video</strong>：自研 <code>sniper_codec</code>（非 decord/OpenCV），帧率 clamp：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/preprocessor/multimodal_data/video/video_file_data_preprocessor.py:293</span></span><br><span class="line">frames = sniper_decode(input_video_file=video_file,</span><br><span class="line">                       input_video_info=input_video_info,</span><br><span class="line">                       output_fps=video_data.sampled_fps,</span><br><span class="line">                       output_size=output_size,</span><br><span class="line">                       enable_chunked_decode=<span class="literal">True</span>,</span><br><span class="line">                       ...)</span><br></pre></td></tr></table></figure>
+
+<p>视频里的音频抽出来用 ffmpeg subprocess：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/utils/ffmpeg.py:27</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">extract_audio</span>(<span class="params">video_path: <span class="built_in">str</span>, audio_output_path: <span class="built_in">str</span></span>) -&gt; <span class="built_in">bool</span>:</span><br><span class="line">    command = [<span class="string">'ffmpeg'</span>, <span class="string">'-i'</span>, video_path, <span class="string">'-q:a'</span>, <span class="string">'0'</span>, <span class="string">'-map'</span>, <span class="string">'a'</span>, audio_output_path]</span><br><span class="line">    subprocess.run(command, check=<span class="literal">True</span>)</span><br></pre></td></tr></table></figure>
+
+<p><strong>Audio</strong>：ffmpeg pipe 解到 s16le 再 / 32768 转 float32 16kHz mono：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashscope-serving/multimodal_serving/utils/ffmpeg.py:125</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">load_bytesio_audio</span>(<span class="params">audio_file: <span class="built_in">str</span>, sr: <span class="built_in">int</span> = <span class="number">16000</span></span>) -&gt; np.ndarray:</span><br><span class="line">    cmd = [</span><br><span class="line">        <span class="string">'ffmpeg'</span>, <span class="string">'-y'</span>, <span class="string">'-nostdin'</span>, <span class="string">'-threads'</span>, <span class="string">'0'</span>, <span class="string">'-i'</span>, audio_file, <span class="string">'-f'</span>, <span class="string">'s16le'</span>, <span class="string">'-ac'</span>, <span class="string">'1'</span>, <span class="string">'-acodec'</span>, <span class="string">'pcm_s16le'</span>,</span><br><span class="line">        <span class="string">'-ar'</span>, <span class="built_in">str</span>(sr), <span class="string">'pipe:'</span></span><br><span class="line">    ]</span><br><span class="line">    ...</span><br><span class="line">    <span class="keyword">return</span> np.frombuffer(out, np.int16).flatten().astype(np.float32) / <span class="number">32768.0</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="6-3-D-端如何知道-MM-token-数（不跑-input-preprocessor）"><a href="#6-3-D-端如何知道-MM-token-数（不跑-input-preprocessor）" class="headerlink" title="6.3 D 端如何知道 MM token 数（不跑 input_preprocessor）"></a>6.3 D 端如何知道 MM token 数（不跑 input_preprocessor）</h3><p>三层机制：</p>
+<ol>
+<li><strong>D 收到的 input_ids 是 P 展开后的完整序列</strong>（含 N 个 pad token），来源于 P 通过 <code>extra_params["prompt_token_ids"]</code> 推过来。</li>
+<li><strong>KV slot 分配</strong>：调度器只看 <code>prompt_token_ids</code> 长度，不区分 pad/普通 token。</li>
+<li><strong>M-RoPE 位置</strong>：P 算出 <code>mrope_position_delta</code> 并传给 D，D 不重算 MM 段位置：</li>
+</ol>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/worker/gpu_model_runner.py:1234</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.uses_mrope:</span><br><span class="line">    remote_mrope_position_delta = (</span><br><span class="line">        sampling_params.extra_args.get(<span class="string">"mrope_position_delta"</span>)</span><br><span class="line">        ...</span><br><span class="line">    )</span><br><span class="line">    <span class="keyword">if</span> remote_mrope_position_delta <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>:</span><br><span class="line">        input_len = <span class="built_in">len</span>(<span class="variable language_">self</span>.requests[req_id].prompt_token_ids)</span><br><span class="line">        req_state.mrope_position_delta = remote_mrope_position_delta</span><br><span class="line">        req_state.mrope_positions = (</span><br><span class="line">            torch.arange(input_len) + remote_mrope_position_delta</span><br><span class="line">        ).expand(<span class="number">3</span>, input_len)</span><br><span class="line">    <span class="keyword">else</span>:</span><br><span class="line">        <span class="variable language_">self</span>._init_mrope_positions(req_state)</span><br></pre></td></tr></table></figure>
+
+<p>非 omni 的 v1 PD path 才有 <code>prompt_token_ids_len + pad token prepend</code> 那套，omni PD 直接传完整 ids。</p>
+<h3 id="6-4-Placeholder-→-embedding-位置映射"><a href="#6-4-Placeholder-→-embedding-位置映射" class="headerlink" title="6.4 Placeholder → embedding 位置映射"></a>6.4 Placeholder → embedding 位置映射</h3><p><strong>Token id</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>Token</th>
+<th>ID</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>&lt;|vision_start|&gt;</code></td>
+<td>248053</td>
+</tr>
+<tr>
+<td><code>&lt;|vision_end|&gt;</code></td>
+<td>248054</td>
+</tr>
+<tr>
+<td><code>&lt;|image_pad|&gt;</code></td>
+<td>248056</td>
+</tr>
+<tr>
+<td><code>&lt;|video_pad|&gt;</code></td>
+<td>248057</td>
+</tr>
+<tr>
+<td><code>&lt;|audio_start|&gt;</code></td>
+<td>248070</td>
+</tr>
+<tr>
+<td><code>&lt;|audio_end|&gt;</code></td>
+<td>248071</td>
+</tr>
+<tr>
+<td><code>&lt;|audio_pad|&gt;</code></td>
+<td>248076</td>
+</tr>
+</tbody></table>
+<p><strong>Placeholder 展开（pad 数量计算）</strong>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/model_executor/models/qwen3_omni_next_thinker.py:604</span></span><br><span class="line">audio_tokens_per_second = math.ceil(</span><br><span class="line">    feature_extractor.sampling_rate</span><br><span class="line">    / feature_extractor.hop_length</span><br><span class="line">    / <span class="number">2</span>**downsample_times</span><br><span class="line">)</span><br><span class="line">...</span><br><span class="line"><span class="keyword">def</span> <span class="title function_">get_audio_replacement_qwen35omni</span>(<span class="params">item_idx: <span class="built_in">int</span></span>):</span><br><span class="line">    ...</span><br><span class="line">    num_features = _get_feat_extract_output_lengths(</span><br><span class="line">        out_item[<span class="string">"feature_attention_mask"</span>].data.<span class="built_in">sum</span>()</span><br><span class="line">    )</span><br><span class="line">    audio_token_str = hf_processor._get_audio_tokens(</span><br><span class="line">        num_features,</span><br><span class="line">        audio_tokens_per_second,</span><br><span class="line">        timestamp_interval,</span><br><span class="line">    ).replace(<span class="string">"&lt;|audio_placeholder|&gt;"</span>, audio_token)</span><br><span class="line">    <span class="keyword">return</span> PromptUpdateDetails.select_token_id(audio_token_str, audio_token_id)</span><br></pre></td></tr></table></figure>
+
+<p><code>audio_tokens_per_second = ceil(sr / hop_length / 2^downsample)</code>，对 Qwen3.5 典型配置 = <strong>7</strong>。</p>
+<p><strong>Scatter encoder embedding 到 pad 位置</strong>（三步）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/worker/gpu_model_runner.py:2972</span></span><br><span class="line"><span class="keyword">for</span> mm_feature <span class="keyword">in</span> req_state.mm_features:</span><br><span class="line">    pos_info = mm_feature.mm_position</span><br><span class="line">    start_pos = pos_info.offset</span><br><span class="line">    num_encoder_tokens = pos_info.length</span><br><span class="line">    ...</span><br><span class="line">    encoder_output = <span class="variable language_">self</span>.encoder_cache.get(mm_hash, <span class="literal">None</span>)</span><br><span class="line">    ...</span><br><span class="line">    is_mm_embed[req_start_pos + start_idx : req_start_pos + end_idx] = (</span><br><span class="line">        <span class="literal">True</span> <span class="keyword">if</span> is_embed <span class="keyword">is</span> <span class="literal">None</span> <span class="keyword">else</span> is_embed</span><br><span class="line">    )</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/model_executor/models/qwen3_omni_next_thinker.py:1255</span></span><br><span class="line">is_multimodal = (</span><br><span class="line">    (input_ids == video_token_id)</span><br><span class="line">    | (input_ids == audio_token_id)</span><br><span class="line">    | (input_ids == image_token_id)</span><br><span class="line">)</span><br><span class="line">inputs_embeds = <span class="variable language_">self</span>._embed_text_input_ids(</span><br><span class="line">    input_ids,</span><br><span class="line">    <span class="variable language_">self</span>.language_model.embed_input_ids,</span><br><span class="line">    is_multimodal=is_multimodal,</span><br><span class="line">    ...</span><br><span class="line">)</span><br><span class="line">...</span><br><span class="line">inputs_embeds = _merge_multimodal_embeddings(</span><br><span class="line">    inputs_embeds=inputs_embeds,</span><br><span class="line">    multimodal_embeddings=multimodal_embeddings,</span><br><span class="line">    is_multimodal=is_multimodal,</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/model_executor/models/utils.py:455</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">_merge_multimodal_embeddings</span>(<span class="params"></span></span><br><span class="line"><span class="params">    inputs_embeds: torch.Tensor,</span></span><br><span class="line"><span class="params">    multimodal_embeddings: NestedTensors,</span></span><br><span class="line"><span class="params">    is_multimodal: torch.Tensor,</span></span><br><span class="line"><span class="params"></span>) -&gt; torch.Tensor:</span><br><span class="line">    ...</span><br><span class="line">    inputs_embeds.masked_scatter_(</span><br><span class="line">        is_multimodal.unsqueeze(-<span class="number">1</span>), mm_embeds_flat.to(dtype=input_dtype)</span><br><span class="line">    )</span><br></pre></td></tr></table></figure>
+
+<h3 id="6-5-omni-prefill-remote-endpoint-在-talker-侧"><a href="#6-5-omni-prefill-remote-endpoint-在-talker-侧" class="headerlink" title="6.5 omni_prefill_remote_endpoint 在 talker 侧"></a>6.5 <code>omni_prefill_remote_endpoint</code> 在 talker 侧</h3><p><strong>Endpoint 是 ZMQ RPC + Vineyard 共享内存控制面地址</strong>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/dashllm/dashllm/core/backend/engine/_vllm_omni_rpc.py:384</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">get_remote_endpoint</span>(<span class="params">self</span>) -&gt; <span class="built_in">str</span>:</span><br><span class="line">    <span class="keyword">if</span> <span class="variable language_">self</span>._ip <span class="keyword">is</span> <span class="literal">None</span> <span class="keyword">or</span> <span class="variable language_">self</span>._send_port <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">        <span class="keyword">return</span> <span class="literal">None</span></span><br><span class="line">    <span class="keyword">return</span> <span class="variable language_">self</span>._ip + <span class="string">":"</span> + <span class="built_in">str</span>(<span class="variable language_">self</span>._send_port)</span><br></pre></td></tr></table></figure>
+
+<p><strong>PD 模式下分布</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>P (kv_producer)</th>
+<th>D (kv_consumer)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Thinker MM encoder + prefill（产 KV）</td>
+<td>✓</td>
+<td>✗</td>
+</tr>
+<tr>
+<td>Thinker decode（出 text token 流）</td>
+<td>✗</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>Talker（出 audio token 流）</td>
+<td>✗</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>Code2wav（audio token → 波形）</td>
+<td>✗</td>
+<td>✓</td>
+</tr>
+</tbody></table>
+<p>Talker 需要两路 t2t 流：</p>
+<ol>
+<li><code>t2t_controller_prefill</code> → 连 P 的 thinker（拿 prefill 阶段 hidden states）</li>
+<li><code>t2t_controller</code> → 连 D 的 thinker（拿后续 text token）</li>
+</ol>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/engine/omni3_5_talker_engine.py:2185</span></span><br><span class="line">embed_endpoint = prefill_remote_endpoint <span class="keyword">or</span> remote_endpoint</span><br><span class="line">...</span><br><span class="line"><span class="keyword">if</span> prefill_remote_endpoint <span class="keyword">and</span> <span class="variable language_">self</span>.t2t_controller_prefill <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>:</span><br><span class="line">    asyncio.run_coroutine_threadsafe(</span><br><span class="line">        <span class="variable language_">self</span>.t2t_controller_prefill.prepare_request_transfer(</span><br><span class="line">            request_id, prefill_remote_endpoint, mm_prompt_len</span><br><span class="line">        ),</span><br><span class="line">        <span class="variable language_">self</span>._recv_loop,</span><br><span class="line">    ).result()</span><br><span class="line">...</span><br><span class="line">asyncio.run_coroutine_threadsafe(</span><br><span class="line">    <span class="variable language_">self</span>.t2t_controller.prepare_request_transfer(</span><br><span class="line">        request_id, t2t_endpoint, mm_prompt_len</span><br><span class="line">    ),</span><br></pre></td></tr></table></figure>
+
+<p><strong>一句话</strong>：<code>omni_prefill_remote_endpoint</code> 是 P thinker 的 t2t RPC 地址，让 D 上的 talker 额外开一条 t2t 流去 P 拿 prefill 阶段算出来的 hidden states。普通 <code>omni_remote_endpoint</code> 仍然指 D 自己的 thinker。两条流缺一不可。</p>
+<hr>
+<h2 id="七、omni-实时场景特别注意点"><a href="#七、omni-实时场景特别注意点" class="headerlink" title="七、omni 实时场景特别注意点"></a>七、omni 实时场景特别注意点</h2><ol>
+<li><strong>D 永远没机会重建 MM 段</strong>：raw <code>multi_modal_data</code> 在 P→D 的 StreamInfer 包里被故意去掉，KVT 控制结构里也没有 MM 字段。所以 D 一旦 KV 没拉到（P abort 或网络问题），<strong>唯一出路是放弃这个 request</strong>。这就是引入 <code>CODE_REQGONE</code> 的根本动机。</li>
+<li><strong><code>prompt_token_ids</code> 在 external_router 路径被剪枝</strong>：D 端依赖 <code>prompt_token_ids_len + pad token</code> 补齐 — omni 路径不走这套（直接传完整 ids），但要确认每次 dashllm 路径选择正确。</li>
+<li><strong>三层 hash 要对齐</strong>：dashscope <code>mm_key</code>（md5）→ vLLM <code>MultiModalHasher</code>（path 或 blake3）→ encoder_cache <code>mm_hash</code>。<code>VLLM_USE_FILE_PATH_MMD_CACHE=True</code> 时同 path 不同内容会错命中。</li>
+<li><strong>omni 视频显式禁用 OSS cache</strong>，高并发下每个 video URL 都要走 ffmpeg 抽音频 + 重新预处理。</li>
+<li><strong><code>MMMetaInfoCache</code> capacity 10000 项</strong>：实时多用户场景容易撑满，命中失败时触发 SHM recovery 读，相对慢。</li>
+</ol>
+<hr>
+<h2 id="八、KV-transfer-修复（CODE-REQGONE）回顾"><a href="#八、KV-transfer-修复（CODE-REQGONE）回顾" class="headerlink" title="八、KV transfer 修复（CODE_REQGONE）回顾"></a>八、KV transfer 修复（CODE_REQGONE）回顾</h2><blockquote>
+<p>这一节单独成文，记录前面 PD 高并发问题的修复方案。</p>
+</blockquote>
+<h3 id="8-1-问题"><a href="#8-1-问题" class="headerlink" title="8.1 问题"></a>8.1 问题</h3><p>并发高 + 实时 omni 场景下：</p>
+<ul>
+<li>P 端：<code>503 ServiceUnavailable: Too many requests</code></li>
+<li>D 端：<code>KVTResp(code=404, cached=0, computed=-1, output_token_ids=[])</code> 重试到几十次，<code>HybridScheduler</code> 卡在 <code>loading=4</code></li>
+</ul>
+<h3 id="8-2-根因"><a href="#8-2-根因" class="headerlink" title="8.2 根因"></a>8.2 根因</h3><p>时间窗错配 + 状态错配：</p>
+<ul>
+<li>P 上 prefill 完成后 <code>_dash_done[reqid]</code> 等 D 来取 KV</li>
+<li>实时业务在新音频段到达时主动 abort 前段的 prefill（但保留 decode 请求）→ P 清掉 <code>_dash_done[reqid]</code> + KV</li>
+<li>D 还在 retry <code>TRANSFER_KV_REQ</code>，P 返回 404（普通的 “not found”）</li>
+<li>D 收到 404 默认 retry，loading slot 一直占着不释放 → 占满 KV → 触发 D 端 503 → 又触发更多 abort → 雪崩</li>
+</ul>
+<h3 id="8-3-修复方案"><a href="#8-3-修复方案" class="headerlink" title="8.3 修复方案"></a>8.3 修复方案</h3><p>引入 <code>CODE_REQGONE=410</code>（P 显式告诉 D「这个 reqid 确实没了」）+ TTL LRU：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/hybrid_connector/kvtbackend.py:706</span></span><br><span class="line"><span class="variable language_">self</span>._gone_reqs: OrderedDict[<span class="built_in">str</span>, <span class="built_in">float</span>] = OrderedDict()</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/hybrid_connector/kvtbackend.py:1146</span></span><br><span class="line"><span class="variable language_">self</span>._dash_done.pop(areq.request_id, <span class="literal">None</span>)</span><br><span class="line"><span class="comment"># Record the abort for future TRANSFER_KV_REQ for this reqid</span></span><br><span class="line"><span class="variable language_">self</span>._mark_gone(areq.request_id, <span class="string">"abort_save"</span>)</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/hybrid_connector/kvtbackend.py:1012</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>._is_gone(rdinfo.reqid):</span><br><span class="line">    code = CODE_REQGONE</span><br><span class="line">    reason = <span class="string">"req gone"</span></span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    code = CODE_REQNOTFOUND</span><br><span class="line">    reason = <span class="string">"req not found"</span></span><br></pre></td></tr></table></figure>
+
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/v1/hybrid_connector/kvtbackend.py:2247</span></span><br><span class="line"><span class="keyword">if</span> kvtresp.code == CODE_REQGONE:</span><br><span class="line">    logger.warning(</span><br><span class="line">        <span class="string">"disagg kv gone on P. reqid=%s peer=%s retry=%s"</span>,</span><br><span class="line">        reqid, peer_hint, retry,</span><br><span class="line">    )</span><br><span class="line">    <span class="keyword">raise</span> RuntimeError(</span><br><span class="line">        <span class="string">f"kv gone on P "</span></span><br><span class="line">        <span class="string">f"(reqid=<span class="subst">{reqid}</span>, peer=<span class="subst">{peer_hint}</span>, retry=<span class="subst">{retry}</span>)"</span>)</span><br></pre></td></tr></table></figure>
+
+<p>环境变量 <code>VLLM_KVT_GONE_REQ_TTL_S</code>（默认 0 关闭，omni 默认 60s）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># /mnt/data/llx/vllm/vllm/engine/omni3_5_llm_engine.py:3673</span></span><br><span class="line">os.environ.setdefault(<span class="string">"VLLM_KVT_MAX_DELAY_MS"</span>, <span class="string">"30000"</span>)</span><br><span class="line">os.environ.setdefault(<span class="string">"VLLM_KVT_GONE_REQ_TTL_S"</span>, <span class="string">"60"</span>)</span><br></pre></td></tr></table></figure>
+
+<h3 id="8-4-验证修复是否生效"><a href="#8-4-验证修复是否生效" class="headerlink" title="8.4 验证修复是否生效"></a>8.4 验证修复是否生效</h3><p>修复生效时，应该在日志里看到：</p>
+<ul>
+<li><strong>P 端</strong>：每次 abort 都会打 <code>mark gone reqid. reqid=... reason=abort_save gone_size=N ttl_s=60</code></li>
+<li><strong>D 端</strong>：再来的请求收到 410（不再是 404），打 <code>disagg kv gone on P. reqid=... peer=... retry=N</code>，<strong>retry 不应再涨到 20+</strong></li>
+<li><strong>D 端 <code>kvtresp</code></strong> 字段从 <code>code=404</code> 变成 <code>code=410</code></li>
+</ul>
+<p>如果 P 上根本看不到 <code>mark gone reqid</code> 这条 log，说明要么 <code>VLLM_KVT_GONE_REQ_TTL_S</code> 没生效（启动时被覆盖成 0），要么实际清空 <code>_dash_done</code> 走的不是 <code>_step_aborting</code> 路径。</p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离）</p><p><a href="https://llx-08.github.io/notes/2026/06/01/2026-06-01-vllm-omni-multimodal-pipeline/">https://llx-08.github.io/notes/2026/06/01/2026-06-01-vllm-omni-multimodal-pipeline/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-06-01</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-06-01</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">Mooncake 项目功能与关键概念笔记</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/05/25/2026-05-25-learn-rabitq/"><span class="level-item">RabitQ 阅读笔记</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">15</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-01T00:00:00.000Z">2026-06-01</time></p><p class="title"><a href="/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/">Mooncake 项目功能与关键概念笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-01T00:00:00.000Z">2026-06-01</time></p><p class="title"><a href="/notes/2026/06/01/2026-06-01-vllm-omni-multimodal-pipeline/">Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离）</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-learn-rabitq/">RabitQ 阅读笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-project-architecture-and-vllm-integration/">blade-kvt 项目架构与 vLLM 对接指南</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-rdma-learning-1/">RDMA学习笔记（1）</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>Mooncake 项目功能与关键概念笔记 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="Mooncake 项目功能与关键概念笔记 1. 项目整体功能 Mooncake 是一个面向大模型推理的分布式 KVCache &amp;#x2F; 对象缓存系统。它的核心目标是把 LLM 推理过程中产生的 KVCache、Tensor、临时对象等数据放到跨节点的 DRAM、VRAM、SSD 资源池中，并通过高性能传输引擎完成跨机器、跨设备的数据读写。 典型使用场景包括： vLLM &amp;#x2F; SGLang 的 prefil"><meta property="og:type" content="blog"><meta property="og:title" content="Mooncake 项目功能与关键概念笔记"><meta property="og:url" content="https://llx-08.github.io/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="Mooncake 项目功能与关键概念笔记 1. 项目整体功能 Mooncake 是一个面向大模型推理的分布式 KVCache &amp;#x2F; 对象缓存系统。它的核心目标是把 LLM 推理过程中产生的 KVCache、Tensor、临时对象等数据放到跨节点的 DRAM、VRAM、SSD 资源池中，并通过高性能传输引擎完成跨机器、跨设备的数据读写。 典型使用场景包括： vLLM &amp;#x2F; SGLang 的 prefil"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-06-01T00:00:00.000Z"><meta property="article:modified_time" content="2026-06-01T02:33:57.268Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/"},"headline":"Mooncake 项目功能与关键概念笔记","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-06-01T00:00:00.000Z","dateModified":"2026-06-01T02:33:57.268Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"Mooncake 项目功能与关键概念笔记 1. 项目整体功能 Mooncake 是一个面向大模型推理的分布式 KVCache &#x2F; 对象缓存系统。它的核心目标是把 LLM 推理过程中产生的 KVCache、Tensor、临时对象等数据放到跨节点的 DRAM、VRAM、SSD 资源池中，并通过高性能传输引擎完成跨机器、跨设备的数据读写。 典型使用场景包括： vLLM &#x2F; SGLang 的 prefil"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-06-01T00:00:00.000Z" title="6/1/2026, 12:00:00 AM">2026-06-01</time>发表</span><span class="level-item"><time dateTime="2026-06-01T02:33:57.268Z" title="6/1/2026, 2:33:57 AM">2026-06-01</time>更新</span><span class="level-item">21 分钟读完 (大约3111个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">Mooncake 项目功能与关键概念笔记</h1><div class="content"><h1 id="Mooncake-项目功能与关键概念笔记"><a href="#Mooncake-项目功能与关键概念笔记" class="headerlink" title="Mooncake 项目功能与关键概念笔记"></a>Mooncake 项目功能与关键概念笔记</h1><h2 id="1-项目整体功能"><a href="#1-项目整体功能" class="headerlink" title="1. 项目整体功能"></a>1. 项目整体功能</h2><p>Mooncake 是一个面向大模型推理的分布式 KVCache / 对象缓存系统。它的核心目标是把 LLM 推理过程中产生的 KVCache、Tensor、临时对象等数据放到跨节点的 DRAM、VRAM、SSD 资源池中，并通过高性能传输引擎完成跨机器、跨设备的数据读写。</p>
+<p>典型使用场景包括：</p>
+<ul>
+<li>vLLM / SGLang 的 prefill-decode 分离。</li>
+<li>多实例之间复用 KVCache，减少重复 prefill 计算。</li>
+<li>分层缓存：GPU 显存、CPU 内存、远端内存、SSD / 文件后端。</li>
+<li>Tensor、checkpoint、KVCache 等大对象的高速传输。</li>
+</ul>
+<p>一句话理解：Mooncake 不是普通 Redis 类缓存，而是为 LLM 推理中的 KVCache 和 Tensor 数据流专门设计的分布式高速对象存储与传输系统。</p>
+<h2 id="2-仓库主要模块"><a href="#2-仓库主要模块" class="headerlink" title="2. 仓库主要模块"></a>2. 仓库主要模块</h2><h3 id="2-1-Transfer-Engine"><a href="#2-1-Transfer-Engine" class="headerlink" title="2.1 Transfer Engine"></a>2.1 Transfer Engine</h3><p>路径：<code>/mnt/data/llx/mooncake/mooncake-transfer-engine</code></p>
+<p>Transfer Engine 是底层数据传输层，负责在不同机器、不同设备之间搬运数据。它支持 TCP、RDMA、CXL、NVLink、NVMe-oF、Ascend 等协议或设备路径。</p>
+<p>核心概念：</p>
+<ul>
+<li><code>Segment</code>：一个进程或节点暴露出来的可访问地址空间。</li>
+<li><code>Buffer</code>：Segment 中具体注册给传输引擎的内存范围。</li>
+<li><code>BatchTransfer</code>：批量读写请求，可以一次提交多个读写任务。</li>
+<li><code>TransferEngine</code>：统一管理传输协议、内存注册、远端 segment 打开、批量传输状态。</li>
+</ul>
+<h3 id="2-2-Mooncake-Store"><a href="#2-2-Mooncake-Store" class="headerlink" title="2.2 Mooncake Store"></a>2.2 Mooncake Store</h3><p>路径：<code>/mnt/data/llx/mooncake/mooncake-store</code></p>
+<p>Mooncake Store 是分布式 KVCache 存储层，基于 Transfer Engine 实现对象级别的 <code>Put</code>、<code>Get</code>、<code>Remove</code>、<code>BatchPut</code>、<code>BatchGet</code> 等操作。</p>
+<p>主要角色：</p>
+<ul>
+<li><code>MasterService</code>：管理元数据、对象到 segment 的映射、空间分配、lease、soft pin、驱逐、任务调度。</li>
+<li><code>Client</code>：执行真正的数据读写，通过 Transfer Engine 把数据写到目标 segment 或从目标 segment 读出。</li>
+<li><code>RealClient</code>：完整客户端 / 存储节点实现，通常作为常驻进程运行。</li>
+<li><code>DummyClient</code>：轻量代理客户端，通常嵌在 Python 推理进程中，通过 RPC 和共享内存连接 RealClient。</li>
+</ul>
+<h3 id="2-3-Python-绑定"><a href="#2-3-Python-绑定" class="headerlink" title="2.3 Python 绑定"></a>2.3 Python 绑定</h3><p>路径：<code>/mnt/data/llx/mooncake/mooncake-integration/store/store_py.cpp</code></p>
+<p>这里通过 pybind11 暴露 Python API，例如：</p>
+<ul>
+<li><code>MooncakeDistributedStore</code></li>
+<li><code>ReplicateConfig</code></li>
+<li><code>put</code></li>
+<li><code>get</code></li>
+<li><code>put_parts</code></li>
+<li><code>put_from</code></li>
+<li><code>get_into</code></li>
+<li><code>get_buffer</code></li>
+<li><code>put_tensor</code></li>
+<li><code>get_tensor</code></li>
+</ul>
+<p>Python 用户主要通过：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">from</span> mooncake.store <span class="keyword">import</span> MooncakeDistributedStore, ReplicateConfig</span><br></pre></td></tr></table></figure>
+
+<p>来使用 Mooncake Store。</p>
+<h2 id="3-全局-Segment-的含义"><a href="#3-全局-Segment-的含义" class="headerlink" title="3. 全局 Segment 的含义"></a>3. 全局 Segment 的含义</h2><p><code>global_segment_size</code> 指的是单个 RealClient / Client 在本机贡献出来的存储 segment 大小。</p>
+<p>它不是一块天然跨机器的连续内存。物理上，每个 segment 都属于某台机器上的某个 RealClient 进程。多个机器上的 RealClient 各自挂载自己的 segment 后，Master 会把这些 segment 统一管理成一个逻辑上的分布式资源池。</p>
+<p>所以可以这样理解：</p>
+<ul>
+<li>物理层面：segment 在单机本地。</li>
+<li>逻辑层面：Master 把所有机器的 segment 组合成跨机器资源池。</li>
+<li>写对象时：<code>PutStart</code> 可以在任意可用 segment 上分配空间，因此对象副本可以被放到远端机器。</li>
+<li>如果 <code>global_segment_size = 0</code>：该 client 是纯客户端，不贡献存储空间。</li>
+</ul>
+<p>结论：全局 segment 不是单块跨机器共享内存，而是“单机贡献、多机汇总”的分布式存储池。</p>
+<h2 id="4-RealClient-与-DummyClient-的关系"><a href="#4-RealClient-与-DummyClient-的关系" class="headerlink" title="4. RealClient 与 DummyClient 的关系"></a>4. RealClient 与 DummyClient 的关系</h2><h3 id="4-1-RealClient"><a href="#4-1-RealClient" class="headerlink" title="4.1 RealClient"></a>4.1 RealClient</h3><p>核心文件：</p>
+<ul>
+<li><code>/mnt/data/llx/mooncake/mooncake-store/include/real_client.h</code></li>
+<li><code>/mnt/data/llx/mooncake/mooncake-store/src/real_client.cpp</code></li>
+<li><code>/mnt/data/llx/mooncake/mooncake-store/src/real_client_main.cpp</code></li>
+</ul>
+<p>RealClient 是完整客户端和存储节点实现。它负责：</p>
+<ul>
+<li>初始化底层 <code>Client</code>。</li>
+<li>挂载本机 global segment。</li>
+<li>注册 Transfer Engine。</li>
+<li>连接 MasterService。</li>
+<li>维护本机内存池、共享内存、hot cache。</li>
+<li>启动 RPC server，给 DummyClient 调用。</li>
+<li>在 local master 模式下，同进程内启动 MasterService。</li>
+</ul>
+<p>独立进程 <code>mooncake_client</code> 本质上就是一个 RealClient 服务。</p>
+<h3 id="4-2-DummyClient"><a href="#4-2-DummyClient" class="headerlink" title="4.2 DummyClient"></a>4.2 DummyClient</h3><p>核心文件：</p>
+<ul>
+<li><code>/mnt/data/llx/mooncake/mooncake-store/include/dummy_client.h</code></li>
+<li><code>/mnt/data/llx/mooncake/mooncake-store/src/dummy_client.cpp</code></li>
+</ul>
+<p>DummyClient 是业务进程中的轻量代理。它通常运行在 Python / vLLM / SGLang 进程里，不自己完整管理存储节点，而是连接本机 RealClient。</p>
+<p>它负责：</p>
+<ul>
+<li>通过 RPC 调用 RealClient。</li>
+<li>通过 Unix domain socket + SCM_RIGHTS 获取共享内存 fd。</li>
+<li>mmap RealClient 暴露的共享内存区域。</li>
+<li>在 local master 模式下，直接通过共享内存池 <code>G</code> 执行 <code>put_parts</code> / <code>get_buffer</code> 快路径。</li>
+<li>必要时把写入 fallback 到 offload storage。</li>
+</ul>
+<h3 id="4-3-多个-DummyClient-连接一个-RealClient"><a href="#4-3-多个-DummyClient-连接一个-RealClient" class="headerlink" title="4.3 多个 DummyClient 连接一个 RealClient"></a>4.3 多个 DummyClient 连接一个 RealClient</h3><p>多个 DummyClient 可以连接同一个 RealClient。每个 DummyClient 有自己的 <code>client_id</code> 和共享内存上下文。</p>
+<p>这些 DummyClient 提交的任务不是在 RealClient 上全局按顺序排队执行。RealClient 的 RPC server 是多线程 / 协程服务，不同 DummyClient、不同 key 的请求可以并发执行。</p>
+<p>正确性不是靠“串行执行所有任务”保证，而是靠以下机制保证：</p>
+<ul>
+<li>MasterService 的元数据锁。</li>
+<li>对象状态机：<code>PutStart</code>、<code>PutEnd</code>、<code>Remove</code>、<code>GetReplicaList</code>。</li>
+<li>lease / refcount。</li>
+<li>allocator 的并发控制。</li>
+<li>同 key 写入冲突检测，例如对象已存在、正在写入、PutStart 未完成等。</li>
+</ul>
+<p>因此：</p>
+<ul>
+<li>不同 key 的请求通常可以并发。</li>
+<li>同一个 key 的冲突由 MasterService 元数据逻辑处理。</li>
+<li>local master 模式下，<code>DummyClient::put_parts()</code> 的快路径甚至会在 DummyClient 进程中通过 mmap 的统一内存池写入，并不是所有数据都进入 RealClient 排队执行。</li>
+</ul>
+<h2 id="5-Soft-Pin"><a href="#5-Soft-Pin" class="headerlink" title="5. Soft Pin"></a>5. Soft Pin</h2><h3 id="5-1-概念"><a href="#5-1-概念" class="headerlink" title="5.1 概念"></a>5.1 概念</h3><p>soft pin 是“软固定”对象的机制。它表示某个对象应该尽量保留在内存中，不要优先被驱逐。</p>
+<p>配置入口是：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">ReplicateConfig config;</span><br><span class="line">config.with_soft_pin = <span class="literal">true</span>;</span><br></pre></td></tr></table></figure>
+
+<p>Python 侧也可以设置：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">config = ReplicateConfig()</span><br><span class="line">config.with_soft_pin = <span class="literal">True</span></span><br><span class="line">store.put(<span class="string">"key"</span>, <span class="string">b"value"</span>, config)</span><br></pre></td></tr></table></figure>
+
+<h3 id="5-2-它不是-hard-pin"><a href="#5-2-它不是-hard-pin" class="headerlink" title="5.2 它不是 hard pin"></a>5.2 它不是 hard pin</h3><p>soft pin 不等于永远不能驱逐。它更像一个驱逐优先级 hint：</p>
+<ul>
+<li>普通对象优先被驱逐。</li>
+<li>soft pinned 对象尽量延后驱逐。</li>
+<li>如果配置允许驱逐 soft pinned 对象，空间非常紧张时仍可能被驱逐。</li>
+</ul>
+<p>默认 TTL 在 <code>DEFAULT_KV_SOFT_PIN_TTL_MS</code> 中定义，目前是 30 分钟。</p>
+<h3 id="5-3-Master-层作用"><a href="#5-3-Master-层作用" class="headerlink" title="5.3 Master 层作用"></a>5.3 Master 层作用</h3><p>在 <code>MasterService::DoPutStart</code> 中，如果 <code>config.with_soft_pin</code> 为 true，会设置 <code>soft_pin_timeout</code>。</p>
+<p>驱逐时大致逻辑是：</p>
+<ul>
+<li>第一轮优先驱逐非 soft pin 对象。</li>
+<li>如果空间仍不够，并且允许驱逐 soft pin 对象，再驱逐 soft pin 对象。</li>
+</ul>
+<h3 id="5-4-Offload-层作用"><a href="#5-4-Offload-层作用" class="headerlink" title="5.4 Offload 层作用"></a>5.4 Offload 层作用</h3><p>在 tiered offload 中，<code>with_soft_pin</code> 还有额外含义。</p>
+<p>例如 <code>TieredOffloadStorage</code> 里，如果 primary backend 写入失败，只有当 <code>with_soft_pin = true</code> 时，才会尝试 fallback backend。</p>
+<p>也就是说 soft pin 在这里还控制“主后端失败时是否允许走 fallback”。</p>
+<h2 id="6-put-parts"><a href="#6-put-parts" class="headerlink" title="6. put_parts"></a>6. put_parts</h2><h3 id="6-1-API-语义"><a href="#6-1-API-语义" class="headerlink" title="6.1 API 语义"></a>6.1 API 语义</h3><p><code>put_parts(key, part1, part2, ...)</code> 用来把多个不连续的 buffer 当作同一个对象写入。</p>
+<p>它适合以下场景：</p>
+<ul>
+<li>上层数据天然分成多段。</li>
+<li>不想在 Python 里先拼成一个大 bytes。</li>
+<li>Tensor metadata 和 payload 分开存储。</li>
+<li>local master 模式下希望走共享内存快路径。</li>
+</ul>
+<p>Python 绑定在 <code>store_py.cpp</code> 中会把多个 bytes-like 参数转换成 <code>std::span&lt;const char&gt;</code>，再调用 C++ 的 <code>put_parts</code>。</p>
+<h3 id="6-2-RealClient-路径"><a href="#6-2-RealClient-路径" class="headerlink" title="6.2 RealClient 路径"></a>6.2 RealClient 路径</h3><p><code>RealClient::put_parts_internal</code> 的大致流程：</p>
+<ol>
+<li>计算所有 part 的总大小。</li>
+<li>从 client buffer allocator 中分配连续 buffer。</li>
+<li>把每个 part 依次 memcpy 到连续 buffer 中。</li>
+<li>调用 <code>split_into_slices</code> 切分为 Mooncake Store 的 slice。</li>
+<li>调用 <code>client_-&gt;Put(key, slices, config)</code> 完成存储。</li>
+</ol>
+<p>相关函数：</p>
+<ul>
+<li><code>RealClient::put_parts</code></li>
+<li><code>RealClient::put_parts_internal</code></li>
+<li><code>RealClient::put_parts_dummy_helper</code></li>
+</ul>
+<h3 id="6-3-DummyClient-local-master-路径"><a href="#6-3-DummyClient-local-master-路径" class="headerlink" title="6.3 DummyClient local master 路径"></a>6.3 DummyClient local master 路径</h3><p>local master 模式下，<code>DummyClient::put_parts</code> 会优先走快路径：</p>
+<ol>
+<li>把每个 part 转成 <code>Slice</code>。</li>
+<li>调用 <code>Client::DummyPut</code>。</li>
+<li><code>DummyPut</code> 向 Master 执行 <code>PutStart</code>。</li>
+<li>将 RealClient 侧统一内存池 <code>G</code> 的地址映射成 DummyClient 进程里的 mmap 地址。</li>
+<li>通过 <code>TransferWrite</code> 写入。</li>
+<li>调用 <code>LocalPutEnd</code> 标记写入完成。</li>
+</ol>
+<p>如果这条路径失败，并且配置了 offload storage，则会走：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">DummyClient::<span class="built_in">put_parts_offload</span>(...)</span><br></pre></td></tr></table></figure>
+
+<p>最终调用：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">offload_storage_-&gt;<span class="built_in">PutParts</span>(...)</span><br></pre></td></tr></table></figure>
+
+<h3 id="6-4-get-buffer-配合"><a href="#6-4-get-buffer-配合" class="headerlink" title="6.4 get_buffer 配合"></a>6.4 get_buffer 配合</h3><p><code>get_buffer</code> 返回的是 <code>BufferHandle</code>，Python 可以通过 buffer protocol 直接读取其中内容。</p>
+<p>DummyClient 的 <code>get_buffer</code> 会优先尝试：</p>
+<ul>
+<li>hot cache 共享内存路径。</li>
+<li>local master 共享内存池 <code>G</code> 路径。</li>
+<li>allocator-backed fallback。</li>
+</ul>
+<p>它和 <code>put_parts</code> 一起构成 DummyClient local master 模式下最关键的读写路径。</p>
+<h2 id="7-主要函数速查"><a href="#7-主要函数速查" class="headerlink" title="7. 主要函数速查"></a>7. 主要函数速查</h2><h3 id="Python-API"><a href="#Python-API" class="headerlink" title="Python API"></a>Python API</h3><ul>
+<li><code>MooncakeDistributedStore.setup()</code>：初始化 real client，连接 Master / metadata server。</li>
+<li><code>MooncakeDistributedStore.setup_dummy()</code>：初始化 dummy client，连接 RealClient。</li>
+<li><code>put()</code>：写入单个 bytes-like 对象。</li>
+<li><code>get()</code>：读取对象并返回 bytes。</li>
+<li><code>put_parts()</code>：把多个 part 作为一个对象写入。</li>
+<li><code>put_from()</code>：从已注册 buffer 直接写入。</li>
+<li><code>get_into()</code>：直接读入用户提供的 buffer。</li>
+<li><code>register_buffer()</code> / <code>unregister_buffer()</code>：注册 / 反注册可被 Transfer Engine 访问的内存。</li>
+<li><code>get_buffer()</code>：返回可直接读取的 <code>BufferHandle</code>。</li>
+<li><code>put_tensor()</code> / <code>get_tensor()</code>：存取 PyTorch tensor。</li>
+</ul>
+<h3 id="Store-Client-层"><a href="#Store-Client-层" class="headerlink" title="Store / Client 层"></a>Store / Client 层</h3><ul>
+<li><code>MasterService::PutStart()</code>：为对象分配副本位置，创建 processing 状态元数据。</li>
+<li><code>MasterService::PutEnd()</code>：标记对象写入完成，使对象变为可读。</li>
+<li><code>MasterService::GetReplicaList()</code>：查询对象副本列表，并授予读取 lease。</li>
+<li><code>MasterService::AcquireReplica()</code>：local master 模式下占用对象副本，防止读取期间被回收。</li>
+<li><code>Client::Put()</code>：常规对象写入路径。</li>
+<li><code>Client::DummyPut()</code>：DummyClient local master 模式下的共享内存写入路径。</li>
+<li><code>RealClient::put_parts_internal()</code>：RealClient 侧多 part 写入实现。</li>
+<li><code>DummyClient::put_parts()</code>：DummyClient 侧多 part 写入入口。</li>
+<li><code>DummyClient::put_parts_offload()</code>：local put 失败后的 offload 写入路径。</li>
+</ul>
+<h3 id="Transfer-Engine-层"><a href="#Transfer-Engine-层" class="headerlink" title="Transfer Engine 层"></a>Transfer Engine 层</h3><ul>
+<li><code>registerLocalMemory()</code>：注册本地内存。</li>
+<li><code>unregisterLocalMemory()</code>：反注册本地内存。</li>
+<li><code>openSegment()</code>：打开远端 segment。</li>
+<li><code>submitTransfer()</code>：提交批量读写请求。</li>
+<li><code>getTransferStatus()</code>：查询异步传输状态。</li>
+</ul>
+<h2 id="8-两个问题的回答整理"><a href="#8-两个问题的回答整理" class="headerlink" title="8. 两个问题的回答整理"></a>8. 两个问题的回答整理</h2><h3 id="问题-1：全局-segment-是单台机器上的吗？还是可以跨机器申请？"><a href="#问题-1：全局-segment-是单台机器上的吗？还是可以跨机器申请？" class="headerlink" title="问题 1：全局 segment 是单台机器上的吗？还是可以跨机器申请？"></a>问题 1：全局 segment 是单台机器上的吗？还是可以跨机器申请？</h3><p>回答：全局 segment 物理上是单台机器上的。每个 RealClient 根据 <code>global_segment_size</code> 在本机贡献一段存储空间。多个 RealClient 的 segment 会被 Master 汇总成逻辑上的分布式资源池。</p>
+<p>所以，不能把它理解成“一块跨机器连续共享内存”。更准确的理解是：</p>
+<ul>
+<li>每个 segment 属于某台机器。</li>
+<li>Master 统一管理所有 segment。</li>
+<li>对象写入时可以被分配到任意机器的 segment。</li>
+<li>多副本时，不同副本也可以分布在不同 segment / 不同机器上。</li>
+</ul>
+<h3 id="问题-2：DummyClient-和-RealClient-的关系是什么？多个-DummyClient-连接一个-RealClient-时，任务是否按顺序执行？"><a href="#问题-2：DummyClient-和-RealClient-的关系是什么？多个-DummyClient-连接一个-RealClient-时，任务是否按顺序执行？" class="headerlink" title="问题 2：DummyClient 和 RealClient 的关系是什么？多个 DummyClient 连接一个 RealClient 时，任务是否按顺序执行？"></a>问题 2：DummyClient 和 RealClient 的关系是什么？多个 DummyClient 连接一个 RealClient 时，任务是否按顺序执行？</h3><p>回答：DummyClient 是业务进程里的轻量代理，RealClient 是常驻的完整客户端 / 存储节点。多个 DummyClient 可以连接同一个 RealClient，并通过 RPC 与共享内存提交请求。</p>
+<p>这些任务不是全局按顺序执行的。RealClient 的 RPC server 支持并发处理，不同 DummyClient 的请求可以并发进入。系统通过 MasterService 元数据锁、对象状态机、lease、allocator 锁和冲突检测来保证正确性。</p>
+<p>对同一个 key：</p>
+<ul>
+<li>如果对象已经写入完成，再写同 key 会触发冲突。</li>
+<li>如果对象正在 PutStart 但还没 PutEnd，其他写入会看到 <code>REPLICA_IS_NOT_READY</code> 等状态。</li>
+<li>读取期间通过 lease / refcount 防止对象被错误回收。</li>
+</ul>
+<p>因此，Mooncake 的一致性依赖元数据状态机，而不是依赖所有 DummyClient 请求串行化。</p>
+<h2 id="9-一句话总结"><a href="#9-一句话总结" class="headerlink" title="9. 一句话总结"></a>9. 一句话总结</h2><p>Mooncake 的核心架构是：Transfer Engine 负责高速数据搬运，MasterService 负责元数据和空间分配，RealClient 负责本机存储节点和 RPC 服务，DummyClient 作为业务进程内的轻量代理通过 RPC 和共享内存连接 RealClient；<code>put_parts</code> / <code>get_buffer</code> 是 DummyClient local master 模式下最关键的高性能读写路径，soft pin 则影响对象的内存驻留优先级和 tiered offload fallback 策略。</p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>Mooncake 项目功能与关键概念笔记</p><p><a href="https://llx-08.github.io/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/">https://llx-08.github.io/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-06-01</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-06-01</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/06/01/2026-06-01-vllm-omni-multimodal-pipeline/"><span class="level-item">Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离）</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">15</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-01T00:00:00.000Z">2026-06-01</time></p><p class="title"><a href="/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/">Mooncake 项目功能与关键概念笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-01T00:00:00.000Z">2026-06-01</time></p><p class="title"><a href="/notes/2026/06/01/2026-06-01-vllm-omni-multimodal-pipeline/">Qwen3.5-Omni 多模态数据全流程（dashscope-serving → dashllm → vLLM，含 PD 分离）</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-learn-rabitq/">RabitQ 阅读笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-project-architecture-and-vllm-integration/">blade-kvt 项目架构与 vLLM 对接指南</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-05-25T00:00:00.000Z">2026-05-25</time></p><p class="title"><a href="/notes/2026/05/25/2026-05-25-rdma-learning-1/">RDMA学习笔记（1）</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
