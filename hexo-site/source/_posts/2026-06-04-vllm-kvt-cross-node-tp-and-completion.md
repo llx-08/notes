@@ -3,6 +3,7 @@ title: vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制
 date: 2026-06-04
 tags: []
 ---
+
 # vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制
 
 > 基于 `/mnt/data/llx/vllm`（带 HybridConnector 分支，2026-06）与 `/mnt/data/llx/blade-kvt`

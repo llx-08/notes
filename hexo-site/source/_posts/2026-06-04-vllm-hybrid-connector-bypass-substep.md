@@ -3,6 +3,7 @@ title: vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线
 date: 2026-06-04
 tags: []
 ---
+
 # vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线
 
 > 基于 `/mnt/data/llx/vllm`(分支带 HybridConnector)当前源码整理(2026-06)。

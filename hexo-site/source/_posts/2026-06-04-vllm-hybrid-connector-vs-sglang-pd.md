@@ -3,6 +3,7 @@ title: vLLM HybridConnector + KVTBackend vs SGLang 的 PD 分离对比
 date: 2026-06-04
 tags: []
 ---
+
 # vLLM HybridConnector + KVTBackend vs SGLang 的 PD 分离对比
 
 > 基于 `/mnt/data/llx/vllm`(分支带 HybridConnector)与 `/mnt/data/llx/sglang` 当前源码整理(2026-06)。

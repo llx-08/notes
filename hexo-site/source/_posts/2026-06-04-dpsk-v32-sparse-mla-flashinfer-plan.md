@@ -3,6 +3,7 @@ title: Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划
 date: 2026-06-04
 tags: []
 ---
+
 # Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划
 
 > 基于 `/mnt/data/llx/vllm` `llx/github` 分支(含 FlashInfer sparse MLA 后端)与 `/mnt/data/llx/vllm` `develop` 分支(含 HybridConnector + KVTBackend)+ `/mnt/data/llx/blade-kvt` 当前源码,2026-06-02 整理。

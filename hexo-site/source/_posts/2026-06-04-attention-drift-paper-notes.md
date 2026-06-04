@@ -3,6 +3,7 @@ title: Attention Drift: 自回归推测解码模型到底学到了什么
 date: 2026-06-04
 tags: []
 ---
+
 # Attention Drift: 自回归推测解码模型到底学到了什么
 
 > 论文：*Attention Drift: What Autoregressive Speculative Decoding Models Learn*
