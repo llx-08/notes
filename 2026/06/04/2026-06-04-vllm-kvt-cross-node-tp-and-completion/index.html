@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制 基于 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm （带 HybridConnector 分支，2026-06）与 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;blade-kvt 源码整理。是 vllm_hybrid_connector_bypass_substep.md （substep 机制）和 project_architecture_"><meta property="og:type" content="blog"><meta property="og:title" content="vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制"><meta property="og:url" content="https://llx-08.github.io/notes/2026/06/04/2026-06-04-vllm-kvt-cross-node-tp-and-completion/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制 基于 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm （带 HybridConnector 分支，2026-06）与 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;blade-kvt 源码整理。是 vllm_hybrid_connector_bypass_substep.md （substep 机制）和 project_architecture_"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-06-04T00:00:00.000Z"><meta property="article:modified_time" content="2026-06-04T08:59:05.628Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/06/04/2026-06-04-vllm-kvt-cross-node-tp-and-completion/"},"headline":"vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-06-04T00:00:00.000Z","dateModified":"2026-06-04T08:59:05.628Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制 基于 &#x2F;mnt&#x2F;data&#x2F;llx&#x2F;vllm （带 HybridConnector 分支，2026-06）与 &#x2F;mnt&#x2F;data&#x2F;llx&#x2F;blade-kvt 源码整理。是 vllm_hybrid_connector_bypass_substep.md （substep 机制）和 project_architecture_"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/06/04/2026-06-04-vllm-kvt-cross-node-tp-and-completion/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-06-04T00:00:00.000Z" title="6/4/2026, 12:00:00 AM">2026-06-04</time>发表</span><span class="level-item"><time dateTime="2026-06-04T08:59:05.628Z" title="6/4/2026, 8:59:05 AM">2026-06-04</time>更新</span><span class="level-item">20 分钟读完 (大约2967个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制</h1><div class="content"><h1 id="vLLM-KVT：跨机-TP、Ray-线程-bug-与-KV-传输完成通知机制"><a href="#vLLM-KVT：跨机-TP、Ray-线程-bug-与-KV-传输完成通知机制" class="headerlink" title="vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制"></a>vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制</h1><blockquote>
+<p>基于 <code>/mnt/data/llx/vllm</code>（带 HybridConnector 分支，2026-06）与 <code>/mnt/data/llx/blade-kvt</code><br>源码整理。是 <code>vllm_hybrid_connector_bypass_substep.md</code>（substep 机制）和<br><code>project_architecture_and_vllm_integration.md</code>（整体架构）的补充，聚焦三件事：<br>① P/D 如何注册/获取 worker_info；② 跨机（多机）TP 的支持点与坑；③ Ray<br>compiled-graph 导致的「主 step 被误判成 substep」线程 bug；④ KV 数据发完后<br>decode 怎么知道。</p>
+</blockquote>
+<hr>
+<h2 id="0-TL-DR"><a href="#0-TL-DR" class="headerlink" title="0. TL;DR"></a>0. TL;DR</h2><ul>
+<li><strong>P/D 实例 = 一个 TP 组</strong>，用 <code>inst_id = name|dprank|tpsize</code> 标识，<code>worker_info</code><br>是<strong>按 tp_rank 索引的 list</strong>。<code>_get_dist</code> 把 P 的 tp_rank 映射到 D 的 tp_rank，<br>只支持 <code>P.tp &gt;= D.tp</code> 且整除；<code>P.tp &lt; D.tp</code> 返回 None（不支持）。</li>
+<li><strong>数据面与「几台机器」无关</strong>（按 inst_id + tp_rank 寻址）。卡住多机 TP 的是<br><strong>控制面</strong>：worker→scheduler 的 RPC 原本硬编码 <code>127.0.0.1</code>。修法是让这 4 处客户端<br>用 engine-core 节点真实 IP（<code>parallel_config.master_addr</code>，即 <code>--master-addr</code>），<br>server 端早已 bind <code>0.0.0.0</code>。<strong>Ray 下 <code>nnodes</code> 可能仍为 1，必须显式配<br><code>scheduler_ip</code>/<code>core_ip</code>。</strong></li>
+<li><strong>Ray compiled-graph 把 <code>execute_model</code> 放到独立后台线程执行</strong>，使<br><code>bind_backend_metadata</code> 里「<code>mytid != _main_tid</code> 判主/副 step」失准 → 主 step 被<br>误当 bypass substep → 触发 <code>_build_req_send_batch</code> 断言。<strong>正确判据是<br><code>substepid</code>（主=0，substep≥1），不是线程 ID。</strong></li>
+<li><strong>KV 数据是 P 单边 RDMA WRITE 直写进 D 的显存块</strong>。默认 RDMA_DIRECT 下这个 write<br>对 D <strong>静默</strong>（不触发 OnRecvCall）；decode「知道发完了」走<strong>控制面 RPC 应答</strong>：<br>P worker <code>send_done</code> → P scheduler → 回 <code>PREFILL_RESP</code> 给 D scheduler。</li>
+</ul>
+<hr>
+<h2 id="1-worker-info-的注册与获取"><a href="#1-worker-info-的注册与获取" class="headerlink" title="1. worker_info 的注册与获取"></a>1. worker_info 的注册与获取</h2><h3 id="1-1-两个-rank-与-inst-id"><a href="#1-1-两个-rank-与-inst-id" class="headerlink" title="1.1 两个 rank 与 inst_id"></a>1.1 两个 rank 与 inst_id</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># kvtbackend.py（register_kv_caches 内，P/D 一致）</span></span><br><span class="line">rank = get_tensor_model_parallel_rank()   <span class="comment"># TP 组内 local rank → worker_info 的下标</span></span><br><span class="line">worker_id = get_tp_group().rank           <span class="comment"># 全局 rank → naming 里 worker_{id} 的 key</span></span><br></pre></td></tr></table></figure>
+
+<p><code>worker_info</code> 是按 <strong>tp_rank</strong> 索引的 list；<code>d_inst_id = dst_inst_name|dst_dprank|dst_tpsize</code>。</p>
+<h3 id="1-2-D-侧注册（接收方）"><a href="#1-2-D-侧注册（接收方）" class="headerlink" title="1.2 D 侧注册（接收方）"></a>1.2 D 侧注册（接收方）</h3><p>每个 D worker 建好 <code>bladekv.KVTransferServer</code> 后取 <code>winfo = current_worker_info('server')</code>，<br>按是否有命名服务分两条路：</p>
+<ul>
+<li><strong>有 naming</strong>：<code>naming_cli.store(f"worker_{worker_id}", winfo)</code>；P 的 bladekv client<br>自带 <code>naming_url</code>，按 <code>dst_inst_name + worker_id</code> 自行从 naming 解析 D worker 地址。<br>请求里的 <code>d_workers_info</code> 为空（<code>_check_kvtdinfo</code> 里 <code>if self.naming_cli(): return True</code>）。</li>
+<li><strong>fake naming（<code>fake://</code>，无命名服务）</strong>：D worker 通过 RPC 把 <code>"{tp_rank}|{winfo}"</code><br>发给<strong>本机 D scheduler</strong>，scheduler 在 <code>_on_register_worker</code> 里填 <code>_workers_info[tp_rank]</code>，<br>集齐后置位 <code>_workers_info_event</code>；之后每个请求把整份 <code>_workers_info</code> 放进<br><code>KVTDInfo.d_workers_info</code> 发给 P（<code>_prefill_rpc</code>）。</li>
+</ul>
+<h3 id="1-3-P-侧（发送方）"><a href="#1-3-P-侧（发送方）" class="headerlink" title="1.3 P 侧（发送方）"></a>1.3 P 侧（发送方）</h3><p>P worker 建 <code>KVTransferClient</code>，但<strong>不上报自己的 winfo</strong>（P 是主动发送方，注册那行是注释掉的）。<br>每个 P worker 用自己的 <code>src_tprank</code> 经 <code>_get_dist</code>/<code>_get_distinfo</code> 算出目标 D worker，<br>再 <code>submit_req_send2(dst_inst_name, dst_wid, ..., dst_worker_info=...)</code>。</p>
+<h3 id="1-4-get-dist-的-P→D-tp-rank-映射"><a href="#1-4-get-dist-的-P→D-tp-rank-映射" class="headerlink" title="1.4 _get_dist 的 P→D tp_rank 映射"></a>1.4 <code>_get_dist</code> 的 P→D tp_rank 映射</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># kvtbackend.py _get_dist</span></span><br><span class="line"><span class="keyword">if</span> idst_tpsize == src_tpsize:</span><br><span class="line">    <span class="keyword">return</span> dst_inst_name, idst_dprank * idst_tpsize + src_tprank, src_tprank</span><br><span class="line"><span class="keyword">if</span> src_tpsize &lt;= idst_tpsize:          <span class="comment"># P.tp &lt; D.tp：不支持</span></span><br><span class="line">    <span class="keyword">return</span> <span class="literal">None</span></span><br><span class="line">group_n = src_tpsize // idst_tpsize    <span class="comment"># P.tp &gt; D.tp 且整除</span></span><br><span class="line">dst_tprank = src_tprank // group_n</span><br><span class="line"><span class="keyword">return</span> dst_inst_name, idst_dprank * idst_tpsize + dst_tprank, dst_tprank</span><br></pre></td></tr></table></figure>
+
+<p>C++ 侧对应 <code>compute_valid_ranks_pd</code>（<code>tx_stub.cpp</code>）：在 <code>num_kv_heads</code> 约束下挑出每个 D<br>subgroup 的代表 P rank（如 num_kv_heads=2, d_tp=4, p_tp=8 → valid_ranks=10101010）。</p>
+<hr>
+<h2 id="2-跨机（多机）TP"><a href="#2-跨机（多机）TP" class="headerlink" title="2. 跨机（多机）TP"></a>2. 跨机（多机）TP</h2><h3 id="2-1-结论"><a href="#2-1-结论" class="headerlink" title="2.1 结论"></a>2.1 结论</h3><p>数据面（KV 传输本身）按 inst_id + tp_rank 寻址，<strong>与机器数无关</strong>，跨机 TP 不需要改传输协议。<br>真正卡住的是<strong>控制面</strong>：worker→scheduler 的 RPC 通道原本写死 <code>127.0.0.1</code>，默认 worker 与<br>engine-core/scheduler 同机。</p>
+<h3 id="2-2-Server-端-OK，Client-端是问题"><a href="#2-2-Server-端-OK，Client-端是问题" class="headerlink" title="2.2 Server 端 OK，Client 端是问题"></a>2.2 Server 端 OK，Client 端是问题</h3><ul>
+<li>Scheduler 的 RPC server 早已 <code>asyncio.start_server(..., "0.0.0.0", port)</code><br>（<code>hybrid_connector/utils.py</code> <code>RpcServer._main</code>）——server 端跨机没问题。</li>
+<li>需要改成「engine-core 节点真实 IP」的 4 处 client：<ol>
+<li><code>HybridWorker.__init__</code> 的 <code>ConnPool</code>（worker 回 io_done）；</li>
+<li><code>HybridWorker._get_bypass_handle</code>（取 bypass handle）；</li>
+<li><code>_set_worker_envs</code> 的 <code>BLLM_KVTRANS_SEND_DONE_ADDR</code>（bladekv 发送完成回调地址）；</li>
+<li><code>DBackend._register_worker_rpc</code>（D worker 注册 winfo 到 scheduler）。</li>
+</ol>
+</li>
+</ul>
+<h3 id="2-3-正确的-IP-来源：master-addr，不是-data-parallel-master-ip"><a href="#2-3-正确的-IP-来源：master-addr，不是-data-parallel-master-ip" class="headerlink" title="2.3 正确的 IP 来源：master_addr，不是 data_parallel_master_ip"></a>2.3 正确的 IP 来源：<code>master_addr</code>，不是 <code>data_parallel_master_ip</code></h3><ul>
+<li><strong>TP 跨机</strong>（一个实例 TP 跨多机，单 engine-core）：engine-core/driver 在<br><code>parallel_config.master_addr</code>（<code>--master-addr</code>，mp 多机分布式 master）节点上，<br>这才是 KVT scheduler 所在节点。</li>
+<li><code>data_parallel_master_ip</code>（= <code>VLLM_DP_MASTER_IP</code>）是 <strong>DP master（DP rank 0）</strong> 节点，<br>只对 dp_rank 0 正确；dp_rank&gt;0 的 engine-core 在别的节点用它就错。</li>
+<li><code>scheduler_rpc_host()</code> helper 解析优先级：extra_config <code>core_ip</code>/<code>core_rpc_host</code>/<br><code>scheduler_ip</code> → <code>master_addr</code>（<code>nnodes&gt;1</code> 时）→ <code>127.0.0.1</code>。</li>
+</ul>
+<h3 id="2-4-Ray-external-launcher-的坑"><a href="#2-4-Ray-external-launcher-的坑" class="headerlink" title="2.4 Ray / external_launcher 的坑"></a>2.4 Ray / external_launcher 的坑</h3><p><code>parallel_config.nnodes</code> 是 mp 多机（<code>--nnodes/--node-rank/--master-addr</code>）那条路设置的。<br><strong>用 Ray 或 external_launcher 起多机时 <code>nnodes</code> 可能仍是 1</strong> → <code>nnodes&gt;1</code> 闸门不成立 →<br>回落 <code>127.0.0.1</code>，跨机又断。<strong>这种情况必须在 <code>kv_connector_extra_config</code> 里显式配<br><code>scheduler_ip</code>/<code>core_ip</code>。</strong></p>
+<h3 id="2-5-环境变量辨析"><a href="#2-5-环境变量辨析" class="headerlink" title="2.5 环境变量辨析"></a>2.5 环境变量辨析</h3><ul>
+<li><code>MASTER_ADDR</code>（+ <code>MASTER_PORT</code>）是 torch.distributed / vLLM 的标准约定；<br><code>VLLM_DP_MASTER_IP</code> 解析链为 <code>VLLM_DP_MASTER_IP</code> → <code>MASTER_ADDR</code> → <code>127.0.0.1</code>。</li>
+<li>在线多机 DP 的 <code>data_parallel_master_ip</code> 来自 <code>--data-parallel-address</code>（mp 回落到<br><code>--master-addr</code>）；<code>VLLM_DP_MASTER_IP</code> 这个 env 只在离线/SPMD（<code>dp_size&lt;=1</code>）分支才被读。</li>
+<li><code>MASTER_ADDRESS</code> <strong>不是任何标准变量</strong>，全仓库无人设置，<code>os.getenv("MASTER_ADDRESS")</code><br>恒为 None——是拼写错误，应为 <code>MASTER_ADDR</code>。</li>
+</ul>
+<hr>
+<h2 id="3-Ray-compiled-graph-线程-bug：主-step-被误判成-substep"><a href="#3-Ray-compiled-graph-线程-bug：主-step-被误判成-substep" class="headerlink" title="3. Ray compiled-graph 线程 bug：主 step 被误判成 substep"></a>3. Ray compiled-graph 线程 bug：主 step 被误判成 substep</h2><h3 id="3-1-现象"><a href="#3-1-现象" class="headerlink" title="3.1 现象"></a>3.1 现象</h3><p>P 侧 <code>AssertionError</code>（<code>kvtbackend.py</code> <code>_build_req_send_batch</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">assert</span> reqm.has_last_token <span class="keyword">and</span> <span class="built_in">len</span>(reqm.d_block_ids) &gt; <span class="number">0</span> <span class="keyword">and</span> reqm.d_inst_id</span><br></pre></td></tr></table></figure>
+
+<p>traceback：<code>execute_model → bind_connector_metadata → bind_backend_metadata → _start_send_substep → _build_req_send_batch</code>。<strong>只在 Ray（跨机 TP 用 Ray）下出现，<br>单机 MultiprocExecutor 没事。</strong></p>
+<h3 id="3-2-根因"><a href="#3-2-根因" class="headerlink" title="3.2 根因"></a>3.2 根因</h3><p><code>bind_backend_metadata</code> / <code>clear_backend_metadata</code> 用 <code>mytid != self._main_tid</code> 来区分<br>主 step / bypass substep。<code>_main_tid</code> 是在 <code>PBackend.__init__</code>（WORKER）里抓的，跑在<br><strong>actor 默认线程</strong>（worker 初始化走普通 Ray actor 调用）。</p>
+<p>但 <strong>Ray Compiled Graph(aDAG) 把 <code>execute_model</code> 放到一个独立后台线程执行</strong>——<br><code>ray_utils.py</code> 注释明说（还因此要重设 CUDA device）：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// on a background thread, so we need to reset torch's current device.</span></span><br></pre></td></tr></table></figure>
+
+<p>于是 <code>execute_model → bind_connector_metadata → bind_backend_metadata</code> 跑在 compiled-graph<br>后台线程上，<code>mytid</code>（后台线程）<strong>永远 ≠</strong> <code>_main_tid</code>（actor 默认线程），分流恒为真 →<br><strong>主 step 的元数据被误当 bypass substep</strong>，走进 <code>_start_send_substep</code>。</p>
+<p>主 step 的 <code>nonfreeze_metas</code> 合法地含「增量发送 / 非 last-token」项（<code>d_block_ids</code> 空、<br><code>has_last_token=False</code>，本应由主分支 <code>submit_delta_send</code> 处理），但 substep 路径断言每项<br>都必须是完整发送 → 炸。<strong>副作用更严重</strong>：主分支被跳过，<code>start_send_step</code>/<code>flush_send_step</code><br>（C++ <code>start_send</code>/<code>flush_send</code>）从不被调用 → 即使没断言，KV 也根本发不出去。</p>
+<h3 id="3-3-修复"><a href="#3-3-修复" class="headerlink" title="3.3 修复"></a>3.3 修复</h3><p>判据从「线程 ID」改成 meta 里的 <code>substepid</code>（主 step=0，bypass substep≥1）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># bind_backend_metadata</span></span><br><span class="line"><span class="comment"># - 删除 mytid = threading.get_native_id()</span></span><br><span class="line"><span class="comment"># - 记录 self._tls.substepid = substepid（threading.local，给无参的 clear 用）</span></span><br><span class="line"><span class="comment"># - 分流：if mytid != self._main_tid:  →  if substepid != 0:</span></span><br><span class="line"><span class="comment"># - 删除内部两处 assert mytid == self._main_tid</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># clear_backend_metadata</span></span><br><span class="line"><span class="comment"># - if mytid != self._main_tid:  →  if getattr(self._tls, "substepid", 0) != 0:</span></span><br></pre></td></tr></table></figure>
+
+<p>用 <code>threading.local()</code> 而非普通字段：主 step（compiled-graph 线程）与 bypass substep<br>（worker loop 线程）可能并发，<code>bind</code>→<code>clear</code> 在同一阶段同一线程上顺序执行，thread-local<br>各读各的，正确且无竞争。<code>_main_tid</code> 改后成死字段。</p>
+<h3 id="3-4-为什么改后仍满足-C-的线程要求"><a href="#3-4-为什么改后仍满足-C-的线程要求" class="headerlink" title="3.4 为什么改后仍满足 C++ 的线程要求"></a>3.4 为什么改后仍满足 C++ 的线程要求</h3><p><code>client.cpp</code>：主 step 接口（<code>submit_req_send</code>/<code>submit_delta_send</code>/<code>start_send</code>/<code>flush_send</code>）<br><strong>直接读写 <code>targets_tasks_buf_</code>/<code>reqs_</code>，不加锁</strong> → 要求所有主 step 调用来自<strong>同一个线程<br>（串行）</strong>，但<strong>不要求是初始化那个线程</strong>（无 thread-id 断言、无 thread_local）。<br><code>start_send_substep</code> 注释 <code>// thread safe!</code>，用 <code>coord_lock_</code> 保护，给 worker loop 线程并发用。</p>
+<p>Ray 下主 step 的所有 bladekv 调用都来自 <code>execute_model</code> 流程 = 同一个 compiled-graph 后台<br>线程，<strong>「同一线程串行」的无锁前提仍成立</strong>（只是这个「主线程」从 MP 的初始化线程换成了<br>Ray 后台线程，而 C++ 不在乎是哪个具体线程，只在乎一致）。所以 substepid 分流既修了误判，<br>又天然满足 C++ 线程模型。</p>
+<blockquote>
+<p>注意：bladekv C++ 内部另有自己的工作线程池（<code>mgr_thd_{1}</code>、<code>single_thd_</code>、<br><code>target_thdpool_</code>/XThreadpool “clisend”）做真正的 RDMA 发送；上面讨论的「调用线程」<br>指的是 Python 层调用 pybind 接口的线程，与 C++ 内部工作线程是两回事。</p>
+</blockquote>
+<hr>
+<h2 id="4-KV-传输完成通知：decode-怎么知道-prefill-发完了"><a href="#4-KV-传输完成通知：decode-怎么知道-prefill-发完了" class="headerlink" title="4. KV 传输完成通知：decode 怎么知道 prefill 发完了"></a>4. KV 传输完成通知：decode 怎么知道 prefill 发完了</h2><p>KV 数据由 P <strong>单边 RDMA WRITE 直写进 D 预先注册好的 KV cache 显存块</strong>（D 的块地址/rkey 是 P<br>握手阶段通过 <code>MEM_HANDLES_REQ</code> 找 D 要来的）。「知道发完了」按协议分三种：</p>
+<h3 id="4-1-RDMA-DIRECT（默认）：write-静默，走控制面-RPC"><a href="#4-1-RDMA-DIRECT（默认）：write-静默，走控制面-RPC" class="headerlink" title="4.1 RDMA_DIRECT（默认）：write 静默，走控制面 RPC"></a>4.1 RDMA_DIRECT（默认）：write 静默，走控制面 RPC</h3><p><code>WriteBySgList</code>/<code>WriteBatch</code> 用 <code>signal_peer=false</code>、<code>imm_data=0</code>（<code>rdma_channel.cpp</code>）——<br>纯 RDMA WRITE，<strong>D 侧 CPU 收不到任何完成事件，不进 OnRecvCall</strong>。WriteBatch 的 future 在<br><strong>P 自己这侧</strong>（发送方 CQE）触发，只用于 P 知道自己 write 完了。</p>
+<p>D 的 <code>OnRecvCall</code> 只处理控制 RPC（<code>MEM_HANDLES_REQ</code>、<code>REMOTE_CRC_REQ</code>），数据到达通知<br>已不走这里（注释：*”No longer need to handle notification callbacks - using event-based<br>mechanism now”*）。完成通知走控制面：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">P worker（do_send: register_data → 逐层 send_data → flush）</span><br><span class="line">   └─ 对 reach_last_token 的请求 send_done → rpc_send_done（TCP, SEND_DONE_REQ）</span><br><span class="line">        └─ 目标 = env_send_done_addr() = BLLM_KVTRANS_SEND_DONE_ADDR = P 自己的 scheduler</span><br><span class="line">              └─ P scheduler _on_send_done → try_advance → 标记 _SendingReq future 完成</span><br><span class="line">                    └─ 回 PREFILL_RESP 给 D scheduler（D 当初 _prefill_rpc await 的应答）</span><br><span class="line">                          └─ D scheduler 得知 prefill 完成 → 放行 decode</span><br></pre></td></tr></table></figure>
+
+<p>关键：<code>send_done</code> 是 P worker 通知 <strong>P 自己的 scheduler</strong>，不是直接通知 D。D 的 GPU worker<br><strong>不需要被网络层信号唤醒</strong>（数据早已被单边写进它的 HBM 块），由 scheduler 编排何时解码——<br>这就是注释说的 “event-based mechanism”。</p>
+<h3 id="4-2-RDMA-STAGED：WRITE-WITH-IMM-→-OnImmRecvCall"><a href="#4-2-RDMA-STAGED：WRITE-WITH-IMM-→-OnImmRecvCall" class="headerlink" title="4.2 RDMA_STAGED：WRITE_WITH_IMM → OnImmRecvCall"></a>4.2 RDMA_STAGED：WRITE_WITH_IMM → OnImmRecvCall</h3><p><code>WriteSingleWithImm</code> 用 <code>signal_peer=true</code> + <code>imm_data</code>（<code>rdma_staged_channel.cpp</code>），<br><strong>会在 D 侧产生 recv 完成</strong> → <code>RDMAStagedServer::...::OnImmRecvCall(imm_data)</code>，<code>imm_data</code><br>里编了 staging buffer id，D 据此把数据从中转 buffer 拷进 KV cache。</p>
+<h3 id="4-3-TCP：SEND-→-OnRecvCall"><a href="#4-3-TCP：SEND-→-OnRecvCall" class="headerlink" title="4.3 TCP：SEND → OnRecvCall"></a>4.3 TCP：SEND → OnRecvCall</h3><p>数据本身以 SEND 消息发出，<code>TCPServer::CtxCallback::OnRecvCall</code> 被触发并携带 KV 数据——<br>这里 OnRecvCall 就是数据通路。</p>
+<h3 id="4-4-一句话"><a href="#4-4-一句话" class="headerlink" title="4.4 一句话"></a>4.4 一句话</h3><blockquote>
+<p><code>write_batch</code> 在 D 侧触发 <code>OnRecvCall</code> 只在 <strong>STAGED/TCP</strong> 成立；默认 <strong>RDMA_DIRECT</strong><br>下 write 静默，D 通过 <strong>P-scheduler 的 RPC 应答</strong> 得知完成。</p>
+</blockquote>
+<hr>
+<h2 id="5-关键源码索引"><a href="#5-关键源码索引" class="headerlink" title="5. 关键源码索引"></a>5. 关键源码索引</h2><table>
+<thead>
+<tr>
+<th>主题</th>
+<th>位置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>P→D tp_rank 映射</td>
+<td><code>vllm .../kvtbackend.py</code> <code>_get_dist</code> / <code>_get_distinfo</code></td>
+</tr>
+<tr>
+<td>D worker 注册</td>
+<td><code>kvtbackend.py</code> <code>DBackend._register_worker_rpc</code> / <code>_on_register_worker</code></td>
+</tr>
+<tr>
+<td>主/副 step 分流（含 bug）</td>
+<td><code>kvtbackend.py</code> <code>bind_backend_metadata</code> / <code>clear_backend_metadata</code></td>
+</tr>
+<tr>
+<td>substep 发送断言</td>
+<td><code>kvtbackend.py</code> <code>_build_req_send_batch</code></td>
+</tr>
+<tr>
+<td>跨机 IP helper</td>
+<td><code>hybrid_connector/__init__.py</code> <code>scheduler_rpc_host</code> / <code>engine_proxy.py</code></td>
+</tr>
+<tr>
+<td>scheduler RPC server bind</td>
+<td><code>hybrid_connector/utils.py</code> <code>RpcServer._main</code>（0.0.0.0）</td>
+</tr>
+<tr>
+<td>Ray 后台线程</td>
+<td><code>vllm/v1/executor/ray_utils.py</code> <code>execute_model_ray</code></td>
+</tr>
+<tr>
+<td>P 发送 + send_done</td>
+<td><code>kvtransfer/src/tx_stub.cpp</code> <code>do_task</code>/<code>do_send</code>/<code>rpc_send_done</code></td>
+</tr>
+<tr>
+<td>RDMA 静默 write</td>
+<td><code>kvtransfer/src/rdma_channel.cpp</code> <code>WriteBySgList</code>/<code>WriteBatch</code>/<code>OnRecvCall</code></td>
+</tr>
+<tr>
+<td>STAGED WRITE_WITH_IMM</td>
+<td><code>kvtransfer/src/rdma_staged_channel.cpp</code> <code>WriteSingleWithImm</code></td>
+</tr>
+<tr>
+<td>C++ 主/副 step 线程模型</td>
+<td><code>kvtransfer/src/client.cpp</code>（<code>targets_tasks_buf_</code> 无锁 / <code>start_send_substep</code> thread safe）</td>
+</tr>
+</tbody></table>
+</div><div class="article-licensing box"><div class="licensing-title"><p>vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制</p><p><a href="https://llx-08.github.io/notes/2026/06/04/2026-06-04-vllm-kvt-cross-node-tp-and-completion/">https://llx-08.github.io/notes/2026/06/04/2026-06-04-vllm-kvt-cross-node-tp-and-completion/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-06-04</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-06-04</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-bypass-substep/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/"><span class="level-item">Mooncake 项目功能与关键概念笔记</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">19</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-dpsk-v32-sparse-mla-flashinfer-plan/">Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-vs-sglang-pd/">vLLM HybridConnector + KVTBackend vs SGLang 的 PD 分离对比</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-bypass-substep/">vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-vllm-kvt-cross-node-tp-and-completion/">vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-01T00:00:00.000Z">2026-06-01</time></p><p class="title"><a href="/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/">Mooncake 项目功能与关键概念笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

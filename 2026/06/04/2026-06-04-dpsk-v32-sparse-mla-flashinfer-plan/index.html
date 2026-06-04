@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划 基于 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm llx&amp;#x2F;github 分支(含 FlashInfer sparse MLA 后端)与 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm develop 分支(含 HybridConnector + KVTBackend)+ &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;blade-kvt"><meta property="og:type" content="blog"><meta property="og:title" content="Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划"><meta property="og:url" content="https://llx-08.github.io/notes/2026/06/04/2026-06-04-dpsk-v32-sparse-mla-flashinfer-plan/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划 基于 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm llx&amp;#x2F;github 分支(含 FlashInfer sparse MLA 后端)与 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm develop 分支(含 HybridConnector + KVTBackend)+ &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;blade-kvt"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-06-04T00:00:00.000Z"><meta property="article:modified_time" content="2026-06-04T08:59:05.487Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/06/04/2026-06-04-dpsk-v32-sparse-mla-flashinfer-plan/"},"headline":"Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-06-04T00:00:00.000Z","dateModified":"2026-06-04T08:59:05.487Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划 基于 &#x2F;mnt&#x2F;data&#x2F;llx&#x2F;vllm llx&#x2F;github 分支(含 FlashInfer sparse MLA 后端)与 &#x2F;mnt&#x2F;data&#x2F;llx&#x2F;vllm develop 分支(含 HybridConnector + KVTBackend)+ &#x2F;mnt&#x2F;data&#x2F;llx&#x2F;blade-kvt"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/06/04/2026-06-04-dpsk-v32-sparse-mla-flashinfer-plan/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-06-04T00:00:00.000Z" title="6/4/2026, 12:00:00 AM">2026-06-04</time>发表</span><span class="level-item"><time dateTime="2026-06-04T08:59:05.487Z" title="6/4/2026, 8:59:05 AM">2026-06-04</time>更新</span><span class="level-item">14 分钟读完 (大约2153个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划</h1><div class="content"><h1 id="Blackwell-FlashInfer-SparseMLA-在-KVT-上的支持计划"><a href="#Blackwell-FlashInfer-SparseMLA-在-KVT-上的支持计划" class="headerlink" title="Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划"></a>Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划</h1><blockquote>
+<p>基于 <code>/mnt/data/llx/vllm</code> <code>llx/github</code> 分支(含 FlashInfer sparse MLA 后端)与 <code>/mnt/data/llx/vllm</code> <code>develop</code> 分支(含 HybridConnector + KVTBackend)+ <code>/mnt/data/llx/blade-kvt</code> 当前源码,2026-06-02 整理。</p>
+</blockquote>
+<h2 id="0-结论先行-TL-DR"><a href="#0-结论先行-TL-DR" class="headerlink" title="0. 结论先行(TL;DR)"></a>0. 结论先行(TL;DR)</h2><p><strong>与最初设想不同</strong>:重新阅读 vllm 主仓与 blade-kvt 源码后发现 — <strong>现有 <code>DPSK_V32_SPARSE_MLA_SHAPE = 4</code> 路径在物理布局上与 Blackwell + FlashInfer + SparseMLA 完全兼容</strong>,在双方使用相同 <code>(block_size, kv_cache_dtype)</code> 配置时,<strong>几乎不需要新增 cache shape</strong>。</p>
+<p>真正需要做的事是:</p>
+<ol>
+<li>(vllm 侧)放宽几处隐含假设(register_kv_caches 注释、报错文案等);</li>
+<li>(vllm 侧)在 <code>_set_worker_envs</code> 里加显式的 sparse MLA + FlashInfer 路径覆盖测试与日志;</li>
+<li>(blade-kvt 侧)如果未来需要支持”P 用 Hopper FA + fp8_ds_mla / D 用 Blackwell FlashInfer + fp8”这种异构混部,再单独处理 token_bytes 转换;</li>
+<li>加端到端测试覆盖。</li>
+</ol>
+<h2 id="1-关键事实"><a href="#1-关键事实" class="headerlink" title="1. 关键事实"></a>1. 关键事实</h2><h3 id="1-1-FlashAttention-sparse-MLA-Hopper-的-KV-cache-形状"><a href="#1-1-FlashAttention-sparse-MLA-Hopper-的-KV-cache-形状" class="headerlink" title="1.1 FlashAttention sparse MLA(Hopper)的 KV cache 形状"></a>1.1 FlashAttention sparse MLA(Hopper)的 KV cache 形状</h3><p><code>vllm/v1/attention/backends/mla/flashmla_sparse.py:139-150</code>:</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@staticmethod</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">get_kv_cache_shape</span>(<span class="params">num_blocks, block_size, num_kv_heads, head_size, cache_dtype_str=<span class="string">"auto"</span></span>):</span><br><span class="line">    <span class="keyword">if</span> cache_dtype_str == <span class="string">"fp8_ds_mla"</span>:</span><br><span class="line">        <span class="comment"># V3.2 main MLA: 656-byte custom storage format</span></span><br><span class="line">        <span class="keyword">return</span> (num_blocks, block_size, <span class="number">656</span>)</span><br><span class="line">    <span class="keyword">else</span>:</span><br><span class="line">        <span class="keyword">return</span> (num_blocks, block_size, head_size)  <span class="comment"># 576</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>get_supported_kernel_block_sizes()</code> → <code>[64]</code>(只允许 64)</li>
+<li><code>get_supported_head_sizes()</code> → <code>[576]</code>(= 512 kv_lora_rank + 64 qk_rope_head_dim)</li>
+<li>支持 cache dtype: <code>auto / bfloat16 / fp8_ds_mla / fp8</code></li>
+</ul>
+<h3 id="1-2-FlashInfer-sparse-MLA-Blackwell-的-KV-cache-形状"><a href="#1-2-FlashInfer-sparse-MLA-Blackwell-的-KV-cache-形状" class="headerlink" title="1.2 FlashInfer sparse MLA(Blackwell)的 KV cache 形状"></a>1.2 FlashInfer sparse MLA(Blackwell)的 KV cache 形状</h3><p><code>vllm/v1/attention/backends/mla/flashinfer_mla_sparse.py:133-145</code>:</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@staticmethod</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">get_kv_cache_shape</span>(<span class="params">num_blocks, block_size, num_kv_heads, head_size, cache_dtype_str=<span class="string">"auto"</span></span>):</span><br><span class="line">    <span class="keyword">return</span> (num_blocks, block_size, head_size)  <span class="comment"># 576</span></span><br><span class="line"></span><br><span class="line"><span class="meta">@classmethod</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">get_required_kv_cache_layout</span>(<span class="params">cls</span>):</span><br><span class="line">    <span class="keyword">return</span> <span class="string">"HND"</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>get_supported_kernel_block_sizes()</code> → <code>[32, 64]</code>(Blackwell 多支持 32)</li>
+<li><code>get_supported_head_sizes()</code> → <code>[576]</code></li>
+<li>支持 cache dtype: <code>auto / float16 / bfloat16 / fp8 / fp8_e4m3</code> — <strong>不支持 <code>fp8_ds_mla</code> 656 字节自定义格式</strong></li>
+<li><strong><code>supports_compute_capability</code> 限定 capability.major == 10</strong>(SM10x,Blackwell)</li>
+</ul>
+<h3 id="1-3-Indexer-cache-在两种后端下完全一致"><a href="#1-3-Indexer-cache-在两种后端下完全一致" class="headerlink" title="1.3 Indexer cache 在两种后端下完全一致"></a>1.3 Indexer cache 在两种后端下完全一致</h3><p><code>vllm/v1/attention/backends/mla/indexer.py:118-155</code>(<code>DeepseekV32IndexerBackend</code>):</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">return</span> (num_blocks, block_size, head_size)   <span class="comment"># head_size ∈ {32, 64, 128}</span></span><br></pre></td></tr></table></figure>
+
+<p>block_size 固定 64(非 ROCm)。FlashInfer 与 FlashAttention 共用同一 indexer backend。</p>
+<h3 id="1-4-现有-DPSK-V32-SPARSE-MLA-SHAPE-4-实际行为"><a href="#1-4-现有-DPSK-V32-SPARSE-MLA-SHAPE-4-实际行为" class="headerlink" title="1.4 现有 DPSK_V32_SPARSE_MLA_SHAPE = 4 实际行为"></a>1.4 现有 <code>DPSK_V32_SPARSE_MLA_SHAPE = 4</code> 实际行为</h3><p><code>blade-kvt/kvtransfer/src/cache_transfer_spec.cpp:257-266</code>:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">{DPSK_V32_SPARSE_MLA_SHAPE, {</span><br><span class="line">  <span class="comment">/*dim_order=*/</span> {D::BLOCK, D::TOKEN, D::KV, D::HEAD, D::HEAD_DIM},</span><br><span class="line">  <span class="comment">/*num_tensors=*/</span> <span class="number">0</span>,                        <span class="comment">// 运行时从 token_sizes.size() 推</span></span><br><span class="line">  <span class="comment">/*rank0_only_when_same_sizes=*/</span> <span class="literal">true</span>,</span><br><span class="line">  <span class="comment">/*force_peqd_tpkind=*/</span> <span class="literal">true</span>,               <span class="comment">// MLA: 每 rank 持有全量 → 强制走 P==D</span></span><br><span class="line">}},</span><br></pre></td></tr></table></figure>
+
+<p><strong>关键洞察</strong>:<code>force_peqd_tpkind=true</code> 使所有 sparse MLA 流量走 P==D 分支,而 P==D 分支在 <code>parse_block_dpsk.cpp:88-127</code> (<code>vllm_parse_block_send_multi_tensor_p_eq_d</code>) 实际只做”按张量整段拷贝”:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> (<span class="type">size_t</span> i = <span class="number">0</span>; i &lt; token_sizes.<span class="built_in">size</span>(); ++i) {</span><br><span class="line">    <span class="built_in">do_parse_block_send_p_eq_d</span>(block_sizes[i], token_sizes[i], task, send_blocks[i]);</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+
+<p>即每张量 <code>block_size * token_size</code> 字节整段 memcpy,<strong>不解释内部 KV/HEAD 布局</strong>,所以 <code>dim_order</code> 在 P==D 路径下基本是装饰性的。这意味着 FA 还是 FlashInfer,只要每张量的 <code>(num_blocks, block_size, dim)</code> 一致,字节布局就一致,传输就正确。</p>
+<h3 id="1-5-vllm-侧-cache-shape-选择已经覆盖-FlashInfer-sparse-MLA"><a href="#1-5-vllm-侧-cache-shape-选择已经覆盖-FlashInfer-sparse-MLA" class="headerlink" title="1.5 vllm 侧 cache_shape 选择已经覆盖 FlashInfer sparse MLA"></a>1.5 vllm 侧 cache_shape 选择已经覆盖 FlashInfer sparse MLA</h3><p><code>vllm/v1/hybrid_connector/kvtbackend.py:516-521</code>(develop 分支):</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> use_mla():</span><br><span class="line">    <span class="keyword">if</span> use_sparse_mla():</span><br><span class="line">        os.environ.setdefault(<span class="string">"BLLM_KVTRANS_CACHE_SHAPE"</span>, <span class="string">"4"</span>)</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>use_mla()</code> 检查 <code>"mla" in attn_backend.lower()</code> → <code>FLASHINFER_MLA_SPARSE</code> 命中 ✓</li>
+<li><code>use_sparse_mla()</code> 在此基础上检查 <code>"sparse" in attn_backend.lower()</code> → 命中 ✓</li>
+</ul>
+<p>所以 <strong>FlashInfer sparse MLA 已经被路由到 shape 4</strong>,且 <code>tensor_shape_dict</code> 多张量分支 (<code>kvtbackend.py:1735-1741</code>) 的 <code>assert len(cache_shape) == 3</code> 对 MLA(576)+ Indexer(32/64/128)双张量场景也已成立。</p>
+<h2 id="2-FA-sparse-MLA-vs-FlashInfer-sparse-MLA-对照表"><a href="#2-FA-sparse-MLA-vs-FlashInfer-sparse-MLA-对照表" class="headerlink" title="2. FA sparse MLA vs FlashInfer sparse MLA 对照表"></a>2. FA sparse MLA vs FlashInfer sparse MLA 对照表</h2><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>FA sparse(Hopper)</th>
+<th>FlashInfer sparse(Blackwell)</th>
+<th>KVT 影响</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>MLA 张量物理形状</td>
+<td><code>(num_blocks, block_size, 576)</code> 默认 / <code>(_, _, 656)</code> 当 <code>fp8_ds_mla</code></td>
+<td><code>(num_blocks, block_size, 576)</code></td>
+<td><strong>同构场景一致</strong>;异构 fp8_ds_mla 混部时 token_bytes 不同</td>
+</tr>
+<tr>
+<td>Indexer 张量形状</td>
+<td><code>(num_blocks, 64, head_size)</code> head_size∈{32,64,128}</td>
+<td>同</td>
+<td>一致</td>
+</tr>
+<tr>
+<td>张量数 / layer</td>
+<td>2(MLA + Indexer)</td>
+<td>2(同)</td>
+<td>一致,走 multi-tensor 路径</td>
+</tr>
+<tr>
+<td><code>block_size</code> 允许值</td>
+<td><code>[64]</code></td>
+<td><code>[32, 64]</code></td>
+<td>同构都用 64 时无影响;若 D 用 32、P 用 64 → block_bytes 不同,需混部支持</td>
+</tr>
+<tr>
+<td>支持的 cache dtype</td>
+<td><code>auto/bf16/fp8/fp8_ds_mla</code></td>
+<td><code>auto/fp16/bf16/fp8/fp8_e4m3</code></td>
+<td><strong><code>fp8_ds_mla</code> 是 FA 专属</strong>;FlashInfer 用标准 fp8</td>
+</tr>
+<tr>
+<td><code>get_required_kv_cache_layout</code></td>
+<td>None</td>
+<td><code>"HND"</code></td>
+<td>对单 head MLA 而言等价(num_kv_heads=1 时 HND 与 NHD 物理布局相同)</td>
+</tr>
+<tr>
+<td><code>get_kv_cache_stride_order</code></td>
+<td>无(默认 identity)</td>
+<td>默认 identity</td>
+<td>一致</td>
+</tr>
+<tr>
+<td><code>compute_capability</code></td>
+<td>major∈{9,10}</td>
+<td>major == 10</td>
+<td>FlashInfer 强制 Blackwell</td>
+</tr>
+<tr>
+<td>KV/V 分离</td>
+<td>无(MLA 单张量 latent)</td>
+<td>无</td>
+<td><code>force_peqd_tpkind=true</code> 路径不解释 KV/HEAD</td>
+</tr>
+</tbody></table>
+<h3 id="三类部署场景"><a href="#三类部署场景" class="headerlink" title="三类部署场景"></a>三类部署场景</h3><table>
+<thead>
+<tr>
+<th>场景</th>
+<th>P 节点</th>
+<th>D 节点</th>
+<th>是否兼容现状</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>A 同构 Blackwell</strong></td>
+<td>Blackwell + FlashInfer + bf16/fp8</td>
+<td>同</td>
+<td>✅ <strong>现有代码已支持</strong>,无需改动</td>
+</tr>
+<tr>
+<td><strong>B 同构 Hopper</strong></td>
+<td>Hopper + FA + bf16/fp8</td>
+<td>同</td>
+<td>✅ 一直支持</td>
+</tr>
+<tr>
+<td><strong>C 异构 Hopper→Blackwell(同 dtype)</strong></td>
+<td>Hopper + FA + bf16</td>
+<td>Blackwell + FlashInfer + bf16</td>
+<td>✅ 双方都是 <code>(_, 64, 576)</code></td>
+</tr>
+<tr>
+<td><strong>C’ 异构混 dtype</strong></td>
+<td>Hopper + FA + fp8_ds_mla</td>
+<td>Blackwell + FlashInfer + fp8</td>
+<td>❌ token_bytes 不同(656 vs 576),需新增异构通路</td>
+</tr>
+<tr>
+<td><strong>D 异构 block_size</strong></td>
+<td>Hopper + FA + bf16 + bs=64</td>
+<td>Blackwell + FlashInfer + bf16 + bs=32</td>
+<td>❌ block_bytes 不同</td>
+</tr>
+</tbody></table>
+<h2 id="3-修改清单"><a href="#3-修改清单" class="headerlink" title="3. 修改清单"></a>3. 修改清单</h2><h3 id="3-1-P0-—-必做-代价小-价值高"><a href="#3-1-P0-—-必做-代价小-价值高" class="headerlink" title="3.1 P0 — 必做,代价小,价值高"></a>3.1 P0 — 必做,代价小,价值高</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>文件</th>
+<th>改动</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>P0-1</td>
+<td><code>vllm/v1/hybrid_connector/kvtbackend.py:516-521</code></td>
+<td>在 <code>if use_sparse_mla(): "4"</code> 处加注释 + INFO 日志,注明此 shape 同时覆盖 FA / FlashInfer 两种 sparse MLA backend</td>
+</tr>
+<tr>
+<td>P0-2</td>
+<td><code>vllm/v1/hybrid_connector/kvtbackend.py:1731-1741</code> 与 <code>2712-2717</code></td>
+<td>把 <code>assert len(cache_shape) == 3, "Currently only support Dpsk-V32"</code> 文案改成 <code>"Currently only support Dpsk-V32 sparse MLA (FA / FlashInfer)"</code>,并补一句注释说明为什么 FlashInfer 也走这里</td>
+</tr>
+<tr>
+<td>P0-3</td>
+<td><code>vllm/v1/hybrid_connector/kvtbackend.py</code> register_kv_caches 入口处</td>
+<td>加日志 <code>logger.info("KVT sparse MLA detected: backend=%s, dtype=%s, block_size=%s", VLLM_ATTENTION_BACKEND, cache_dtype, block_size)</code>,便于线上排查</td>
+</tr>
+<tr>
+<td>P0-4</td>
+<td><code>vllm/v1/hybrid_connector/engine_proxy.py:337-349</code> <code>use_flashinfer()</code></td>
+<td><code>if capability.major != 10: raise ValueError("Currently KVT only support HND layout of flashinfer")</code> 当前文案误导 — 把消息改成更准确的 <code>"FlashInfer KVT path requires Blackwell (SM 10.x), got SM%d.%d"</code></td>
+</tr>
+</tbody></table>
+<h3 id="3-2-P1-—-防御性硬化"><a href="#3-2-P1-—-防御性硬化" class="headerlink" title="3.2 P1 — 防御性硬化"></a>3.2 P1 — 防御性硬化</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>文件</th>
+<th>改动</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>P1-1</td>
+<td><code>vllm/v1/hybrid_connector/kvtbackend.py</code> <code>_set_worker_envs</code> 末尾</td>
+<td>加显式校验:当 <code>use_sparse_mla() and use_flashinfer()</code> 时,<code>assert cfg.cache_config.block_size in (32, 64)</code>(对齐 <code>flashinfer_mla_sparse.py:73</code>);当 <code>use_sparse_mla() and not use_flashinfer()</code> 时,<code>assert cfg.cache_config.block_size == 64</code></td>
+</tr>
+<tr>
+<td>P1-2</td>
+<td><code>vllm/v1/hybrid_connector/kvtbackend.py</code> <code>_set_worker_envs</code> 末尾</td>
+<td>加 dtype 校验:当 <code>use_sparse_mla() and use_flashinfer()</code> 时,断言 <code>cache_dtype</code> 不在 <code>{"fp8_ds_mla"}</code> — FlashInfer 不支持 656 字节自定义格式,提前拒绝</td>
+</tr>
+<tr>
+<td>P1-3</td>
+<td><code>blade-kvt/kvtransfer/src/cache_transfer_spec.cpp</code> <code>build_transfer_plan</code> 入口</td>
+<td>P==D 分支里加一行 <code>assert(src.token_sizes == dst.token_sizes)</code> 已有;在断言失败时打印更详细的 message,把 token_sizes 双方都列出来,便于排查 fp8_ds_mla / fp8 混部</td>
+</tr>
+<tr>
+<td>P1-4</td>
+<td><code>blade-kvt/kvtransfer/include/envcfg.h:35</code> 注释</td>
+<td>把 <code>// Each layer contains two tensors: k tensor for select and mla tensor for attention.</code> 扩展为 <code>// Each layer contains two tensors: indexer cache (for sparse selection) and main MLA cache (kv_lora_rank + qk_rope_head_dim). Compatible with both FlashAttention and FlashInfer attn backends as long as P/D use the same (block_size, kv_cache_dtype).</code></td>
+</tr>
+<tr>
+<td>P1-5</td>
+<td><code>blade-kvt/kvtransfer/docs/cache_transfer_spec.md:458</code> <code>DPSK_V32_SPARSE_MLA_SHAPE</code> 章节</td>
+<td>补一段 “支持的 attn 后端” 表格,列明 FlashAttention(Hopper) / FlashInfer(Blackwell) 都走该 shape,以及 block_size / dtype 兼容性约束</td>
+</tr>
+</tbody></table>
+<h3 id="3-3-P2-—-测试覆盖"><a href="#3-3-P2-—-测试覆盖" class="headerlink" title="3.3 P2 — 测试覆盖"></a>3.3 P2 — 测试覆盖</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>文件</th>
+<th>改动</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>P2-1</td>
+<td><code>vllm/tests/v1/kv_connector/hybrid/test_hybrid_connector.py</code></td>
+<td>加单测 <code>test_dpsk_v32_flashinfer_cache_shape</code>:mock <code>VLLM_ATTENTION_BACKEND=FLASHINFER_MLA_SPARSE</code>,mock device capability=(10, 0),断言 <code>_set_worker_envs</code> 后 <code>BLLM_KVTRANS_CACHE_SHAPE == "4"</code>,且 <code>register_kv_caches</code> 不抛错</td>
+</tr>
+<tr>
+<td>P2-2</td>
+<td><code>blade-kvt/kvtransfer/benchmarks/</code></td>
+<td>加一个 standalone 测试程序构造两组 <code>(num_blocks=N, block_size=32, dim=576) + (num_blocks=N, block_size=32, dim=64)</code> 的 fake KV cache,通过 P==D 路径在两个进程间走一遍 KVT,对比 src/dst bytes 一致</td>
+</tr>
+<tr>
+<td>P2-3</td>
+<td>(可选)<code>vllm/test_pd_kvt_run.sh</code></td>
+<td>加一个 <code>--attn-backend FLASHINFER_MLA_SPARSE</code> 的运行模式,用于 e2e 联调</td>
+</tr>
+</tbody></table>
+<h3 id="3-4-P3-—-异构混部-场景-C’-D-非阻塞"><a href="#3-4-P3-—-异构混部-场景-C’-D-非阻塞" class="headerlink" title="3.4 P3 — 异构混部(场景 C’ / D),非阻塞"></a>3.4 P3 — 异构混部(场景 C’ / D),非阻塞</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>P3-1</td>
+<td>评估是否需要支持 Hopper FA(fp8_ds_mla, 656B)→ Blackwell FlashInfer(fp8, 576B)的字节级转换。当前 <code>parse_block_dpsk.cpp</code> 假设 src/dst token_size 相同,需要在 D 侧引入按 dtype 转换的 staging buffer,工作量较大且依赖业务上是否真要混部</td>
+</tr>
+<tr>
+<td>P3-2</td>
+<td>评估 P 用 block_size=64 / D 用 block_size=32 的混部需求。这等价于 ntpb 不同的”逻辑 P==D”,可在 <code>parse_block_dpsk.cpp</code> 加一个新的 helper 处理</td>
+</tr>
+<tr>
+<td>P3-3</td>
+<td>如果 P3-1 或 P3-2 真要做,<strong>才</strong>新增 <code>DPSK_V32_SPARSE_MLA_FLASHINFER_SHAPE = 8</code>,在 <code>cache_transfer_spec.cpp</code> registry 中显式带上 dtype/block_size 元数据,并在 <code>tx_stub.cpp</code> 增加分支</td>
+</tr>
+</tbody></table>
+<h2 id="4-验证步骤"><a href="#4-验证步骤" class="headerlink" title="4. 验证步骤"></a>4. 验证步骤</h2><ol>
+<li><p><strong>同构 Blackwell A 场景</strong>:</p>
+<ul>
+<li>P 与 D 都 <code>VLLM_ATTENTION_BACKEND=FLASHINFER_MLA_SPARSE</code>,<code>block_size=64</code>,<code>kv_cache_dtype=auto</code></li>
+<li>启动 PD 分离 → 发请求 → 检查 KV 命中率与生成正确性</li>
+<li>应该<strong>直接可用</strong>,无需任何修改</li>
+</ul>
+</li>
+<li><p><strong>同构 Blackwell + block_size=32</strong>:</p>
+<ul>
+<li>同上但 <code>block_size=32</code></li>
+<li>期望:P0/P1 修改完成后,正常工作</li>
+</ul>
+</li>
+<li><p><strong>异构(场景 C)</strong>:</p>
+<ul>
+<li>P:Hopper + <code>FLASH_MLA_SPARSE</code> + bf16 + bs=64</li>
+<li>D:Blackwell + <code>FLASHINFER_MLA_SPARSE</code> + bf16 + bs=64</li>
+<li>期望:正常工作</li>
+</ul>
+</li>
+<li><p><strong>应该被拒绝的场景</strong>:</p>
+<ul>
+<li>P:Hopper + <code>FLASH_MLA_SPARSE</code> + <code>fp8_ds_mla</code> + bs=64</li>
+<li>D:Blackwell + <code>FLASHINFER_MLA_SPARSE</code> + <code>fp8</code> + bs=64</li>
+<li>期望:P1-3 的 <code>token_sizes != dst.token_sizes</code> 断言能在 PD 握手阶段拦下来,而不是在传输中悄悄出错</li>
+</ul>
+</li>
+</ol>
+<h2 id="5-落地优先级"><a href="#5-落地优先级" class="headerlink" title="5. 落地优先级"></a>5. 落地优先级</h2><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">P0 (~半天) → 同构 Blackwell 场景验证(1 天) → P1 (~1 天) → P2 (~2 天) → 上线</span><br><span class="line">                                                           │</span><br><span class="line">                                                           └→ P3(按需,规划单独迭代)</span><br></pre></td></tr></table></figure>
+</div><div class="article-licensing box"><div class="licensing-title"><p>Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划</p><p><a href="https://llx-08.github.io/notes/2026/06/04/2026-06-04-dpsk-v32-sparse-mla-flashinfer-plan/">https://llx-08.github.io/notes/2026/06/04/2026-06-04-dpsk-v32-sparse-mla-flashinfer-plan/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-06-04</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-06-04</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-vs-sglang-pd/"><span class="level-item">vLLM HybridConnector + KVTBackend vs SGLang 的 PD 分离对比</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">19</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-dpsk-v32-sparse-mla-flashinfer-plan/">Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-vs-sglang-pd/">vLLM HybridConnector + KVTBackend vs SGLang 的 PD 分离对比</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-bypass-substep/">vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-vllm-kvt-cross-node-tp-and-completion/">vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-01T00:00:00.000Z">2026-06-01</time></p><p class="title"><a href="/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/">Mooncake 项目功能与关键概念笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

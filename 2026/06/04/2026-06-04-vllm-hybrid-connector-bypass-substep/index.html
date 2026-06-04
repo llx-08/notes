@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="vLLM HybridConnector &amp;#x2F; KVT：启动机制与 Bypass-Substep 流水线 基于 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm (分支带 HybridConnector)当前源码整理(2026-06)。 涉及文件： vllm&amp;#x2F;v1&amp;#x2F;engine&amp;#x2F;core.py 、 vllm&amp;#x2F;v1&amp;#x2F;hybrid_connector&amp;#x2F;__init__.py 、 vllm&amp;#x2F;v1&amp;#x2F;hybrid_con"><meta property="og:type" content="blog"><meta property="og:title" content="vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线"><meta property="og:url" content="https://llx-08.github.io/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-bypass-substep/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="vLLM HybridConnector &amp;#x2F; KVT：启动机制与 Bypass-Substep 流水线 基于 &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm (分支带 HybridConnector)当前源码整理(2026-06)。 涉及文件： vllm&amp;#x2F;v1&amp;#x2F;engine&amp;#x2F;core.py 、 vllm&amp;#x2F;v1&amp;#x2F;hybrid_connector&amp;#x2F;__init__.py 、 vllm&amp;#x2F;v1&amp;#x2F;hybrid_con"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-06-04T00:00:00.000Z"><meta property="article:modified_time" content="2026-06-04T08:59:05.550Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-bypass-substep/"},"headline":"vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-06-04T00:00:00.000Z","dateModified":"2026-06-04T08:59:05.550Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"vLLM HybridConnector &#x2F; KVT：启动机制与 Bypass-Substep 流水线 基于 &#x2F;mnt&#x2F;data&#x2F;llx&#x2F;vllm (分支带 HybridConnector)当前源码整理(2026-06)。 涉及文件： vllm&#x2F;v1&#x2F;engine&#x2F;core.py 、 vllm&#x2F;v1&#x2F;hybrid_connector&#x2F;__init__.py 、 vllm&#x2F;v1&#x2F;hybrid_con"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-bypass-substep/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-06-04T00:00:00.000Z" title="6/4/2026, 12:00:00 AM">2026-06-04</time>发表</span><span class="level-item"><time dateTime="2026-06-04T08:59:05.550Z" title="6/4/2026, 8:59:05 AM">2026-06-04</time>更新</span><span class="level-item">32 分钟读完 (大约4765个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线</h1><div class="content"><h1 id="vLLM-HybridConnector-KVT：启动机制与-Bypass-Substep-流水线"><a href="#vLLM-HybridConnector-KVT：启动机制与-Bypass-Substep-流水线" class="headerlink" title="vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线"></a>vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线</h1><blockquote>
+<p>基于 <code>/mnt/data/llx/vllm</code>(分支带 HybridConnector)当前源码整理(2026-06)。<br>涉及文件：<code>vllm/v1/engine/core.py</code>、<code>vllm/v1/hybrid_connector/__init__.py</code>、<br><code>vllm/v1/hybrid_connector/engine_proxy.py</code>、<code>vllm/v1/hybrid_connector/kvtbackend.py</code>、<br><code>vllm/distributed/kv_transfer/kv_transfer_state.py</code>。</p>
+<p>关联：跨机 TP、主/副 step 在 Ray 下被误判的线程 bug、以及 KV 发完后 decode 如何得知，<br>见 <code>vllm_kvt_cross_node_tp_and_completion.md</code>。其中第 3 节正是本文「主 step <code>substepid=0</code><br>vs substep <code>substepid≥1</code>」这个判据在 Ray compiled-graph 后台线程下被破坏的实战案例。</p>
+</blockquote>
+<hr>
+<h2 id="0-TL-DR-核心结论"><a href="#0-TL-DR-核心结论" class="headerlink" title="0. TL;DR / 核心结论"></a>0. TL;DR / 核心结论</h2><ul>
+<li><strong>KVT 不是独立守护进程</strong>，而是作为 vLLM 的 KV connector 插件 <code>HybridConnector</code>，跟随引擎进程/worker 进程在固定钩子点自动起线程、建监听、实例化底层 <code>bladekv</code> 传输客户端。触发开关是 <code>--kv-transfer-config</code>。</li>
+<li><strong>step 与 substep</strong> 用一对 <code>(stepid, substepid)</code> 区分：主 step <code>substepid=0</code>（真正跑 GPU、产 token），substep <code>substepid≥1</code>（不产 token，只携带 KV 传输任务，通过 zmq PUB 下发给 worker）。</li>
+<li><strong>substep 在 EngineCore 等主 step GPU 结果的空窗期被合成</strong>，靠给 <code>SchedulerOutput</code> 动态挂 <code>hc_parent</code> 属性标记归属。循环无固定 tick：有传输工作就连轴转、没活就阻塞，且只有 <code>reqs</code> 非空的 substep 才真正发出去。</li>
+<li><strong>bypass/substep 优化的是”控制面时延”（step 粒度 → sub-step 粒度）</strong>；真正的 <strong>layer 粒度数据传输</strong> 由 worker 的 <code>save_kv_layer</code> 逐层回调实现，二者配合形成更细的重叠流水线。</li>
+<li><strong><code>kvconn.step()</code></strong> 是 connector 在 EngineCore 线程上的”控制面状态机泵”，推进 save/load/abort 生命周期并产出 <code>kv_transfer_done</code> 等输出。</li>
+<li><strong><code>_wait_model_output_future</code></strong> 本职是”阻塞等异步 GPU future 出结果”；<code>EngineCoreProc</code> 把它 override 成”等的同时跑 bypass 循环”。</li>
+</ul>
+<hr>
+<h2 id="1-KVT-服务如何在-vLLM-启动时自动拉起"><a href="#1-KVT-服务如何在-vLLM-启动时自动拉起" class="headerlink" title="1. KVT 服务如何在 vLLM 启动时自动拉起"></a>1. KVT 服务如何在 vLLM 启动时自动拉起</h2><p>KVT 不需要手动 <code>start</code> 一个独立进程，而是作为 vLLM 的 <strong>KV connector 插件（<code>HybridConnector</code>）</strong>，跟随 vLLM 的引擎进程/worker 进程一起被自动初始化、自动起线程、自动建监听服务。整个触发点是启动 vLLM 时传入的 <code>--kv-transfer-config</code>。</p>
+<h3 id="1-1-触发开关：kv-transfer-config"><a href="#1-1-触发开关：kv-transfer-config" class="headerlink" title="1.1 触发开关：kv_transfer_config"></a>1.1 触发开关：<code>kv_transfer_config</code></h3><p>只要 <code>VllmConfig.kv_transfer_config</code> 非空且 <code>kv_connector="HybridConnector"</code>，整条 KVT 链路就会被激活。connector 名字在工厂里注册：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/distributed/kv_transfer/kv_connector/factory.py:141</span></span><br><span class="line">KVConnectorFactory.register_connector(</span><br><span class="line">    <span class="string">"HybridConnector"</span>, <span class="string">"vllm.v1.hybrid_connector"</span>, <span class="string">"HybridConnector"</span></span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p>具体走哪个后端（kvt / local_file / v6d_object 等）由 extra_config 里的 <code>backend</code> 字段决定，在 <code>_get_backend_cls</code> 里分发（<code>backend="kvt"</code> 且是 producer→<code>PBackend</code>、consumer→<code>DBackend</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/__init__.py:490</span></span><br><span class="line"><span class="keyword">elif</span> backend == <span class="string">"kvt"</span>:</span><br><span class="line">    <span class="keyword">if</span> cfg.kv_transfer_config.is_kv_producer <span class="keyword">and</span> cfg.kv_transfer_config.is_kv_consumer:</span><br><span class="line">        <span class="keyword">from</span> .filekvtbackend <span class="keyword">import</span> FilePBackend</span><br><span class="line">        <span class="keyword">return</span> FilePBackend</span><br><span class="line">    <span class="keyword">elif</span> cfg.kv_transfer_config.is_kv_consumer:</span><br><span class="line">        <span class="keyword">from</span> .kvtbackend <span class="keyword">import</span> DBackend      <span class="comment"># decode 侧</span></span><br><span class="line">        <span class="keyword">return</span> DBackend</span><br><span class="line">    <span class="keyword">elif</span> cfg.kv_transfer_config.is_kv_producer:</span><br><span class="line">        <span class="keyword">from</span> .kvtbackend <span class="keyword">import</span> PBackend      <span class="comment"># prefill 侧</span></span><br><span class="line">        <span class="keyword">return</span> PBackend</span><br></pre></td></tr></table></figure>
+
+<h3 id="1-2-Engine-Core-进程侧：起调度线程-RPC-监听服务"><a href="#1-2-Engine-Core-进程侧：起调度线程-RPC-监听服务" class="headerlink" title="1.2 Engine Core 进程侧：起调度线程 + RPC 监听服务"></a>1.2 Engine Core 进程侧：起调度线程 + RPC 监听服务</h3><p>EngineCore 进程构造时（<code>EngineCoreProc.__init__</code>）会调用 <code>_core_init</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/engine/core.py:1237</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">_core_init</span>(<span class="params">core, vllm_config: VllmConfig</span>):</span><br><span class="line">    <span class="keyword">if</span> vllm_config.kv_transfer_config <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">        <span class="keyword">return</span></span><br><span class="line">    <span class="keyword">from</span> vllm.v1.hybrid_connector.engine_proxy <span class="keyword">import</span> core_init</span><br><span class="line">    core_init(core, vllm_config)</span><br></pre></td></tr></table></figure>
+
+<p><code>core_init</code> 做两件关键的”起服务”动作：①起一个名为 <code>hybridsched</code> 的 uvloop asyncio 后台线程；②起一个调度侧 RPC server（<code>schedrpcserver</code>）监听端口：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/engine_proxy.py:379</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">core_init</span>(<span class="params">core: <span class="string">"EngineCoreProc"</span>, cfg: VllmConfig</span>):</span><br><span class="line">    <span class="keyword">global</span> _g_core, _g_sched_loop, _g_sched_rpc_serv</span><br><span class="line">    _g_core = core</span><br><span class="line">    _g_sched_loop = start_asyncio_thread(<span class="string">"hybridsched"</span>)        <span class="comment"># ① asyncio 线程</span></span><br><span class="line">    port = sched_rpc_server_port(cfg)</span><br><span class="line">    _g_sched_rpc_serv = RpcServer(port, <span class="string">"schedrpcserver"</span>)</span><br><span class="line">    _g_sched_rpc_serv.start(_g_sched_loop)                     <span class="comment"># ② TCP 监听 (0.0.0.0:port)</span></span><br></pre></td></tr></table></figure>
+
+<p><code>RpcServer.start</code> 内部就是 <code>asyncio.start_server(..., "0.0.0.0", port)</code>，这就是 KVT 在调度侧真正对外监听的”服务”（接受 worker 注册、bypass handle、save/load-done 等 RPC）。</p>
+<p>随后 Scheduler 通过工厂创建 role=SCHEDULER 的 <code>HybridConnector</code> → <code>HybridScheduler</code> → 调度侧 backend（<code>DBackend</code>/<code>PBackend</code>），在这里启动 <code>PeerManager</code>、向 naming 服务注册、注册 worker 注册回调等。</p>
+<h3 id="1-3-Worker-进程侧：起-worker-线程-创建-connector"><a href="#1-3-Worker-进程侧：起-worker-线程-创建-connector" class="headerlink" title="1.3 Worker 进程侧：起 worker 线程 + 创建 connector"></a>1.3 Worker 进程侧：起 worker 线程 + 创建 connector</h3><p>每个 worker 在初始化 KV transfer 时调用 <code>ensure_kv_transfer_initialized</code>，它先 <code>worker_init</code> 起一个 <code>hybridworker</code> asyncio 线程，再用工厂创建 role=WORKER 的 connector：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/distributed/kv_transfer/kv_transfer_state.py:65</span></span><br><span class="line"><span class="keyword">if</span> vllm_config.kv_transfer_config.is_kv_transfer_instance <span class="keyword">and</span> _KV_CONNECTOR_AGENT <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">    <span class="keyword">from</span> vllm.v1.hybrid_connector.engine_proxy <span class="keyword">import</span> worker_init</span><br><span class="line">    worker_init(vllm_config, local_rank)                       <span class="comment"># 起 hybridworker 线程</span></span><br><span class="line">    _KV_CONNECTOR_AGENT = KVConnectorFactory.create_connector(</span><br><span class="line">        config=vllm_config, role=KVConnectorRole.WORKER, kv_cache_config=kv_cache_config,</span><br><span class="line">    )</span><br></pre></td></tr></table></figure>
+
+<h3 id="1-4-真正的传输服务端点：register-kv-caches-时创建-KVTransferClient"><a href="#1-4-真正的传输服务端点：register-kv-caches-时创建-KVTransferClient" class="headerlink" title="1.4 真正的传输服务端点：register_kv_caches 时创建 KVTransferClient"></a>1.4 真正的传输服务端点：<code>register_kv_caches</code> 时创建 <code>KVTransferClient</code></h3><p>KV cache 显存分配完成后，GPU model runner 会调用 <code>kv_transfer_group.register_kv_caches(kv_caches)</code>（<code>vllm/v1/worker/gpu_model_runner.py:8122</code>）。这一路最终落到 backend 的 <code>register_kv_caches</code>，创建底层 KVT 传输引擎 <code>bladekv.KVTransferClient</code>——它注册显存、建立 RDMA/TCP 传输端点、并把 worker 信息注册到 naming，这才是真正承载 KV 搬运的”KVT 服务”实例：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/kvtbackend.py:1792</span></span><br><span class="line"><span class="variable language_">self</span>._bladkv_cli = bladekv.KVTransferClient(</span><br><span class="line">    <span class="variable language_">self</span>._inst_id, <span class="variable language_">self</span>._cfg.parallel_config.tensor_parallel_size,</span><br><span class="line">    worker_id=worker_id, worker_tp_rank=rank,</span><br><span class="line">    block_bytes=block_bytes, token_bytes=token_bytes,</span><br><span class="line">    naming_url=<span class="variable language_">self</span>._naming_url, layers=_flatten_cache(kv_caches),</span><br><span class="line">    protocols=[protocol], num_kv_heads=total_num_kv_heads, **_hybrid_kwargs,</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<h3 id="1-5-启动链路总结"><a href="#1-5-启动链路总结" class="headerlink" title="1.5 启动链路总结"></a>1.5 启动链路总结</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">vllm serve --kv-transfer-config '{"kv_connector":"HybridConnector","kv_role":"kv_producer/consumer",</span><br><span class="line">            "kv_connector_extra_config":{"backend":"kvt","naming_url":...}}'</span><br><span class="line">        │</span><br><span class="line">        ├─ EngineCoreProc.__init__</span><br><span class="line">        │     └─ _core_init → core_init()            ← 起 hybridsched 线程 + schedrpcserver 监听端口</span><br><span class="line">        │     └─ Scheduler 创建 HybridConnector(SCHEDULER)</span><br><span class="line">        │           └─ HybridScheduler → DBackend/PBackend(SCHEDULER)  ← PeerManager / naming / worker 注册回调</span><br><span class="line">        │</span><br><span class="line">        └─ Worker 进程: ensure_kv_transfer_initialized</span><br><span class="line">              └─ worker_init()                        ← 起 hybridworker 线程</span><br><span class="line">              └─ HybridConnector(WORKER) → HybridWorker → PBackend/DBackend(WORKER)</span><br><span class="line">                    └─ register_kv_caches()           ← 创建 bladekv.KVTransferClient（真正的 KVT 传输服务端点）</span><br></pre></td></tr></table></figure>
+
+<blockquote>
+<p>“自动启动”的本质：配置了 <code>kv_transfer_config</code> 后，vLLM 在引擎进程和 worker 进程初始化的固定钩子点（<code>_core_init</code> / <code>ensure_kv_transfer_initialized</code> / <code>register_kv_caches</code>）里，自动起后台 asyncio 线程、建 RPC 监听 server、并在显存就绪后实例化底层 <code>bladekv</code> 传输客户端，全程无需单独拉起一个 KVT 守护进程。外部依赖只有 <code>naming_url</code> 指向的命名服务（若用 <code>fake://</code> 则连命名服务都不需要，走本地直连）。</p>
+</blockquote>
+<hr>
+<h2 id="2-step-与-substep：如何区分、如何提交"><a href="#2-step-与-substep：如何区分、如何提交" class="headerlink" title="2. step 与 substep：如何区分、如何提交"></a>2. step 与 substep：如何区分、如何提交</h2><p>二者用一对 <code>(stepid, substepid)</code> 来区分，在调度侧 <code>HybridScheduler</code> 里维护：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/__init__.py:579</span></span><br><span class="line"><span class="comment">### R/W: core thread - stepid/substepid 管理</span></span><br><span class="line"><span class="variable language_">self</span>._stepid: <span class="built_in">int</span> = <span class="number">1024</span>     <span class="comment"># stepid 起始值为 1024，每次新 step 递增</span></span><br><span class="line"><span class="variable language_">self</span>._substepid: <span class="built_in">int</span> = <span class="number">1</span>     <span class="comment"># substepid 在每次新 step 时重置为 1，bypass substep 从 1 开始</span></span><br></pre></td></tr></table></figure>
+
+<p>区分逻辑全在 <code>build_connector_meta</code> 里，靠 <code>SchedulerOutput</code> 上是否挂了 <code>hc_parent</code> 这个动态属性来判断：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/__init__.py:1026</span></span><br><span class="line"><span class="keyword">if</span> hc_parent <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">    <span class="comment"># 主 step：分配新的 hc_stepid，hc_substepid 为 0</span></span><br><span class="line">    stepid = <span class="variable language_">self</span>._stepid</span><br><span class="line">    substepid = <span class="number">0</span></span><br><span class="line">    <span class="variable language_">self</span>._stepid += <span class="number">1</span></span><br><span class="line">    <span class="variable language_">self</span>._substepid = <span class="number">1</span>          <span class="comment"># 重置 substepid</span></span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    <span class="comment"># bypass substep：从 hc_parent 的 kv_connector_metadata 中取出 hc_stepid</span></span><br><span class="line">    ...</span><br><span class="line">    parent_meta = hc_parent.kv_connector_metadata</span><br><span class="line">    stepid = parent_meta.stepid  <span class="comment"># 复用父 step 的 stepid</span></span><br><span class="line">    substepid = <span class="variable language_">self</span>._substepid</span><br><span class="line">    <span class="variable language_">self</span>._substepid += <span class="number">1</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><strong>主 step</strong>：<code>hc_parent is None</code> → <code>substepid=0</code>，<code>stepid</code> 自增。它走的是正常引擎路径，真正跑 GPU、产 token，通过 <code>scheduler.update_from_output(...)</code> 提交、把 <code>EngineCoreOutput</code> 写回 client。</li>
+<li><strong>substep</strong>：<code>hc_parent</code> 指向它所属的主 step 的 <code>SchedulerOutput</code>，<code>stepid</code> 复用父 step 的，<code>substepid</code> 从 1 递增。substep <strong>不产 token、不更新 scheduler 状态</strong>，它唯一的载荷是 KV 传输任务 <code>reqs</code>（<code>BackendMeta</code>）。</li>
+</ul>
+<h3 id="2-1-“提交”的两种含义"><a href="#2-1-“提交”的两种含义" class="headerlink" title="2.1 “提交”的两种含义"></a>2.1 “提交”的两种含义</h3><table>
+<thead>
+<tr>
+<th></th>
+<th>主 step</th>
+<th>substep</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>是否跑 GPU</td>
+<td>是</td>
+<td>否</td>
+</tr>
+<tr>
+<td>是否产 token</td>
+<td>是</td>
+<td>否</td>
+</tr>
+<tr>
+<td><code>substepid</code></td>
+<td>0</td>
+<td>从 1 递增</td>
+</tr>
+<tr>
+<td>“提交” 方式</td>
+<td><code>update_from_output</code> + 输出队列回包给 client</td>
+<td>把 <code>HybridMetadata</code> 通过 zmq PUB 发给 worker，worker 收到后 <code>_do_bypass_meta</code> 触发 layer 级 load/send</td>
+</tr>
+<tr>
+<td>token 级 commit</td>
+<td>有</td>
+<td>无</td>
+</tr>
+</tbody></table>
+<p><code>(stepid, substepid)</code> 这对值会随 meta 一起带到 worker / 底层 <code>bladekv</code>，作为传输任务的排序/归属键——worker 据此知道某个 substep 属于哪个 step、在 step 内的先后顺序。</p>
+<hr>
+<h2 id="3-substep-在-vLLM-中何时生成（bypass-循环）"><a href="#3-substep-在-vLLM-中何时生成（bypass-循环）" class="headerlink" title="3. substep 在 vLLM 中何时生成（bypass 循环）"></a>3. substep 在 vLLM 中何时生成（bypass 循环）</h2><p>substep 是 EngineCore 在<strong>等主 step 的 GPU 结果时</strong>合成的。入口在 <code>_wait_model_output_future</code>：当 <code>_enable_bypass</code> 时，它把”等 GPU future”丢到线程池，自己进入一个循环：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/engine/core.py:2022 (EngineCoreProc._wait_model_output_future 内)</span></span><br><span class="line"><span class="comment"># process kvconn step</span></span><br><span class="line">step_outputs = kvconn.step()</span><br><span class="line">...</span><br><span class="line"><span class="comment"># process kvconn tasks</span></span><br><span class="line">substep_sout: SchedulerOutput = SchedulerOutput.make_empty()</span><br><span class="line"><span class="comment"># 利用 Python 动态性设置 hc_parent，不修改 SchedulerOutput 的定义</span></span><br><span class="line"><span class="comment"># hc_parent 表明当前 substep_sout 所属的 step_sout</span></span><br><span class="line">substep_sout.hc_parent = step_sout            <span class="comment"># type: ignore[attr-defined]</span></span><br><span class="line">meta = kvconn.build_connector_meta(substep_sout)</span><br><span class="line">send_bypass_task(meta)</span><br></pre></td></tr></table></figure>
+
+<p>每跑一圈循环就：①推进 KV connector 状态机 <code>kvconn.step()</code>；②造一个<strong>空的</strong> <code>SchedulerOutput</code>（<code>make_empty()</code>），挂上 <code>hc_parent=step_sout</code> 标记成 substep；③<code>build_connector_meta</code> 给它分配 <code>(stepid, substepid)</code> 并打包当前 ready 的传输任务；④<code>send_bypass_task</code> 发给 worker。</p>
+<p>关键：<code>send_bypass_task</code> 只有在 <code>reqs</code> 非空时才真的通过 zmq 发：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/__init__.py:658</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">send_bypass_task</span>(<span class="params">self, kv_connector_metadata: HybridMetadata</span>):</span><br><span class="line">    <span class="keyword">if</span> kv_connector_metadata.reqs:                       <span class="comment"># 只有非空才发</span></span><br><span class="line">        asyncio.run_coroutine_threadsafe(</span><br><span class="line">            <span class="variable language_">self</span>._send_bypass_task(kv_connector_metadata), <span class="variable language_">self</span>.loop)</span><br></pre></td></tr></table></figure>
+
+<p>发送通道是调度侧在 <code>_start_bypass_rpc_server</code> 建的 zmq <code>XPUB</code> socket，worker 在 <code>start_bypass_task_loop</code> 里 <code>SUB</code> 订阅，每收到一条就 <code>pickle.loads</code> 出 <code>HybridMetadata</code> 交给 <code>_do_bypass_meta</code>。所以”通过 zmq 传到 hybrid worker”指的就是这些非空 substep。</p>
+<h3 id="3-1-循环多久一圈？等待期间会合成多少-substep？"><a href="#3-1-循环多久一圈？等待期间会合成多少-substep？" class="headerlink" title="3.1 循环多久一圈？等待期间会合成多少 substep？"></a>3.1 循环多久一圈？等待期间会合成多少 substep？</h3><p><strong>没有固定定时器/间隔</strong>，它是纯事件+工作驱动的：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/engine/core.py:1992</span></span><br><span class="line"><span class="keyword">while</span> <span class="literal">True</span>:</span><br><span class="line">    <span class="keyword">if</span> <span class="keyword">not</span> kvconn.has_requests():</span><br><span class="line">        item = <span class="variable language_">self</span>.input_queue.get()        <span class="comment"># blocking op：没活就阻塞</span></span><br><span class="line">        ...</span><br><span class="line">    <span class="keyword">while</span> <span class="keyword">not</span> <span class="variable language_">self</span>.input_queue.empty():       <span class="comment"># 有活则非阻塞地排空输入队列</span></span><br><span class="line">        item = <span class="variable language_">self</span>.input_queue.get_nowait()</span><br><span class="line">        ...</span><br><span class="line">    <span class="comment"># 然后 kvconn.step() + 合成 substep + send_bypass_task</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><strong>当 <code>kvconn.has_requests()</code> 为 False</strong>（没有待处理传输工作）：循环阻塞在 <code>input_queue.get()</code>，<strong>不空转</strong>，直到 GPU 结果 <code>EXECUTE_MODEL_RESULT</code> 到达或来了新 client 请求才醒。基本不合成 substep。</li>
+<li><strong>当 <code>has_requests()</code> 为 True</strong>（有传输工作排队）：循环<strong>不阻塞</strong>，以 CPU 能跑多快就多快地一圈圈转，每圈合成一个 substep。循环体里<strong>没有 sleep</strong>，每圈成本是 <code>kvconn.step()</code> + <code>build_connector_meta</code>，约微秒~亚毫秒级。</li>
+</ul>
+<p><code>has_requests()</code> 检查的就是那些会被 <code>kvconn.step()</code> 排空的队列：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/__init__.py:1067</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">has_requests</span>(<span class="params">self</span>) -&gt; <span class="built_in">bool</span>:</span><br><span class="line">    <span class="keyword">if</span> <span class="variable language_">self</span>._waiting: <span class="keyword">return</span> <span class="literal">True</span></span><br><span class="line">    ...</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">bool</span>(<span class="variable language_">self</span>._prepared)</span><br></pre></td></tr></table></figure>
+
+<p>所以”等待期间合成多少 substep”≈ <code>主step的GPU时长 / 单圈CPU成本</code>，上界可能很大（decode step GPU 约几~几十 ms，prefill 更长，单圈很便宜，理论上可达数百圈）。但其中<strong>大部分圈 <code>reqs</code> 为空、是 no-op，不发 zmq</strong>；<strong>实际发出的 substep 数 = 这段 GPU 窗口里新变 ready 的传输任务批次数</strong>，由传输工作到达节奏决定，而不是固定 tick。队列被排空后 <code>has_requests()</code> 转 False，循环又回到阻塞态——不是无脑 busy-spin，而是”有活连轴转、没活就睡”。</p>
+<hr>
+<h2 id="4-与-layer-粒度传输的关系"><a href="#4-与-layer-粒度传输的关系" class="headerlink" title="4. 与 layer 粒度传输的关系"></a>4. 与 layer 粒度传输的关系</h2><p>要把<strong>两件正交的事</strong>分开看：</p>
+<h3 id="4-1-substep-bypass：解决”控制面时延”（step-粒度-→-sub-step-粒度）"><a href="#4-1-substep-bypass：解决”控制面时延”（step-粒度-→-sub-step-粒度）" class="headerlink" title="4.1 substep/bypass：解决”控制面时延”（step 粒度 → sub-step 粒度）"></a>4.1 substep/bypass：解决”控制面时延”（step 粒度 → sub-step 粒度）</h3><p>正常情况下，调度器一个 engine step 才 <code>build_connector_meta</code> 一次，即每个 step 只能下发一批传输任务。但在 PD 场景里，主 step 的 GPU 正在跑的这几~几十 ms 内，可能不断有新信息到达（D 侧握手/拉取请求、某些 req 的传输条件刚刚满足等）。如果只能等 GPU 跑完 + 下一次 schedule 才处理，就被”卡”在 step 粒度。bypass 循环把 EngineCore 在等 GPU 时本来闲置的 CPU 利用起来，<strong>在一个 step 内多次下发传输任务</strong>，把控制面反应粒度从”每 step 一次”细化到”sub-step 级”。这正是”prefill 在算、decode 的 info 还没来得及汇合”那种时序错位的缓解手段。</p>
+<h3 id="4-2-layer-粒度数据传输：由-worker-逐层-hook-完成"><a href="#4-2-layer-粒度数据传输：由-worker-逐层-hook-完成" class="headerlink" title="4.2 layer 粒度数据传输：由 worker 逐层 hook 完成"></a>4.2 layer 粒度数据传输：由 worker 逐层 hook 完成</h3><p>KV 的逐层发送发生在 <code>save_kv_layer</code>——模型每算完一层就回调一次，于是早算完的层可以先发，不必等整个 step 所有层算完：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/__init__.py:1268</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">save_kv_layer</span>(<span class="params">self, layer_name, kv_layer, **kwargs</span>) -&gt; <span class="literal">None</span>:</span><br><span class="line">    <span class="keyword">if</span> <span class="variable language_">self</span>._meta <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">        <span class="keyword">return</span></span><br><span class="line">    save_coro = <span class="variable language_">self</span>._backend.async_save_kv_layer(layer_name, kv_layer, <span class="variable language_">self</span>._meta.reqs)</span><br><span class="line">    ...</span><br></pre></td></tr></table></figure>
+
+<p>（在 hybrid 模型里还会按 attn pack 聚合，到 pack 的最后一层才触发该 pack 的发送，即 <code>hybrid_model_send_layer</code> 的逻辑。）</p>
+<h3 id="4-3-二者的配合"><a href="#4-3-二者的配合" class="headerlink" title="4.3 二者的配合"></a>4.3 二者的配合</h3><p>layer 粒度传输要能”早发”，前提是 worker 已经拿到了”这个 req 要发给谁、发哪些”的 meta；bypass/substep 的作用就是让这份 meta 在 GPU 还在算的过程中就尽早通过 zmq 送到 worker，从而让 <code>save_kv_layer</code> 的逐层发送能在本 step 内尽快起跑，而不是等 step 结束后才开始。</p>
+<ul>
+<li>能否做到 <strong>layer 粒度传输</strong>？能，但那是 <code>save_kv_layer</code> 逐层 hook 实现的，不是 substep 本身。</li>
+<li>substep 的价值是把<strong>控制面下发</strong>从 step 粒度细化到 sub-step 粒度，让 layer 粒度的数据搬运”对得上、起得早”。二者配合才把原来的 step 粒度流水线打散成更细的重叠流水线。</li>
+</ul>
+<hr>
+<h2 id="5-kvconn-step-做什么"><a href="#5-kvconn-step-做什么" class="headerlink" title="5. kvconn.step() 做什么"></a>5. <code>kvconn.step()</code> 做什么</h2><p><code>kvconn</code> 是 <code>HybridConnector</code>，<code>step()</code> 最终走到 <code>HybridScheduler.step()</code>。它是 KV connector 在 **EngineCore 线程上的”控制面状态机泵”**——每调一次，就把所有在途请求沿 save/load/abort 生命周期推进一格，并产出要回给 client 的输出：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/__init__.py:669</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">step</span>(<span class="params">self</span>) -&gt; <span class="type">Optional</span>[<span class="built_in">dict</span>[<span class="built_in">int</span>, <span class="built_in">list</span>[EngineCoreOutput]]]:</span><br><span class="line">    <span class="keyword">from</span> vllm.v1.engine.core <span class="keyword">import</span> combine_outputs</span><br><span class="line">    kvt_done = <span class="variable language_">self</span>._step_saved()</span><br><span class="line">    <span class="variable language_">self</span>._step_waiting()</span><br><span class="line">    <span class="variable language_">self</span>._step_loaded()</span><br><span class="line">    <span class="keyword">return</span> combine_outputs(kvt_done, <span class="variable language_">self</span>._step_aborting())</span><br></pre></td></tr></table></figure>
+
+<p>四个子步骤（PD 语境下：load=decode 侧拉取，save=prefill 侧推送）：</p>
+<ul>
+<li>**<code>_step_saved()</code>**：处理 KV <strong>保存/发送完成</strong>的请求。若 finish 已到就发出 <code>kv_transfer_done</code> 的 <code>EngineCoreOutput</code>，否则只打标记；并 <code>_try_teardown_save</code> 释放占用的 block。是唯一会产出 client 输出的子步骤。</li>
+<li>**<code>_step_waiting()</code>**：把新加入、还在等显存的 PD 请求取出，调 <code>sched_allocate_slots</code> 分配 KV cache block；成功后给 prefill 侧 <code>_setup_save</code>、给 decode 侧异步 <code>_on_add_req</code> 发起 load（<code>num_external_tokens==0</code> 走 fastpath 直接进 <code>_loaded</code>）；分配不到就 break 等下次。</li>
+</ul>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/hybrid_connector/__init__.py:735</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">_step_waiting</span>(<span class="params">self</span>):</span><br><span class="line">    <span class="keyword">while</span> <span class="variable language_">self</span>._waiting:</span><br><span class="line">        <span class="comment"># In pd disagg, load means decode, save means prefill</span></span><br><span class="line">        req, load_count, save_count = <span class="variable language_">self</span>._waiting[<span class="number">0</span>]</span><br><span class="line">        ...</span><br><span class="line">        kvblks = sched_allocate_slots(req, load_count &gt; <span class="number">0</span>, save_count &gt; <span class="number">0</span>, prealloc, gamma)</span><br><span class="line">        <span class="keyword">if</span> kvblks <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">            <span class="keyword">break</span></span><br><span class="line">        ...</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>**<code>_step_loaded()</code>**：处理 KV <strong>load 完成</strong>的请求，使其对 scheduler 可见（这样主 step 才能真正调度它们去算）。</li>
+<li>**<code>_step_aborting()</code>**：处理 abort。</li>
+</ul>
+<blockquote>
+<p>一句话：<code>kvconn.step()</code> 不跑 GPU、不产 token，它只是把传输请求从”等待 → 分配/发起 → 完成”逐格推进，并把诸如 <code>kv_transfer_done</code> 这类传输事件包成 <code>EngineCoreOutput</code> 返回。它在两处被调用——正常的 <code>EngineCore.step()</code> 开头调一次（<code>core.py:645</code>），以及 bypass 循环里每圈调一次。</p>
+</blockquote>
+<hr>
+<h2 id="6-wait-model-output-future-的本职作用"><a href="#6-wait-model-output-future-的本职作用" class="headerlink" title="6. _wait_model_output_future 的本职作用"></a>6. <code>_wait_model_output_future</code> 的本职作用</h2><h3 id="6-1-基类版本（没开-PD-bypass）"><a href="#6-1-基类版本（没开-PD-bypass）" class="headerlink" title="6.1 基类版本（没开 PD/bypass）"></a>6.1 基类版本（没开 PD/bypass）</h3><p>基类 <code>EngineCore</code> 里这个方法是<strong>极简版</strong>，就是它”本来”的样子：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/engine/core.py:618</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">_wait_model_output_future</span>(<span class="params">self, model_output_future, step_sout</span>):</span><br><span class="line">    <span class="keyword">return</span> model_output_future.result(), {}</span><br></pre></td></tr></table></figure>
+
+<p>本职非常单纯：**阻塞等 GPU 算完，拿回 <code>ModelRunnerOutput</code>**，第二个返回值（KV connector 的输出）恒为空 <code>{}</code>。</p>
+<h3 id="6-2-为什么是-future？——-v1-的异步-executor"><a href="#6-2-为什么是-future？——-v1-的异步-executor" class="headerlink" title="6.2 为什么是 future？—— v1 的异步 executor"></a>6.2 为什么是 future？—— v1 的异步 executor</h3><p>vLLM v1 的 executor 是异步/流水线式的——<code>execute_model(scheduler_output, non_block=True)</code> 不原地跑完模型，而是把前向计算提交给 worker（可能是别的进程），立刻返回一个 <code>Future</code> 当句柄：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/engine/core.py:672</span></span><br><span class="line">future = <span class="variable language_">self</span>.model_executor.execute_model(scheduler_output, non_block=<span class="literal">True</span>)</span><br><span class="line">grammar_output = <span class="variable language_">self</span>.scheduler.get_grammar_bitmask(scheduler_output)</span><br><span class="line"><span class="keyword">with</span> <span class="variable language_">self</span>.log_error_detail(scheduler_output):</span><br><span class="line">    model_output, kvconn_outputs2 = <span class="variable language_">self</span>._wait_model_output_future(future, step_sout=scheduler_output)</span><br><span class="line">    <span class="keyword">if</span> model_output <span class="keyword">is</span> <span class="literal">None</span>:                 <span class="comment"># forward/sample 两阶段：forward 先返回 None</span></span><br><span class="line">        sample_future = <span class="variable language_">self</span>.model_executor.sample_tokens(grammar_output, non_block=<span class="literal">True</span>)</span><br><span class="line">        model_output, kvconn_outputs3 = <span class="variable language_">self</span>._wait_model_output_future(sample_future, step_sout=scheduler_output)</span><br></pre></td></tr></table></figure>
+
+<p><code>_wait_model_output_future</code> 就是把这个 future <code>.result()</code> 取出来。注意 v1 把 “forward” 和 “sample_tokens” 拆成两阶段，forward future 先返回 <code>None</code>，再 <code>sample_tokens(non_block=True)</code> 拿第二个 future 又 wait 一次，所以普通流程里它也会被调用两次。</p>
+<h3 id="6-3-为什么抽成单独方法-——-留扩展点"><a href="#6-3-为什么抽成单独方法-——-留扩展点" class="headerlink" title="6.3 为什么抽成单独方法 —— 留扩展点"></a>6.3 为什么抽成单独方法 —— 留扩展点</h3><p>它被单独抽成方法，正是为了留一个<strong>可重写的扩展点</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>场景</th>
+<th><code>_wait_model_output_future</code> 行为</th>
+<th>第二个返回值</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>无 PD（基类 <code>EngineCore</code>）</td>
+<td>纯 <code>future.result()</code>，阻塞等 GPU</td>
+<td><code>{}</code> 空</td>
+</tr>
+<tr>
+<td>有 PD/bypass（<code>EngineCoreProc</code> override，<code>core.py:1942</code>）</td>
+<td>等 GPU 的同时跑 KV connector 的 substep 循环</td>
+<td>期间 <code>kvconn.step()</code> 的传输事件输出</td>
+</tr>
+</tbody></table>
+<p><code>EngineCoreProc</code> 的 override 把”等 GPU 的这段空窗期”利用起来——CPU 本来闲着等结果，于是在循环里反复跑 <code>kvconn.step()</code> + 合成 substep 下发传输任务，直到 <code>EXECUTE_MODEL_RESULT</code> 到达才返回。</p>
+<hr>
+<h2 id="7-关键名词速查"><a href="#7-关键名词速查" class="headerlink" title="7. 关键名词速查"></a>7. 关键名词速查</h2><table>
+<thead>
+<tr>
+<th>名词</th>
+<th>含义</th>
+<th>位置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>HybridConnector</code></td>
+<td>KV connector 插件入口，按 role 分 SCHEDULER/WORKER</td>
+<td><code>__init__.py:1333</code></td>
+</tr>
+<tr>
+<td><code>HybridScheduler</code></td>
+<td>调度侧状态机，维护 <code>_waiting/_loading/_loaded/_saving/_saved</code> 等 deque</td>
+<td><code>__init__.py:558</code></td>
+</tr>
+<tr>
+<td><code>HybridWorker</code></td>
+<td>worker 侧，持有底层 backend，订阅 bypass、逐层 save</td>
+<td><code>__init__.py:1135</code></td>
+</tr>
+<tr>
+<td><code>PBackend</code> / <code>DBackend</code></td>
+<td>prefill / decode 侧 KVT backend</td>
+<td><code>kvtbackend.py:679 / 1948</code></td>
+</tr>
+<tr>
+<td><code>bladekv.KVTransferClient</code></td>
+<td>底层传输引擎（RDMA/TCP），真正的”KVT 服务”实例</td>
+<td><code>kvtbackend.py:1792</code></td>
+</tr>
+<tr>
+<td><code>stepid</code> / <code>substepid</code></td>
+<td>step（≥1024 自增，substepid=0）与 substep（substepid≥1）的归属/排序键</td>
+<td><code>__init__.py:579</code></td>
+</tr>
+<tr>
+<td><code>hc_parent</code></td>
+<td>动态挂在 <code>SchedulerOutput</code> 上，指向 substep 所属的主 step</td>
+<td><code>core.py:2041</code></td>
+</tr>
+<tr>
+<td><code>send_bypass_task</code></td>
+<td>调度侧通过 zmq XPUB 把非空 substep meta 发给 worker</td>
+<td><code>__init__.py:658</code></td>
+</tr>
+<tr>
+<td><code>_wait_model_output_future</code></td>
+<td>等异步 GPU future；override 后兼跑 bypass 循环</td>
+<td><code>core.py:618 / 1942</code></td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="附：关于注释里的”Python-动态性”"><a href="#附：关于注释里的”Python-动态性”" class="headerlink" title="附：关于注释里的”Python 动态性”"></a>附：关于注释里的”Python 动态性”</h2><p><code>core.py:2041</code> 那行注释”利用 Python 动态性”指的是：<strong>利用 Python 可在运行时给任意对象动态新增属性这一特性</strong>，给 <code>SchedulerOutput</code> 实例临时挂一个类定义里根本不存在的 <code>hc_parent</code> 字段，而不修改 <code>SchedulerOutput</code> 这个上游类本身。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">substep_sout.hc_parent = step_sout  <span class="comment"># type: ignore[attr-defined]</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>SchedulerOutput</code> 是 vLLM 上游定义的类，字段里没有 <code>hc_parent</code>。Python 是动态语言，普通对象属性存在实例的 <code>__dict__</code> 里，运行时可随时新增，所以这行会在该实例上凭空创建 <code>hc_parent</code>。</li>
+<li>读取方因此用容错方式取（<code>dict(sout.__dict__).get("hc_parent")</code>，见 <code>__init__.py:1024</code>），避免普通主 step 上没有该属性时 <code>AttributeError</code>。</li>
+<li>末尾 <code># type: ignore[attr-defined]</code> 是为了让 mypy 闭嘴——类型检查器按类定义认为没有该属性。</li>
+<li><strong>设计意图</strong>：避免侵入式修改上游类（加字段会污染上游、增加 rebase 冲突、影响序列化）。<code>hc_parent</code> 只在 EngineCore 进程内、调度线程里使用，不跨进程，所以安全。</li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线</p><p><a href="https://llx-08.github.io/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-bypass-substep/">https://llx-08.github.io/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-bypass-substep/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-06-04</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-06-04</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-vs-sglang-pd/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">vLLM HybridConnector + KVTBackend vs SGLang 的 PD 分离对比</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/06/04/2026-06-04-vllm-kvt-cross-node-tp-and-completion/"><span class="level-item">vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">19</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-dpsk-v32-sparse-mla-flashinfer-plan/">Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-vs-sglang-pd/">vLLM HybridConnector + KVTBackend vs SGLang 的 PD 分离对比</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-bypass-substep/">vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-vllm-kvt-cross-node-tp-and-completion/">vLLM KVT：跨机 TP、Ray 线程 bug 与 KV 传输完成通知机制</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-01T00:00:00.000Z">2026-06-01</time></p><p class="title"><a href="/notes/2026/06/01/2026-06-01-mooncake-architecture-notes/">Mooncake 项目功能与关键概念笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
