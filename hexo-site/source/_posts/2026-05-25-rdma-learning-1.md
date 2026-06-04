@@ -95,7 +95,27 @@ Send / Recv：发送方用 SQ 发；接收方必须用 RQ 提前给出接收缓�
 
 CQ(Completion Queue)
 
-MR(Memory Region)
+### MR(Memory Region)
 
 Ref:
-https://www.bilibili.com/video/BV1LqdnYeEDT/?vd_source=abcbcdfc21d527c3519a180ed8826c9d
+https://www.bilibili.com/video/BV1LqdnYeEDT/?vd_source=abcbcdfc21d527c3519a180ed8826c9d 
+
+Memory region, pinned to physical locations that can be performed the DMA by RNIC, provide RDMA device RNIC with necessary permissions for reading and writing.
+
+Once registering a MR, the RNIC will return an Local Key and an Remote Key identifier, using for application which want to read or write memory. Similar with KVT usage, providing offset and lkey/rkey to mark the memory area that want to read/write.
+
+- Lkey: used by local app
+- Rkey: used by remote app
+
+![alt text](/imgs/sge_list.jpg)
+
+### Protection Domains(PD)
+
+control access to various RDMA resources
+
+
+
+
+
+Ref:
+https://www.snia.org/blog/2025/rdma-qa
