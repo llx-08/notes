@@ -3,6 +3,7 @@ title: vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析
 date: 2026-06-08
 tags: []
 ---
+
 # vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析
 
 > 基于 develop 分支代码，分析 EPD（Encoder-Prefill-Decode）三级分离架构中 Encoder Cache 的传输机制。
