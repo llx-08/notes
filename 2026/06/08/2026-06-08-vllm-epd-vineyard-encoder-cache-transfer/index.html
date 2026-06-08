@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析 基于 develop 分支代码，分析 EPD（Encoder-Prefill-Decode）三级分离架构中 Encoder Cache 的传输机制。 一、总体架构 1.1 EPD 分离概述 EPD 是 PD（Prefill-Decode）分离的扩展，针对多模态模型（如 Qwen-VL）引入第三级——"><meta property="og:type" content="blog"><meta property="og:title" content="vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析"><meta property="og:url" content="https://llx-08.github.io/notes/2026/06/08/2026-06-08-vllm-epd-vineyard-encoder-cache-transfer/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析 基于 develop 分支代码，分析 EPD（Encoder-Prefill-Decode）三级分离架构中 Encoder Cache 的传输机制。 一、总体架构 1.1 EPD 分离概述 EPD 是 PD（Prefill-Decode）分离的扩展，针对多模态模型（如 Qwen-VL）引入第三级——"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-06-08T00:00:00.000Z"><meta property="article:modified_time" content="2026-06-08T08:11:33.018Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/06/08/2026-06-08-vllm-epd-vineyard-encoder-cache-transfer/"},"headline":"vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-06-08T00:00:00.000Z","dateModified":"2026-06-08T08:11:33.018Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析 基于 develop 分支代码，分析 EPD（Encoder-Prefill-Decode）三级分离架构中 Encoder Cache 的传输机制。 一、总体架构 1.1 EPD 分离概述 EPD 是 PD（Prefill-Decode）分离的扩展，针对多模态模型（如 Qwen-VL）引入第三级——"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/06/08/2026-06-08-vllm-epd-vineyard-encoder-cache-transfer/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-06-08T00:00:00.000Z" title="6/8/2026, 12:00:00 AM">2026-06-08</time>发表</span><span class="level-item"><time dateTime="2026-06-08T08:11:33.018Z" title="6/8/2026, 8:11:33 AM">2026-06-08</time>更新</span><span class="level-item">37 分钟读完 (大约5588个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析</h1><div class="content"><h1 id="vLLM-EPD-分离与-Vineyard-Encoder-Cache-Transfer-深度分析"><a href="#vLLM-EPD-分离与-Vineyard-Encoder-Cache-Transfer-深度分析" class="headerlink" title="vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析"></a>vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析</h1><blockquote>
+<p>基于 develop 分支代码，分析 EPD（Encoder-Prefill-Decode）三级分离架构中 Encoder Cache 的传输机制。</p>
+</blockquote>
+<h2 id="一、总体架构"><a href="#一、总体架构" class="headerlink" title="一、总体架构"></a>一、总体架构</h2><h3 id="1-1-EPD-分离概述"><a href="#1-1-EPD-分离概述" class="headerlink" title="1.1 EPD 分离概述"></a>1.1 EPD 分离概述</h3><p>EPD 是 PD（Prefill-Decode）分离的扩展，针对多模态模型（如 Qwen-VL）引入第三级——<strong>Encoder 节点</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>节点</th>
+<th>角色</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>E (Encoder)</td>
+<td>ec_producer</td>
+<td>只运行 ViT 视觉编码器，生成 embedding，写入 v6d 共享内存</td>
+</tr>
+<tr>
+<td>P (Prefill)</td>
+<td>ec_consumer</td>
+<td>从 v6d 加载 embedding，执行 LLM prefill，生成 KV cache</td>
+</tr>
+<tr>
+<td>D (Decode)</td>
+<td>—</td>
+<td>从 P 节点接收 KV cache，执行自回归解码</td>
+</tr>
+</tbody></table>
+<p>E→P 的 Encoder Cache 传输由 <strong>EC Connector</strong> 框架负责，与 KV Connector（P→D）平行但独立。</p>
+<h3 id="1-2-EC-Connector-框架"><a href="#1-2-EC-Connector-框架" class="headerlink" title="1.2 EC Connector 框架"></a>1.2 EC Connector 框架</h3><p>EC Connector 与 KV Connector 的设计模式一致：</p>
+<ul>
+<li><strong>配置入口</strong>：<code>--ec-transfer-config</code>，解析为 <code>ECTransferConfig</code>（<code>vllm/config/ec_transfer.py</code>）</li>
+<li><strong>三个配置字段</strong>：<ul>
+<li><code>ec_connector</code>：连接器类名（如 <code>ECGlobalVineyardConnector</code>）</li>
+<li><code>ec_role</code>：<code>ec_producer</code>（E 节点）或 <code>ec_consumer</code>（P 节点）</li>
+<li><code>ec_v6d_socket</code>：Vineyard IPC socket 路径</li>
+</ul>
+</li>
+<li><strong>三角色实例化</strong>：<code>ECConnectorRole.SCHEDULER</code>、<code>WORKER</code>、<code>APISERVER</code>，分别在不同进程中运行</li>
+<li><strong>工厂模式</strong>：<code>ECConnectorFactory</code>（<code>vllm/distributed/ec_transfer/ec_connector/factory.py</code>）注册了三个实现：<ul>
+<li><code>ECExampleConnector</code>：示例实现</li>
+<li><code>ECVineyardConnector</code>：单实例 Vineyard</li>
+<li><code>ECGlobalVineyardConnector</code>：生产环境使用的全局 Vineyard 连接器</li>
+</ul>
+</li>
+</ul>
+<h3 id="1-3-核心接口-ECConnectorBase"><a href="#1-3-核心接口-ECConnectorBase" class="headerlink" title="1.3 核心接口 ECConnectorBase"></a>1.3 核心接口 ECConnectorBase</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/distributed/ec_transfer/ec_connector/base.py</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">ECConnectorBase</span>(<span class="title class_ inherited__">ABC</span>):</span><br><span class="line"><span class="meta">    @abstractmethod</span></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">has_caches</span>(<span class="params">self, request</span>) -&gt; <span class="built_in">list</span>[<span class="built_in">bool</span>]:</span><br><span class="line">        <span class="string">"""检查每个 mm_feature 是否在远程缓存中可用"""</span></span><br><span class="line"></span><br><span class="line"><span class="meta">    @abstractmethod</span></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">start_load_caches</span>(<span class="params">self, encoder_cache, **kwargs</span>):</span><br><span class="line">        <span class="string">"""从远程加载 encoder cache 到本地 encoder_cache dict"""</span></span><br><span class="line"></span><br><span class="line"><span class="meta">    @abstractmethod</span></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">save_caches</span>(<span class="params">self, encoder_cache, mm_hash, **kwargs</span>):</span><br><span class="line">        <span class="string">"""将 encoder cache 保存到远程存储"""</span></span><br><span class="line"></span><br><span class="line"><span class="meta">    @abstractmethod</span></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">build_connector_meta</span>(<span class="params">self, scheduler_output</span>) -&gt; ECConnectorMetadata:</span><br><span class="line">        <span class="string">"""构建传输给 Worker 的元数据"""</span></span><br><span class="line"></span><br><span class="line"><span class="meta">    @abstractmethod</span></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">get_prefetch_hints</span>(<span class="params">self, scheduler</span>) -&gt; <span class="built_in">list</span>[<span class="built_in">str</span>]:</span><br><span class="line">        <span class="string">"""返回下一步可能需要的 mm_hash 列表，供预取使用"""</span></span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="二、Vineyard-v6d-存储层"><a href="#二、Vineyard-v6d-存储层" class="headerlink" title="二、Vineyard (v6d) 存储层"></a>二、Vineyard (v6d) 存储层</h2><h3 id="2-1-什么是-Vineyard"><a href="#2-1-什么是-Vineyard" class="headerlink" title="2.1 什么是 Vineyard"></a>2.1 什么是 Vineyard</h3><p>Vineyard（v6d）是一个分布式共享内存系统，专为大数据和机器学习场景设计。在 EPD 架构中：</p>
+<ul>
+<li>E 节点和 P 节点部署在<strong>同一台物理机</strong>上</li>
+<li>v6d 提供 IPC（进程间通信）级别的共享内存访问</li>
+<li>数据通过 v6d daemon 管理，不经过网络栈</li>
+</ul>
+<h3 id="2-2-内容寻址的-Key-设计"><a href="#2-2-内容寻址的-Key-设计" class="headerlink" title="2.2 内容寻址的 Key 设计"></a>2.2 内容寻址的 Key 设计</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/distributed/ec_transfer/ec_connector/epd_global_v6d_backend.py</span></span><br><span class="line"></span><br><span class="line"><span class="meta">@dataclass</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">VineyardMultiModalKey</span>:</span><br><span class="line">    mm_hash: <span class="built_in">str</span></span><br><span class="line"></span><br><span class="line"><span class="meta">    @property</span></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">embd</span>(<span class="params">self</span>) -&gt; <span class="built_in">str</span>:</span><br><span class="line">        <span class="keyword">return</span> <span class="string">f"<span class="subst">{self.mm_hash}</span>_embd"</span>   <span class="comment"># embedding tensor 的 key</span></span><br><span class="line"></span><br><span class="line"><span class="meta">    @property</span></span><br><span class="line">    <span class="keyword">def</span> <span class="title function_">meta</span>(<span class="params">self</span>) -&gt; <span class="built_in">str</span>:</span><br><span class="line">        <span class="keyword">return</span> <span class="string">f"<span class="subst">{self.mm_hash}</span>_meta"</span>   <span class="comment"># MultiModalMetadata 的 key</span></span><br></pre></td></tr></table></figure>
+
+<p><strong>设计核心</strong>：同一张图片 → 同一个 <code>mm_hash</code> → 同一个 v6d key → 天然去重。</p>
+<p>当多个请求包含同一张图片时，E 节点只需编码一次，后续请求直接复用 v6d 中已有的 embedding（通过 <code>ObjectAlreadyExistError</code> 检测）。</p>
+<h3 id="2-3-GlobalVineyardBackend-实现"><a href="#2-3-GlobalVineyardBackend-实现" class="headerlink" title="2.3 GlobalVineyardBackend 实现"></a>2.3 GlobalVineyardBackend 实现</h3><p><code>GlobalVineyardBackend</code>（<code>epd_global_v6d_backend.py</code>）是底层的 v6d 操作封装，提供以下核心方法：</p>
+<h4 id="Save-操作（E-节点使用）"><a href="#Save-操作（E-节点使用）" class="headerlink" title="Save 操作（E 节点使用）"></a>Save 操作（E 节点使用）</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">save_caches</span>(<span class="params">self, mm_hash, embedding_tensor, **kwargs</span>):</span><br><span class="line">    key = VineyardMultiModalKey(mm_hash)</span><br><span class="line">    non_blocking = kwargs.get(<span class="string">"non_blocking"</span>, <span class="literal">False</span>)</span><br><span class="line"></span><br><span class="line">    <span class="comment"># 获取 v6d 共享内存中的 tensor 引用（可写模式）</span></span><br><span class="line">    obj = <span class="variable language_">self</span>._base_client.get(key.embd, peer=<span class="string">"local"</span>, unsafe=<span class="literal">True</span>)</span><br><span class="line">    resolver = obj.resolver()</span><br><span class="line"></span><br><span class="line">    <span class="comment"># 将 GPU tensor 拷贝到 v6d 共享内存</span></span><br><span class="line">    resolver.copy_(embedding_tensor)</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>peer="local"</code>：只在本机的 v6d 实例内查找</li>
+<li><code>unsafe=True</code>：可写模式（v6d 默认对象不可变，unsafe 允许就地写入）</li>
+<li><code>resolver()</code>：返回一个 numpy/torch 视图，直接指向共享内存区域</li>
+<li><code>copy_()</code>：将 GPU 上的 embedding tensor 拷贝到该共享内存</li>
+</ul>
+<h4 id="Load-操作（P-节点使用）"><a href="#Load-操作（P-节点使用）" class="headerlink" title="Load 操作（P 节点使用）"></a>Load 操作（P 节点使用）</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">load_caches</span>(<span class="params">self, mm_hash</span>):</span><br><span class="line">    key = VineyardMultiModalKey(mm_hash)</span><br><span class="line">    obj = <span class="variable language_">self</span>._base_client.get(key.embd, peer=<span class="string">"local"</span>)</span><br><span class="line">    tensor = obj.resolver().detach().clone().cuda()</span><br><span class="line">    <span class="keyword">return</span> tensor</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>resolver()</code>：获取共享内存视图</li>
+<li><code>.detach().clone()</code>：复制到独立的 CPU tensor（断开共享内存引用，避免后续 v6d GC 影响）</li>
+<li><code>.cuda()</code>：拷贝到 GPU</li>
+</ul>
+<h4 id="Load-to-Pinned（异步预取路径使用）"><a href="#Load-to-Pinned（异步预取路径使用）" class="headerlink" title="Load to Pinned（异步预取路径使用）"></a>Load to Pinned（异步预取路径使用）</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">load_caches_to_pinned</span>(<span class="params">self, mm_hash</span>):</span><br><span class="line">    key = VineyardMultiModalKey(mm_hash)</span><br><span class="line">    obj = <span class="variable language_">self</span>._base_client.get(key.embd, peer=<span class="string">"local"</span>)</span><br><span class="line">    tensor = obj.resolver().detach().clone().pin_memory()</span><br><span class="line">    <span class="keyword">return</span> tensor</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>.pin_memory()</code>：返回 pinned memory tensor，后续可用 <code>non_blocking=True</code> 做异步 H2D 拷贝</li>
+</ul>
+<h4 id="预创建-v6d-对象（API-Server-使用）"><a href="#预创建-v6d-对象（API-Server-使用）" class="headerlink" title="预创建 v6d 对象（API Server 使用）"></a>预创建 v6d 对象（API Server 使用）</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">prepare_for_save_embd</span>(<span class="params">self, mm_hash, shape, dtype</span>):</span><br><span class="line">    key = VineyardMultiModalKey(mm_hash)</span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        obj = <span class="variable language_">self</span>._base_client.create(</span><br><span class="line">            vineyard.Tensor, shape=shape, dtype=dtype)</span><br><span class="line">        <span class="variable language_">self</span>._base_client.put(obj, name=key.embd)</span><br><span class="line">    <span class="keyword">except</span> ObjectAlreadyExistError:</span><br><span class="line">        <span class="keyword">pass</span>  <span class="comment"># 缓存命中，同 hash 的 embedding 已存在</span></span><br></pre></td></tr></table></figure>
+
+<p>API Server 在请求进入时预创建空的 v6d Tensor 对象，E 节点的 Worker 后续只需 <code>copy_()</code> 填充数据。</p>
+<h4 id="保存-Metadata"><a href="#保存-Metadata" class="headerlink" title="保存 Metadata"></a>保存 Metadata</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">save_meta</span>(<span class="params">self, mm_hash, mm_meta</span>):</span><br><span class="line">    key = VineyardMultiModalKey(mm_hash)</span><br><span class="line">    pickled = pickle.dumps(mm_meta)</span><br><span class="line">    obj = <span class="variable language_">self</span>._base_client.create(vineyard.Blob, <span class="built_in">len</span>(pickled))</span><br><span class="line">    obj.copy(<span class="number">0</span>, pickled)</span><br><span class="line">    <span class="variable language_">self</span>._base_client.put(obj, name=key.meta)</span><br></pre></td></tr></table></figure>
+
+<p>将 <code>MultiModalMetadata</code> pickle 序列化后存为 v6d Blob 对象，key 后缀为 <code>_meta</code>。</p>
+<hr>
+<h2 id="三、E-节点（Encoder-Producer）详细流程"><a href="#三、E-节点（Encoder-Producer）详细流程" class="headerlink" title="三、E 节点（Encoder / Producer）详细流程"></a>三、E 节点（Encoder / Producer）详细流程</h2><h3 id="3-1-E-节点的”伪引擎”特性"><a href="#3-1-E-节点的”伪引擎”特性" class="headerlink" title="3.1 E 节点的”伪引擎”特性"></a>3.1 E 节点的”伪引擎”特性</h3><p>E 节点启动完整的 vLLM 引擎（scheduler + worker + model runner），但通过多处判断跳过所有 LLM 相关逻辑：</p>
+<h4 id="1-profile-run-提前返回"><a href="#1-profile-run-提前返回" class="headerlink" title="(1) profile_run 提前返回"></a>(1) profile_run 提前返回</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># gpu_model_runner.py:6972-6978</span></span><br><span class="line"><span class="comment"># EC producer only runs the ViT encoder, skip decoder dummy runs.</span></span><br><span class="line"><span class="keyword">if</span> has_ec_transfer() <span class="keyword">and</span> get_ec_transfer().is_producer:</span><br><span class="line">    <span class="variable language_">self</span>._sync_device()</span><br><span class="line">    <span class="variable language_">self</span>.encoder_cache.clear()</span><br><span class="line">    gc.collect()</span><br><span class="line">    <span class="keyword">return</span></span><br></pre></td></tr></table></figure>
+
+<p>profile_run 是 vLLM 初始化时计算可用 GPU 内存和编译 CUDA graph 的阶段。E 节点在完成 ViT 编码器的 dummy run 后直接返回，不执行 decoder 的 dummy runs。</p>
+<h4 id="2-get-kv-cache-spec-返回空字典"><a href="#2-get-kv-cache-spec-返回空字典" class="headerlink" title="(2) get_kv_cache_spec 返回空字典"></a>(2) get_kv_cache_spec 返回空字典</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># gpu_model_runner.py:8315-8316</span></span><br><span class="line"><span class="keyword">if</span> has_ec_transfer() <span class="keyword">and</span> get_ec_transfer().is_producer:</span><br><span class="line">    <span class="keyword">return</span> {}</span><br></pre></td></tr></table></figure>
+
+<p>返回空字典意味着 E 节点<strong>不分配任何 KV cache block</strong>，因为完全不需要做 LLM forward。这大幅节省了 GPU 显存，使 E 节点可以用较少的 GPU 资源。</p>
+<h4 id="3-execute-model-只跑-ViT-Save"><a href="#3-execute-model-只跑-ViT-Save" class="headerlink" title="(3) execute_model 只跑 ViT + Save"></a>(3) execute_model 只跑 ViT + Save</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># gpu_model_runner.py:4487-4494</span></span><br><span class="line"><span class="keyword">if</span> has_ec_transfer() <span class="keyword">and</span> get_ec_transfer().is_producer:</span><br><span class="line">    <span class="keyword">with</span> <span class="variable language_">self</span>.maybe_get_ec_connector_output(</span><br><span class="line">        scheduler_output,</span><br><span class="line">        encoder_cache=<span class="variable language_">self</span>.encoder_cache,</span><br><span class="line">    ):</span><br><span class="line">        <span class="variable language_">self</span>._execute_mm_encoder(scheduler_output)   <span class="comment"># 只跑 ViT</span></span><br><span class="line">        <span class="variable language_">self</span>._save_ec_to_connector(scheduler_output)  <span class="comment"># 保存到 v6d</span></span><br></pre></td></tr></table></figure>
+
+<p>完整的 execute_model 方法有数千行代码处理 attention、speculative decoding 等，但 E 节点只执行这几行。</p>
+<h3 id="3-2-save-ec-to-connector-实现"><a href="#3-2-save-ec-to-connector-实现" class="headerlink" title="3.2 _save_ec_to_connector 实现"></a>3.2 _save_ec_to_connector 实现</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># gpu_model_runner.py:2941-2966</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">_save_ec_to_connector</span>(<span class="params">self, scheduler_output</span>):</span><br><span class="line">    non_blocking = <span class="literal">True</span></span><br><span class="line">    unique_mm_hashes: <span class="built_in">set</span>[<span class="built_in">str</span>] = <span class="built_in">set</span>()</span><br><span class="line"></span><br><span class="line">    <span class="comment"># 收集本步调度的所有 unique mm_hashes</span></span><br><span class="line">    <span class="keyword">for</span> req_id, input_ids <span class="keyword">in</span> scheduler_output.scheduled_encoder_inputs.items():</span><br><span class="line">        req_state = <span class="variable language_">self</span>.requests.get(req_id)</span><br><span class="line">        <span class="keyword">if</span> req_state <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">            <span class="keyword">continue</span></span><br><span class="line">        <span class="keyword">for</span> mm_input_id <span class="keyword">in</span> input_ids:</span><br><span class="line">            mm_hash = req_state.mm_features[mm_input_id].identifier</span><br><span class="line">            unique_mm_hashes.add(mm_hash)</span><br><span class="line"></span><br><span class="line">    <span class="comment"># 逐个保存到 v6d</span></span><br><span class="line">    <span class="keyword">for</span> mm_hash <span class="keyword">in</span> unique_mm_hashes:</span><br><span class="line">        <span class="keyword">try</span>:</span><br><span class="line">            <span class="variable language_">self</span>.maybe_save_ec_to_connector(</span><br><span class="line">                <span class="variable language_">self</span>.encoder_cache, mm_hash,</span><br><span class="line">                non_blocking=non_blocking)</span><br><span class="line">        <span class="keyword">except</span> Exception <span class="keyword">as</span> e:</span><br><span class="line">            logger.error(<span class="string">f"Failed to save encoder cache for mm_hash <span class="subst">{mm_hash}</span>: <span class="subst">{e}</span>"</span>)</span><br><span class="line"></span><br><span class="line">    <span class="comment"># 确保所有非阻塞拷贝完成</span></span><br><span class="line">    <span class="keyword">if</span> non_blocking <span class="keyword">and</span> unique_mm_hashes:</span><br><span class="line">        torch.cuda.synchronize()</span><br></pre></td></tr></table></figure>
+
+<p>调用链：<code>_save_ec_to_connector</code> → <code>maybe_save_ec_to_connector</code>（mixin 静态方法）→ <code>ECGlobalVineyardConnector.save_caches()</code> → <code>GlobalVineyardBackend.save_caches()</code></p>
+<hr>
+<h2 id="四、P-节点（Prefill-Consumer）详细流程"><a href="#四、P-节点（Prefill-Consumer）详细流程" class="headerlink" title="四、P 节点（Prefill / Consumer）详细流程"></a>四、P 节点（Prefill / Consumer）详细流程</h2><h3 id="4-1-Scheduler-侧：判断是否从远程加载"><a href="#4-1-Scheduler-侧：判断是否从远程加载" class="headerlink" title="4.1 Scheduler 侧：判断是否从远程加载"></a>4.1 Scheduler 侧：判断是否从远程加载</h3><h4 id="has-caches-判定逻辑"><a href="#has-caches-判定逻辑" class="headerlink" title="has_caches 判定逻辑"></a>has_caches 判定逻辑</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># global_vineyard_connector.py:372-401</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">has_caches</span>(<span class="params">self, request</span>):</span><br><span class="line">    <span class="keyword">if</span> (</span><br><span class="line">        <span class="variable language_">self</span>.is_producer</span><br><span class="line">        <span class="keyword">or</span> request.sampling_params <span class="keyword">is</span> <span class="literal">None</span></span><br><span class="line">        <span class="keyword">or</span> request.sampling_params.extra_args <span class="keyword">is</span> <span class="literal">None</span></span><br><span class="line">        <span class="keyword">or</span> <span class="string">"enable_disaggregated_vit"</span> <span class="keyword">not</span> <span class="keyword">in</span> request.sampling_params.extra_args</span><br><span class="line">    ):</span><br><span class="line">        <span class="keyword">return</span> [<span class="literal">False</span> <span class="keyword">for</span> _ <span class="keyword">in</span> request.mm_features]  <span class="comment"># 需要本地计算</span></span><br><span class="line">    <span class="keyword">else</span>:</span><br><span class="line">        <span class="keyword">return</span> [<span class="literal">True</span> <span class="keyword">for</span> _ <span class="keyword">in</span> request.mm_features]    <span class="comment"># 使用远程缓存</span></span><br></pre></td></tr></table></figure>
+
+<p>判定依据是 <code>sampling_params.extra_args</code> 中是否包含 <code>enable_disaggregated_vit</code>。这是在<strong>请求级别</strong>控制的——同一个 P 节点可以同时处理有 E 节点缓存和没有 E 节点缓存的请求，实现混合部署。</p>
+<h4 id="Scheduler-调度-encoder-inputs"><a href="#Scheduler-调度-encoder-inputs" class="headerlink" title="Scheduler 调度 encoder inputs"></a>Scheduler 调度 encoder inputs</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># scheduler.py:1380-1530 — _schedule_encoder_inputs()</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 先检查远程缓存</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.ec_connector <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>:</span><br><span class="line">    remote_cache_has_item = <span class="variable language_">self</span>.ec_connector.has_caches(request)</span><br><span class="line"></span><br><span class="line"><span class="comment"># ...遍历每个 mm_feature...</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 如果远程有缓存，标记为外部加载</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.ec_connector <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span> <span class="keyword">and</span> remote_cache_has_item[i]:</span><br><span class="line">    mm_hashes_to_schedule.add(request.mm_features[i].identifier)</span><br><span class="line">    external_load_encoder_input.append(i)</span><br><span class="line">    num_embeds_to_schedule += num_encoder_embeds</span><br><span class="line">    <span class="keyword">continue</span>  <span class="comment"># 不消耗 encoder_compute_budget</span></span><br></pre></td></tr></table></figure>
+
+<p>关键点：</p>
+<ul>
+<li>远程加载的 encoder input **不消耗 <code>encoder_compute_budget</code>**（不需要跑 ViT）</li>
+<li>但仍然消耗 <code>encoder_cache_manager</code> 的 slot（需要在 GPU 上缓存 embedding）</li>
+<li>通过 <code>update_state_after_alloc</code> 将 mm_hash 加入 <code>_mm_datas_need_loads</code> 列表</li>
+</ul>
+<h4 id="update-state-after-alloc"><a href="#update-state-after-alloc" class="headerlink" title="update_state_after_alloc"></a>update_state_after_alloc</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># global_vineyard_connector.py:402-409</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">update_state_after_alloc</span>(<span class="params">self, request, index</span>):</span><br><span class="line">    mm_hash = request.mm_features[index].identifier</span><br><span class="line">    <span class="keyword">if</span> mm_hash <span class="keyword">not</span> <span class="keyword">in</span> <span class="variable language_">self</span>._mm_datas_need_loads:</span><br><span class="line">        <span class="variable language_">self</span>._mm_datas_need_loads.append(mm_hash)</span><br></pre></td></tr></table></figure>
+
+<p>每当 scheduler 为某个 encoder input 分配了 cache slot，就将其 mm_hash 记录到待加载列表中。</p>
+<h3 id="4-2-Scheduler-侧：构建-EC-Metadata"><a href="#4-2-Scheduler-侧：构建-EC-Metadata" class="headerlink" title="4.2 Scheduler 侧：构建 EC Metadata"></a>4.2 Scheduler 侧：构建 EC Metadata</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># scheduler.py:1162-1190</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># Build the connector meta for ECConnector</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.ec_connector <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>:</span><br><span class="line">    ec_meta = <span class="variable language_">self</span>.ec_connector.build_connector_meta(scheduler_output)</span><br><span class="line">    scheduler_output.ec_connector_metadata = ec_meta</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> <span class="keyword">not</span> <span class="variable language_">self</span>.is_ec_producer:</span><br><span class="line">        <span class="comment"># 生成预取提示</span></span><br><span class="line">        prefetch_hashes = <span class="variable language_">self</span>.ec_connector.get_prefetch_hints(<span class="variable language_">self</span>)</span><br><span class="line">        <span class="keyword">if</span> prefetch_hashes:</span><br><span class="line">            scheduler_output.prefetch_ec_mm_hashes = prefetch_hashes</span><br><span class="line"></span><br><span class="line">        <span class="comment"># 收集过期预取条目释放的 mm_hashes</span></span><br><span class="line">        expired_freed = <span class="variable language_">self</span>.encoder_cache_manager.get_freed_mm_hashes()</span><br><span class="line">        <span class="keyword">if</span> expired_freed:</span><br><span class="line">            scheduler_output.free_encoder_mm_hashes.extend(expired_freed)</span><br></pre></td></tr></table></figure>
+
+<p><code>build_connector_meta</code> 实现：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># global_vineyard_connector.py:411-421</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">build_connector_meta</span>(<span class="params">self, scheduler_output</span>):</span><br><span class="line">    <span class="keyword">if</span> <span class="variable language_">self</span>.is_producer:</span><br><span class="line">        <span class="keyword">return</span> ECGlobalVineyardConnectorMetadata(mm_hashes=[])</span><br><span class="line"></span><br><span class="line">    mm_hashes = <span class="variable language_">self</span>._mm_datas_need_loads.copy()</span><br><span class="line">    <span class="variable language_">self</span>._mm_datas_need_loads.clear()</span><br><span class="line">    <span class="keyword">return</span> ECGlobalVineyardConnectorMetadata(mm_hashes=mm_hashes)</span><br></pre></td></tr></table></figure>
+
+<p>Consumer 侧将本步需要加载的 mm_hashes 打包到 metadata 中，随 <code>SchedulerOutput</code> 传给 Worker。</p>
+<h3 id="4-3-SchedulerOutput-中的-EC-相关字段"><a href="#4-3-SchedulerOutput-中的-EC-相关字段" class="headerlink" title="4.3 SchedulerOutput 中的 EC 相关字段"></a>4.3 SchedulerOutput 中的 EC 相关字段</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># vllm/v1/core/sched/output.py</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">SchedulerOutput</span>:</span><br><span class="line">    free_encoder_mm_hashes: <span class="built_in">list</span>[<span class="built_in">str</span>]                        <span class="comment"># 需要释放的 mm_hashes</span></span><br><span class="line">    ec_connector_metadata: ECConnectorMetadata | <span class="literal">None</span> = <span class="literal">None</span>  <span class="comment"># EC 传输元数据</span></span><br><span class="line">    prefetch_ec_mm_hashes: <span class="built_in">list</span>[<span class="built_in">str</span>] | <span class="literal">None</span> = <span class="literal">None</span>           <span class="comment"># 下一步预取提示</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="4-4-Worker-侧：加载-Encoder-Cache"><a href="#4-4-Worker-侧：加载-Encoder-Cache" class="headerlink" title="4.4 Worker 侧：加载 Encoder Cache"></a>4.4 Worker 侧：加载 Encoder Cache</h3><p>Worker 通过 <code>ECConnectorModelRunnerMixin</code>（<code>vllm/v1/worker/ec_connector_model_runner_mixin.py</code>）集成 EC 加载逻辑。</p>
+<h4 id="Context-Manager-模式"><a href="#Context-Manager-模式" class="headerlink" title="Context Manager 模式"></a>Context Manager 模式</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># ec_connector_model_runner_mixin.py — _get_ec_connector_output()</span></span><br><span class="line"><span class="meta">@contextmanager</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">_get_ec_connector_output</span>(<span class="params">scheduler_output, encoder_cache,</span></span><br><span class="line"><span class="params">                              prefetch_manager=<span class="literal">None</span>, **kwargs</span>):</span><br><span class="line">    output = ECConnectorOutput()</span><br><span class="line">    ec_connector = get_ec_transfer()</span><br><span class="line"></span><br><span class="line">    <span class="comment"># 绑定 metadata</span></span><br><span class="line">    ec_connector.bind_connector_metadata(scheduler_output.ec_connector_metadata)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> <span class="keyword">not</span> ec_connector.is_producer:</span><br><span class="line">        <span class="keyword">if</span> prefetch_manager <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>:</span><br><span class="line">            <span class="comment"># 异步预取路径</span></span><br><span class="line">            ...</span><br><span class="line">        <span class="keyword">else</span>:</span><br><span class="line">            <span class="comment"># 同步加载路径（默认）</span></span><br><span class="line">            ec_connector.start_load_caches(encoder_cache, **kwargs)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        <span class="keyword">yield</span> output</span><br><span class="line">    <span class="keyword">finally</span>:</span><br><span class="line">        output.finished_sending, output.finished_recving = (</span><br><span class="line">            ec_connector.get_finished(scheduler_output.finished_req_ids)</span><br><span class="line">        )</span><br><span class="line">        ec_connector.clear_connector_metadata()</span><br></pre></td></tr></table></figure>
+
+<p>生命周期：</p>
+<ol>
+<li>绑定 metadata</li>
+<li>加载 encoder cache（同步或异步）</li>
+<li>yield → 调用者执行 encoder + gather</li>
+<li>finally：收集完成信号，清理 metadata</li>
+</ol>
+<h4 id="Consumer-路径在-execute-model-中的位置"><a href="#Consumer-路径在-execute-model-中的位置" class="headerlink" title="Consumer 路径在 execute_model 中的位置"></a>Consumer 路径在 execute_model 中的位置</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># gpu_model_runner.py:3597-3605</span></span><br><span class="line"><span class="keyword">with</span> <span class="variable language_">self</span>.maybe_get_ec_connector_output(</span><br><span class="line">    scheduler_output,</span><br><span class="line">    encoder_cache=<span class="variable language_">self</span>.encoder_cache,</span><br><span class="line">    prefetch_manager=<span class="variable language_">self</span>.ec_prefetch_manager,</span><br><span class="line">) <span class="keyword">as</span> ec_connector_output:</span><br><span class="line">    <span class="variable language_">self</span>._execute_mm_encoder(scheduler_output)        <span class="comment"># 跑本地 encoder（如有）</span></span><br><span class="line">    mm_embeds, is_mm_embed = <span class="variable language_">self</span>._gather_mm_embeddings(scheduler_output)</span><br></pre></td></tr></table></figure>
+
+<p>对于 P 节点：</p>
+<ul>
+<li>远程缓存的 encoder inputs 已经通过 <code>start_load_caches</code> 加载到 <code>encoder_cache</code></li>
+<li><code>_execute_mm_encoder</code> 只处理没有远程缓存的 encoder inputs（如果有的话）</li>
+<li><code>_gather_mm_embeddings</code> 统一从 <code>encoder_cache</code> 中取出所有 embedding</li>
+</ul>
+<hr>
+<h2 id="五、异步预取管线（Cross-Step-Prefetch）"><a href="#五、异步预取管线（Cross-Step-Prefetch）" class="headerlink" title="五、异步预取管线（Cross-Step Prefetch）"></a>五、异步预取管线（Cross-Step Prefetch）</h2><h3 id="5-1-开关与配置"><a href="#5-1-开关与配置" class="headerlink" title="5.1 开关与配置"></a>5.1 开关与配置</h3><p>通过环境变量控制，默认<strong>关闭</strong>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># ec_connector_model_runner_mixin.py</span></span><br><span class="line">_ENABLE_CROSS_STEP_PREFETCH = os.getenv(</span><br><span class="line">    <span class="string">"VLLM_EPD_ENABLE_CROSS_STEP_PREFETCH"</span>, <span class="string">"False"</span></span><br><span class="line">).lower() <span class="keyword">in</span> (<span class="string">"true"</span>, <span class="string">"1"</span>)</span><br><span class="line"></span><br><span class="line">_PREFETCH_WORKERS = <span class="built_in">int</span>(os.getenv(<span class="string">"VLLM_EPD_PREFETCH_WORKERS"</span>, <span class="string">"16"</span>))</span><br></pre></td></tr></table></figure>
+
+<h3 id="5-2-ECPrefetchManager-设计"><a href="#5-2-ECPrefetchManager-设计" class="headerlink" title="5.2 ECPrefetchManager 设计"></a>5.2 ECPrefetchManager 设计</h3><p><code>ECPrefetchManager</code>（<code>vllm/v1/worker/ec_prefetch_manager.py</code>）管理异步 encoder cache 加载，实现计算与传输的重叠。</p>
+<h4 id="数据结构"><a href="#数据结构" class="headerlink" title="数据结构"></a>数据结构</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@dataclass</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">PendingLoad</span>:</span><br><span class="line">    v6d_future: Future                         <span class="comment"># phase 1: v6d → pinned CPU</span></span><br><span class="line">    pinned_tensor: torch.Tensor | <span class="literal">None</span> = <span class="literal">None</span>  <span class="comment"># phase 1 完成后的 pinned tensor</span></span><br><span class="line">    gpu_tensor: torch.Tensor | <span class="literal">None</span> = <span class="literal">None</span>     <span class="comment"># phase 2: H2D 后的 GPU tensor</span></span><br><span class="line">    h2d_event: torch.cuda.Event | <span class="literal">None</span> = <span class="literal">None</span>  <span class="comment"># H2D 完成标记</span></span><br></pre></td></tr></table></figure>
+
+<h4 id="双-CUDA-Stream-设计"><a href="#双-CUDA-Stream-设计" class="headerlink" title="双 CUDA Stream 设计"></a>双 CUDA Stream 设计</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">__init__</span>(<span class="params">self, max_workers=<span class="literal">None</span></span>):</span><br><span class="line">    <span class="variable language_">self</span>._copy_stream_low: torch.cuda.Stream   <span class="comment"># priority=0, 给预取 H2D</span></span><br><span class="line">    <span class="variable language_">self</span>._copy_stream_high: torch.cuda.Stream  <span class="comment"># priority=-1, 给紧急 H2D</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><strong>low-priority stream</strong>：用于 <code>_advance()</code> 中的后台预取 H2D 拷贝，不阻塞主 forward</li>
+<li><strong>high-priority stream</strong>：用于 <code>ensure_loaded()</code> 中的紧急 H2D 拷贝，优先级高于预取</li>
+</ul>
+<h3 id="5-3-三阶段流水线"><a href="#5-3-三阶段流水线" class="headerlink" title="5.3 三阶段流水线"></a>5.3 三阶段流水线</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line">Step N:</span><br><span class="line">  scheduler → get_prefetch_hints() → prefetch_ec_mm_hashes</span><br><span class="line"></span><br><span class="line">Step N+1 开始:</span><br><span class="line">  ┌──────────────────────────────────────────────────────┐</span><br><span class="line">  │ submit(prefetch_mm_hashes)                           │</span><br><span class="line">  │   └── ThreadPool: v6d → pinned CPU (并行)            │</span><br><span class="line">  │                                                      │</span><br><span class="line">  │ _advance()                                           │</span><br><span class="line">  │   └── low-priority stream: pinned → GPU (non_blocking)│</span><br><span class="line">  │                                                      │</span><br><span class="line">  │ ensure_loaded(mm_hashes_this_step)                    │</span><br><span class="line">  │   └── 等待本步需要的 mm_hashes 就绪                   │</span><br><span class="line">  │       ├── 已在 encoder_cache → 跳过                  │</span><br><span class="line">  │       ├── 有 pending 条目 → 等 future + high-prio H2D │</span><br><span class="line">  │       └── 无 pending → 同步 fallback                  │</span><br><span class="line">  └──────────────────────────────────────────────────────┘</span><br><span class="line"></span><br><span class="line">Step N+1 forward:</span><br><span class="line">  _gather_mm_embeddings() → 从 encoder_cache 取出 embedding</span><br></pre></td></tr></table></figure>
+
+<h4 id="submit-—-提交预取任务"><a href="#submit-—-提交预取任务" class="headerlink" title="submit() — 提交预取任务"></a>submit() — 提交预取任务</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">submit</span>(<span class="params">self, prefetch_mm_hashes, encoder_cache, load_fn</span>):</span><br><span class="line">    <span class="keyword">for</span> mm_hash <span class="keyword">in</span> prefetch_mm_hashes:</span><br><span class="line">        <span class="keyword">if</span> mm_hash <span class="keyword">in</span> encoder_cache:</span><br><span class="line">            <span class="keyword">continue</span>  <span class="comment"># 已缓存</span></span><br><span class="line">        <span class="keyword">if</span> mm_hash <span class="keyword">in</span> <span class="variable language_">self</span>._pending:</span><br><span class="line">            <span class="keyword">continue</span>  <span class="comment"># 已提交</span></span><br><span class="line">        future = <span class="variable language_">self</span>._executor.submit(load_fn, mm_hash)</span><br><span class="line">        <span class="variable language_">self</span>._pending[mm_hash] = PendingLoad(v6d_future=future)</span><br><span class="line"></span><br><span class="line">    <span class="variable language_">self</span>._advance()  <span class="comment"># 尝试推进已完成的条目</span></span><br><span class="line">    <span class="keyword">return</span> submitted</span><br></pre></td></tr></table></figure>
+
+<p><code>load_fn</code> 绑定为 <code>GlobalVineyardBackend.load_caches_to_pinned()</code>，在线程池中执行 v6d 读取。</p>
+<h4 id="advance-—-非阻塞推进"><a href="#advance-—-非阻塞推进" class="headerlink" title="_advance() — 非阻塞推进"></a>_advance() — 非阻塞推进</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">_advance</span>(<span class="params">self</span>):</span><br><span class="line">    <span class="keyword">for</span> load <span class="keyword">in</span> <span class="variable language_">self</span>._pending.values():</span><br><span class="line">        <span class="keyword">if</span> load.gpu_tensor <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>:</span><br><span class="line">            <span class="keyword">continue</span>  <span class="comment"># 已完成 H2D</span></span><br><span class="line">        <span class="keyword">if</span> load.pinned_tensor <span class="keyword">is</span> <span class="literal">None</span> <span class="keyword">and</span> <span class="keyword">not</span> load.v6d_future.done():</span><br><span class="line">            <span class="keyword">continue</span>  <span class="comment"># v6d 读取尚未完成</span></span><br><span class="line">        <span class="keyword">if</span> load.pinned_tensor <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">            load.pinned_tensor = load.v6d_future.result()</span><br><span class="line">        <span class="keyword">with</span> torch.cuda.stream(low_stream):</span><br><span class="line">            load.gpu_tensor = load.pinned_tensor.to(</span><br><span class="line">                device=<span class="variable language_">self</span>._device, non_blocking=<span class="literal">True</span>)</span><br><span class="line">            load.h2d_event = low_stream.record_event()</span><br></pre></td></tr></table></figure>
+
+<p>遍历所有 pending 条目，将已完成 v6d 读取的 tensor 通过 low-priority stream 异步拷贝到 GPU。</p>
+<h4 id="ensure-loaded-—-阻塞确保就绪"><a href="#ensure-loaded-—-阻塞确保就绪" class="headerlink" title="ensure_loaded() — 阻塞确保就绪"></a>ensure_loaded() — 阻塞确保就绪</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">ensure_loaded</span>(<span class="params">self, mm_hashes, encoder_cache, load_fn</span>):</span><br><span class="line">    <span class="keyword">for</span> mm_hash <span class="keyword">in</span> mm_hashes:</span><br><span class="line">        <span class="keyword">if</span> mm_hash <span class="keyword">in</span> encoder_cache:</span><br><span class="line">            <span class="keyword">continue</span>  <span class="comment"># 路径 1: 已缓存</span></span><br><span class="line"></span><br><span class="line">        load = <span class="variable language_">self</span>._pending.get(mm_hash)</span><br><span class="line">        <span class="keyword">if</span> load <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">            <span class="variable language_">self</span>._sync_load_into_cache(mm_hash, ...)  <span class="comment"># 路径 3: 同步 fallback</span></span><br><span class="line">            <span class="keyword">continue</span></span><br><span class="line"></span><br><span class="line">        <span class="keyword">try</span>:</span><br><span class="line">            <span class="comment"># 路径 2: 消费 pending 条目</span></span><br><span class="line">            <span class="keyword">if</span> load.pinned_tensor <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">                load.pinned_tensor = load.v6d_future.result()  <span class="comment"># 等待 v6d</span></span><br><span class="line">            <span class="keyword">if</span> load.gpu_tensor <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">                <span class="keyword">with</span> torch.cuda.stream(high_stream):</span><br><span class="line">                    load.gpu_tensor = load.pinned_tensor.to(</span><br><span class="line">                        device=<span class="variable language_">self</span>._device, non_blocking=<span class="literal">True</span>)</span><br><span class="line">                    load.h2d_event = high_stream.record_event()</span><br><span class="line">            load.h2d_event.synchronize()  <span class="comment"># 同步等待 H2D 完成</span></span><br><span class="line">            encoder_cache[mm_hash] = load.gpu_tensor</span><br><span class="line">        <span class="keyword">except</span> Exception:</span><br><span class="line">            <span class="variable language_">self</span>._sync_load_into_cache(mm_hash, ...)  <span class="comment"># fallback</span></span><br><span class="line">        <span class="keyword">finally</span>:</span><br><span class="line">            <span class="variable language_">self</span>._pending.pop(mm_hash, <span class="literal">None</span>)</span><br></pre></td></tr></table></figure>
+
+<p>三条路径：</p>
+<ol>
+<li><strong>已在 encoder_cache</strong>：直接跳过</li>
+<li><strong>有 pending 条目</strong>：等待 future 完成，用 high-priority stream 做 H2D，同步 event</li>
+<li><strong>无 pending</strong>：回退到同步 <code>load_fn</code> 加载（prefetch miss）</li>
+</ol>
+<h4 id="cancel-prefetches-—-Scheduler-驱动的取消"><a href="#cancel-prefetches-—-Scheduler-驱动的取消" class="headerlink" title="cancel_prefetches() — Scheduler 驱动的取消"></a>cancel_prefetches() — Scheduler 驱动的取消</h4><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">cancel_prefetches</span>(<span class="params">self, mm_hashes</span>):</span><br><span class="line">    <span class="keyword">for</span> mm_hash <span class="keyword">in</span> mm_hashes:</span><br><span class="line">        load = <span class="variable language_">self</span>._pending.pop(mm_hash, <span class="literal">None</span>)</span><br><span class="line">        <span class="keyword">if</span> load <span class="keyword">is</span> <span class="literal">None</span>:</span><br><span class="line">            <span class="keyword">continue</span></span><br><span class="line">        <span class="keyword">if</span> load.h2d_event <span class="keyword">is</span> <span class="keyword">not</span> <span class="literal">None</span>:</span><br><span class="line">            load.h2d_event.synchronize()</span><br><span class="line">        load.gpu_tensor = <span class="literal">None</span></span><br><span class="line">        load.pinned_tensor = <span class="literal">None</span></span><br></pre></td></tr></table></figure>
+
+<p>当 scheduler 通过 <code>free_encoder_mm_hashes</code> 通知某些 mm_hash 不再需要时，worker 取消对应的预取任务，释放 CPU/GPU 内存。</p>
+<h3 id="5-4-Scheduler-侧预取提示生成"><a href="#5-4-Scheduler-侧预取提示生成" class="headerlink" title="5.4 Scheduler 侧预取提示生成"></a>5.4 Scheduler 侧预取提示生成</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># global_vineyard_connector.py — get_prefetch_hints()</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">get_prefetch_hints</span>(<span class="params">self, scheduler</span>) -&gt; <span class="built_in">list</span>[<span class="built_in">str</span>]:</span><br></pre></td></tr></table></figure>
+
+<p>基于 <strong>proximity scoring</strong>（邻近度评分）：</p>
+<ol>
+<li><strong>构建候选集</strong>：扫描 running + waiting 中的请求</li>
+<li><strong>计算距离</strong>：每个 mm_feature 到当前 <code>num_computed_tokens</code> 的距离</li>
+<li><strong>过滤</strong>：排除超过 <code>proximity_window</code>（= <code>max_age × per_req_tokens_per_step</code>）的候选</li>
+<li><strong>排序</strong>：按距离从近到远</li>
+<li><strong>预算控制</strong>：在 <code>encoder_cache_manager</code> 的空闲 slot 内选取 top-K</li>
+<li><strong>过期管理</strong>：<code>expire_prefetch_reservations(max_age)</code> 自动释放超龄条目</li>
+</ol>
+<h3 id="5-5-Worker-侧初始化"><a href="#5-5-Worker-侧初始化" class="headerlink" title="5.5 Worker 侧初始化"></a>5.5 Worker 侧初始化</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># ec_connector_model_runner_mixin.py</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">_init_ec_prefetch_manager</span>(<span class="params">self</span>) -&gt; ECPrefetchManager | <span class="literal">None</span>:</span><br><span class="line">    <span class="keyword">if</span> <span class="keyword">not</span> _ENABLE_CROSS_STEP_PREFETCH:</span><br><span class="line">        <span class="keyword">return</span> <span class="literal">None</span>  <span class="comment"># 未启用则不创建</span></span><br><span class="line">    <span class="keyword">if</span> has_ec_transfer() <span class="keyword">and</span> <span class="keyword">not</span> get_ec_transfer().is_producer:</span><br><span class="line">        <span class="keyword">return</span> ECPrefetchManager(max_workers=_PREFETCH_WORKERS)</span><br><span class="line">    <span class="keyword">return</span> <span class="literal">None</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>仅 Consumer（P 节点）且显式启用时创建</li>
+<li>返回 None 时 <code>_get_ec_connector_output</code> 回退到同步 <code>start_load_caches</code> 路径</li>
+</ul>
+<hr>
+<h2 id="六、Worker-侧状态管理"><a href="#六、Worker-侧状态管理" class="headerlink" title="六、Worker 侧状态管理"></a>六、Worker 侧状态管理</h2><h3 id="6-1-encoder-cache-的释放"><a href="#6-1-encoder-cache-的释放" class="headerlink" title="6.1 encoder_cache 的释放"></a>6.1 encoder_cache 的释放</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># gpu_model_runner.py:1125-1131</span></span><br><span class="line"><span class="comment"># _update_states 中</span></span><br><span class="line"><span class="keyword">for</span> mm_hash <span class="keyword">in</span> scheduler_output.free_encoder_mm_hashes:</span><br><span class="line">    <span class="variable language_">self</span>.encoder_cache.pop(mm_hash, <span class="literal">None</span>)</span><br><span class="line"></span><br><span class="line"><span class="comment"># 取消对应的预取</span></span><br><span class="line"><span class="keyword">if</span> scheduler_output.free_encoder_mm_hashes <span class="keyword">and</span> <span class="variable language_">self</span>.ec_prefetch_manager:</span><br><span class="line">    <span class="variable language_">self</span>.ec_prefetch_manager.cancel_prefetches(</span><br><span class="line">        scheduler_output.free_encoder_mm_hashes)</span><br></pre></td></tr></table></figure>
+
+<p><code>free_encoder_mm_hashes</code> 由 scheduler 的 <code>EncoderCacheManager</code> 管理，当 encoder input 对应的所有 decoder token 都已计算完毕时释放。</p>
+<h3 id="6-2-EC-传输完成通知"><a href="#6-2-EC-传输完成通知" class="headerlink" title="6.2 EC 传输完成通知"></a>6.2 EC 传输完成通知</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># ec_connector_model_runner_mixin.py — _get_ec_connector_output finally 块</span></span><br><span class="line">output.finished_sending, output.finished_recving = (</span><br><span class="line">    ec_connector.get_finished(scheduler_output.finished_req_ids)</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p>通过 <code>ECConnectorOutput</code> 将完成信号传回上层，最终反映到 <code>ModelRunnerOutput</code> 中。</p>
+<hr>
+<h2 id="七、端到端流程总结"><a href="#七、端到端流程总结" class="headerlink" title="七、端到端流程总结"></a>七、端到端流程总结</h2><h3 id="7-1-完整数据流"><a href="#7-1-完整数据流" class="headerlink" title="7.1 完整数据流"></a>7.1 完整数据流</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br></pre></td><td class="code"><pre><span class="line">API Server (收到图文请求)</span><br><span class="line">    │</span><br><span class="line">    ├── 计算 mm_hash (基于图片内容的哈希)</span><br><span class="line">    ├── prepare_for_save_embd()</span><br><span class="line">    │     └── 在 v6d 预创建空 Tensor 对象 (key: {mm_hash}_embd)</span><br><span class="line">    ├── sampling_params.extra_args["enable_disaggregated_vit"] = True</span><br><span class="line">    └── 发送请求到 E 节点 和 P 节点</span><br><span class="line">         │</span><br><span class="line">         ▼</span><br><span class="line">E 节点 (ec_role = ec_producer)</span><br><span class="line">    │</span><br><span class="line">    ├── Scheduler:</span><br><span class="line">    │     ├── has_caches() → [False] (producer 始终返回 False)</span><br><span class="line">    │     ├── 正常调度 encoder inputs</span><br><span class="line">    │     └── build_connector_meta() → 空 metadata</span><br><span class="line">    │</span><br><span class="line">    ├── Worker (execute_model):</span><br><span class="line">    │     ├── 检测 is_producer → 进入 producer 分支</span><br><span class="line">    │     ├── _execute_mm_encoder(scheduler_output)</span><br><span class="line">    │     │     └── 运行 ViT 编码器，输出 embedding tensor</span><br><span class="line">    │     │         结果存入 self.encoder_cache[mm_hash]</span><br><span class="line">    │     └── _save_ec_to_connector(scheduler_output)</span><br><span class="line">    │           ├── 遍历 scheduled_encoder_inputs 的 unique mm_hashes</span><br><span class="line">    │           ├── save_caches(mm_hash, embedding_tensor)</span><br><span class="line">    │           │     ├── v6d.get("{mm_hash}_embd", unsafe=True)</span><br><span class="line">    │           │     │     获取可写共享内存引用</span><br><span class="line">    │           │     └── resolver.copy_(embedding_tensor)</span><br><span class="line">    │           │           GPU tensor → v6d 共享内存</span><br><span class="line">    │           └── torch.cuda.synchronize()</span><br><span class="line">    │                 确保所有拷贝完成</span><br><span class="line">    │</span><br><span class="line">    ├── 初始化特性:</span><br><span class="line">    │     ├── profile_run: 跳过 decoder dummy → 不分配 KV cache</span><br><span class="line">    │     └── get_kv_cache_spec: 返回 {} → 不创建 KV cache</span><br><span class="line">    │</span><br><span class="line">    └── 结果: embedding 已写入 v6d 共享内存</span><br><span class="line">         │</span><br><span class="line">         ▼</span><br><span class="line">  ═══════ v6d 共享内存 (同机 IPC，无网络开销) ═══════</span><br><span class="line">  ║ key: {mm_hash}_embd → embedding tensor          ║</span><br><span class="line">  ║ key: {mm_hash}_meta → MultiModalMetadata (pickle)║</span><br><span class="line">  ═══════════════════════════════════════════════════</span><br><span class="line">         │</span><br><span class="line">         ▼</span><br><span class="line">P 节点 (ec_role = ec_consumer)</span><br><span class="line">    │</span><br><span class="line">    ├── Scheduler:</span><br><span class="line">    │     ├── has_caches(request) → [True]</span><br><span class="line">    │     │     (检测到 enable_disaggregated_vit in extra_args)</span><br><span class="line">    │     ├── 标记为 external_load_encoder_input</span><br><span class="line">    │     │     └── 不消耗 encoder_compute_budget（不需要跑 ViT）</span><br><span class="line">    │     ├── update_state_after_alloc(request, i)</span><br><span class="line">    │     │     └── mm_hash 加入 _mm_datas_need_loads</span><br><span class="line">    │     ├── build_connector_meta()</span><br><span class="line">    │     │     └── ECGlobalVineyardConnectorMetadata(mm_hashes=[...])</span><br><span class="line">    │     └── get_prefetch_hints() → 下一步预取候选</span><br><span class="line">    │</span><br><span class="line">    ├── Worker (execute_model) — 同步路径（默认）:</span><br><span class="line">    │     ├── bind_connector_metadata(ec_meta)</span><br><span class="line">    │     ├── start_load_caches(encoder_cache)</span><br><span class="line">    │     │     └── 遍历 metadata.mm_hashes:</span><br><span class="line">    │     │           load_caches(mm_hash)</span><br><span class="line">    │     │             ├── v6d.get("{mm_hash}_embd", peer="local")</span><br><span class="line">    │     │             └── resolver.detach().clone().cuda()</span><br><span class="line">    │     │                   v6d SHM → CPU copy → GPU</span><br><span class="line">    │     │           encoder_cache[mm_hash] = tensor</span><br><span class="line">    │     ├── _execute_mm_encoder()  → 跳过远程加载的 inputs</span><br><span class="line">    │     └── _gather_mm_embeddings()</span><br><span class="line">    │           └── 从 encoder_cache 取出 embedding → 注入 LLM 输入</span><br><span class="line">    │</span><br><span class="line">    ├── Worker (execute_model) — 异步预取路径（需启用）:</span><br><span class="line">    │     ├── submit(prefetch_mm_hashes)</span><br><span class="line">    │     │     └── 线程池: v6d → pinned CPU (并行于 forward)</span><br><span class="line">    │     ├── _advance()</span><br><span class="line">    │     │     └── low-priority stream: pinned → GPU (non_blocking)</span><br><span class="line">    │     ├── ensure_loaded(mm_hashes_this_step)</span><br><span class="line">    │     │     └── high-priority stream: 等待并同步</span><br><span class="line">    │     └── _gather_mm_embeddings() → 取出 embedding</span><br><span class="line">    │</span><br><span class="line">    └── 继续 LLM prefill forward（带 embedding 的完整输入）</span><br><span class="line">         │</span><br><span class="line">         ▼</span><br><span class="line">  ═══ KV Connector (blade-kvt) ═══</span><br><span class="line">         │</span><br><span class="line">         ▼</span><br><span class="line">D 节点 → 自回归解码</span><br></pre></td></tr></table></figure>
+
+<h3 id="7-2-关键设计要点"><a href="#7-2-关键设计要点" class="headerlink" title="7.2 关键设计要点"></a>7.2 关键设计要点</h3><table>
+<thead>
+<tr>
+<th>设计</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>内容寻址去重</strong></td>
+<td>同一图片 mm_hash 相同 → v6d 中只存一份 → <code>ObjectAlreadyExistError</code> 跳过 → 多请求共享</td>
+</tr>
+<tr>
+<td><strong>零拷贝写入</strong></td>
+<td>E 节点通过 <code>resolver().copy_()</code> 直接写入共享内存视图，避免中间拷贝</td>
+</tr>
+<tr>
+<td><strong>请求级控制</strong></td>
+<td><code>extra_args["enable_disaggregated_vit"]</code> 按请求控制 → 同一 P 节点可混合处理</td>
+</tr>
+<tr>
+<td><strong>不消耗编码预算</strong></td>
+<td>远程加载的 encoder input 不消耗 <code>encoder_compute_budget</code> → P 节点专注 LLM prefill</td>
+</tr>
+<tr>
+<td><strong>E 节点极简</strong></td>
+<td>不分配 KV cache，不做 decoder forward → 资源占用极低</td>
+</tr>
+<tr>
+<td><strong>预取与计算重叠</strong></td>
+<td>cross-step prefetch 在 step N+1 的 forward 期间并行加载 step N+2 的数据</td>
+</tr>
+<tr>
+<td><strong>双优先级 stream</strong></td>
+<td>high-priority 给紧急 H2D → 不被预取 H2D 阻塞 → 确保时效性</td>
+</tr>
+<tr>
+<td><strong>Scheduler 驱动的生命周期</strong></td>
+<td>预取条目的创建和取消由 scheduler 统一管理 → worker 不自主过期 → 避免异步调度下的不一致</td>
+</tr>
+</tbody></table>
+<h3 id="7-3-与-KV-Connector-的对比"><a href="#7-3-与-KV-Connector-的对比" class="headerlink" title="7.3 与 KV Connector 的对比"></a>7.3 与 KV Connector 的对比</h3><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>EC Connector (E→P)</th>
+<th>KV Connector (P→D)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>传输内容</td>
+<td>Encoder embedding tensor</td>
+<td>Attention KV cache blocks</td>
+</tr>
+<tr>
+<td>传输介质</td>
+<td>v6d 共享内存 (同机 IPC)</td>
+<td>RDMA / blade-kvt (可跨机)</td>
+</tr>
+<tr>
+<td>传输粒度</td>
+<td>按 mm_hash（整张图的 embedding）</td>
+<td>按 KV block（逐层 record_event）</td>
+</tr>
+<tr>
+<td>去重机制</td>
+<td>内容寻址（mm_hash）</td>
+<td>无（每个请求独立传输）</td>
+</tr>
+<tr>
+<td>预取机制</td>
+<td>Cross-step prefetch (线程池 + 双 stream)</td>
+<td>无显式预取（layer-by-layer pipeline 自身实现重叠）</td>
+</tr>
+<tr>
+<td>配置入口</td>
+<td>–ec-transfer-config</td>
+<td>–kv-transfer-config</td>
+</tr>
+<tr>
+<td>代码位置</td>
+<td>vllm/distributed/ec_transfer/</td>
+<td>vllm/distributed/kv_transfer/</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="八、生产配置示例"><a href="#八、生产配置示例" class="headerlink" title="八、生产配置示例"></a>八、生产配置示例</h2><p>典型的 EPD 三节点配置中，EC 相关部分：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// E 节点</span></span><br><span class="line"><span class="punctuation">{</span></span><br><span class="line">  <span class="attr">"ec_transfer_config"</span><span class="punctuation">:</span> <span class="punctuation">{</span></span><br><span class="line">    <span class="attr">"ec_connector"</span><span class="punctuation">:</span> <span class="string">"ECGlobalVineyardConnector"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"ec_role"</span><span class="punctuation">:</span> <span class="string">"ec_producer"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"ec_v6d_socket"</span><span class="punctuation">:</span> <span class="string">"/tmp/vineyard.sock"</span></span><br><span class="line">  <span class="punctuation">}</span></span><br><span class="line"><span class="punctuation">}</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// P 节点</span></span><br><span class="line"><span class="punctuation">{</span></span><br><span class="line">  <span class="attr">"ec_transfer_config"</span><span class="punctuation">:</span> <span class="punctuation">{</span></span><br><span class="line">    <span class="attr">"ec_connector"</span><span class="punctuation">:</span> <span class="string">"ECGlobalVineyardConnector"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"ec_role"</span><span class="punctuation">:</span> <span class="string">"ec_consumer"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"ec_v6d_socket"</span><span class="punctuation">:</span> <span class="string">"/tmp/vineyard.sock"</span></span><br><span class="line">  <span class="punctuation">}</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">"kv_transfer_config"</span><span class="punctuation">:</span> <span class="punctuation">{</span></span><br><span class="line">    <span class="attr">"kv_connector"</span><span class="punctuation">:</span> <span class="string">"HybridConnector"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"kv_role"</span><span class="punctuation">:</span> <span class="string">"kv_producer"</span></span><br><span class="line">  <span class="punctuation">}</span></span><br><span class="line"><span class="punctuation">}</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// D 节点</span></span><br><span class="line"><span class="punctuation">{</span></span><br><span class="line">  <span class="attr">"kv_transfer_config"</span><span class="punctuation">:</span> <span class="punctuation">{</span></span><br><span class="line">    <span class="attr">"kv_connector"</span><span class="punctuation">:</span> <span class="string">"HybridConnector"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"kv_role"</span><span class="punctuation">:</span> <span class="string">"kv_consumer"</span></span><br><span class="line">  <span class="punctuation">}</span></span><br><span class="line"><span class="punctuation">}</span></span><br></pre></td></tr></table></figure>
+
+<p>E 和 P 节点共享同一个 <code>vineyard.sock</code>（同机部署），通过 v6d daemon 进行 IPC 通信。P 节点同时配置 EC（作为 consumer）和 KV（作为 producer），是 EPD 链条中的中间节点。D 节点只配置 KV connector。</p>
+<hr>
+<h2 id="九、源码文件索引"><a href="#九、源码文件索引" class="headerlink" title="九、源码文件索引"></a>九、源码文件索引</h2><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>核心内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vllm/config/ec_transfer.py</code></td>
+<td>ECTransferConfig 定义</td>
+</tr>
+<tr>
+<td><code>vllm/distributed/ec_transfer/ec_connector/base.py</code></td>
+<td>ECConnectorBase 抽象基类</td>
+</tr>
+<tr>
+<td><code>vllm/distributed/ec_transfer/ec_connector/factory.py</code></td>
+<td>ECConnectorFactory 工厂</td>
+</tr>
+<tr>
+<td><code>vllm/distributed/ec_transfer/ec_connector/global_vineyard_connector.py</code></td>
+<td>ECGlobalVineyardConnector（scheduler 侧逻辑）</td>
+</tr>
+<tr>
+<td><code>vllm/distributed/ec_transfer/ec_connector/epd_global_v6d_backend.py</code></td>
+<td>GlobalVineyardBackend（v6d 操作封装）</td>
+</tr>
+<tr>
+<td><code>vllm/v1/worker/ec_connector_model_runner_mixin.py</code></td>
+<td>ECConnectorModelRunnerMixin（worker 侧 EC 集成）</td>
+</tr>
+<tr>
+<td><code>vllm/v1/worker/ec_prefetch_manager.py</code></td>
+<td>ECPrefetchManager（异步预取管线）</td>
+</tr>
+<tr>
+<td><code>vllm/v1/worker/gpu_model_runner.py</code></td>
+<td>GPUModelRunner 中的 EC producer/consumer 路径</td>
+</tr>
+<tr>
+<td><code>vllm/v1/core/sched/scheduler.py</code></td>
+<td>Scheduler 中的 EC 调度集成</td>
+</tr>
+<tr>
+<td><code>vllm/v1/core/sched/output.py</code></td>
+<td>SchedulerOutput EC 相关字段</td>
+</tr>
+</tbody></table>
+</div><div class="article-licensing box"><div class="licensing-title"><p>vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析</p><p><a href="https://llx-08.github.io/notes/2026/06/08/2026-06-08-vllm-epd-vineyard-encoder-cache-transfer/">https://llx-08.github.io/notes/2026/06/08/2026-06-08-vllm-epd-vineyard-encoder-cache-transfer/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-06-08</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-06-08</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/06/08/2026-06-08-vllm-develop-pd-disagg-scheduler-worker-messaging/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">vLLM Develop 分支 PD 分离：Scheduler-Worker 消息传递与 Bypass 路径深度分析</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/06/08/2026-06-08-vllm-pd-disaggregation-and-cpu-offloading/"><span class="level-item">vLLM PD 分离与 CPU Offloading 深度分析</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">23</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-08T00:00:00.000Z">2026-06-08</time></p><p class="title"><a href="/notes/2026/06/08/2026-06-08-vllm-develop-pd-disagg-scheduler-worker-messaging/">vLLM Develop 分支 PD 分离：Scheduler-Worker 消息传递与 Bypass 路径深度分析</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-08T00:00:00.000Z">2026-06-08</time></p><p class="title"><a href="/notes/2026/06/08/2026-06-08-vllm-epd-vineyard-encoder-cache-transfer/">vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-08T00:00:00.000Z">2026-06-08</time></p><p class="title"><a href="/notes/2026/06/08/2026-06-08-vllm-pd-disaggregation-and-cpu-offloading/">vLLM PD 分离与 CPU Offloading 深度分析</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-06T00:00:00.000Z">2026-06-06</time></p><p class="title"><a href="/notes/2026/06/06/2026-06-06-vllm-pd-disaggregation-community-vs-develop/">vLLM PD 分离：社区方案 vs Develop 分支深度对比</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-04T00:00:00.000Z">2026-06-04</time></p><p class="title"><a href="/notes/2026/06/04/2026-06-04-vllm-hybrid-connector-bypass-substep/">vLLM HybridConnector / KVT：启动机制与 Bypass-Substep 流水线</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
