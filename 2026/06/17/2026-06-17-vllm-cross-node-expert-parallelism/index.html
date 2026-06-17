@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>vLLM 跨机 Expert Parallelism (EP) 深度解析 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="vLLM 跨机 Expert Parallelism (EP) 深度解析 基于 vLLM v0.11.1 ( &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm ) + vllm_ep_deepdive.html 活体追踪文档 撰写日期：2026-06-09 一、什么是跨机 EP Expert Parallelism (EP) 是 MoE 模型独有的并行维度：把 N 个 expert 分到各 GPU 上，每个"><meta property="og:type" content="blog"><meta property="og:title" content="vLLM 跨机 Expert Parallelism (EP) 深度解析"><meta property="og:url" content="https://llx-08.github.io/notes/2026/06/17/2026-06-17-vllm-cross-node-expert-parallelism/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="vLLM 跨机 Expert Parallelism (EP) 深度解析 基于 vLLM v0.11.1 ( &amp;#x2F;mnt&amp;#x2F;data&amp;#x2F;llx&amp;#x2F;vllm ) + vllm_ep_deepdive.html 活体追踪文档 撰写日期：2026-06-09 一、什么是跨机 EP Expert Parallelism (EP) 是 MoE 模型独有的并行维度：把 N 个 expert 分到各 GPU 上，每个"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-06-17T00:00:00.000Z"><meta property="article:modified_time" content="2026-06-17T09:19:37.799Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/06/17/2026-06-17-vllm-cross-node-expert-parallelism/"},"headline":"vLLM 跨机 Expert Parallelism (EP) 深度解析","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-06-17T00:00:00.000Z","dateModified":"2026-06-17T09:19:37.799Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"vLLM 跨机 Expert Parallelism (EP) 深度解析 基于 vLLM v0.11.1 ( &#x2F;mnt&#x2F;data&#x2F;llx&#x2F;vllm ) + vllm_ep_deepdive.html 活体追踪文档 撰写日期：2026-06-09 一、什么是跨机 EP Expert Parallelism (EP) 是 MoE 模型独有的并行维度：把 N 个 expert 分到各 GPU 上，每个"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/06/17/2026-06-17-vllm-cross-node-expert-parallelism/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-06-17T00:00:00.000Z" title="6/17/2026, 12:00:00 AM">2026-06-17</time>发表</span><span class="level-item"><time dateTime="2026-06-17T09:19:37.799Z" title="6/17/2026, 9:19:37 AM">2026-06-17</time>更新</span><span class="level-item">25 分钟读完 (大约3682个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">vLLM 跨机 Expert Parallelism (EP) 深度解析</h1><div class="content"><h1 id="vLLM-跨机-Expert-Parallelism-EP-深度解析"><a href="#vLLM-跨机-Expert-Parallelism-EP-深度解析" class="headerlink" title="vLLM 跨机 Expert Parallelism (EP) 深度解析"></a>vLLM 跨机 Expert Parallelism (EP) 深度解析</h1><blockquote>
+<p>基于 vLLM v0.11.1 (<code>/mnt/data/llx/vllm</code>) + <code>vllm_ep_deepdive.html</code> 活体追踪文档<br>撰写日期：2026-06-09</p>
+</blockquote>
+<hr>
+<h2 id="一、什么是跨机-EP"><a href="#一、什么是跨机-EP" class="headerlink" title="一、什么是跨机 EP"></a>一、什么是跨机 EP</h2><p>Expert Parallelism (EP) 是 MoE 模型独有的并行维度：把 N 个 expert 分到各 GPU 上，每个 GPU 只持有 N/EP 个完整 expert。vLLM 中 EP 不是独立的进程轴，而是 <strong>TP 轴和 DP 轴的并集</strong>：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">EP = TP × DP</span><br></pre></td></tr></table></figure>
+
+<p><strong>跨机 EP</strong> 指的是：当 EP group 的成员分布在<strong>不同物理节点</strong>上时，MoE 层的 dispatch/combine all-to-all 通信就不再只走节点内高速的 NVLink/NVSwitch，而必须跨越<strong>节点间较慢的网络</strong>（InfiniBand RDMA、RoCE 等）。</p>
+<p>例如：</p>
+<ul>
+<li>4 节点 × 8 GPU/节点，TP=1, DP=32 → EP=32，每个 EP group 横跨 4 台机器</li>
+<li>2 节点 × 8 GPU/节点，TP=8, DP=2 → EP=16，EP group 横跨 2 台机器</li>
+</ul>
+<p>跨机检测逻辑（<code>base_device_communicator.py:55</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="variable language_">self</span>.internode = <span class="keyword">not</span> <span class="built_in">all</span>(in_the_same_node_as(cpu_group, source_rank=<span class="number">0</span>))</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="二、EP-拓扑与进程模型"><a href="#二、EP-拓扑与进程模型" class="headerlink" title="二、EP 拓扑与进程模型"></a>二、EP 拓扑与进程模型</h2><h3 id="2-1-EP-group-的构造"><a href="#2-1-EP-group-的构造" class="headerlink" title="2.1 EP group 的构造"></a>2.1 EP group 的构造</h3><p><code>parallel_state.py:1534-1556</code> 中，EP group 通过对 <code>[ExternalDP, DP, PP, PCP, TP]</code> 五维 rank tensor 做 <code>transpose(1,2)</code> 再 <code>flatten(DP×PCP×TP)</code> 构造：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">global</span> _EP</span><br><span class="line">group_ranks = (</span><br><span class="line">    all_ranks.transpose(<span class="number">1</span>, <span class="number">2</span>)</span><br><span class="line">    .reshape(-<span class="number">1</span>, data_parallel_size * prefill_context_model_parallel_size * tensor_model_parallel_size)</span><br><span class="line">    .unbind(<span class="number">0</span>)</span><br><span class="line">)</span><br><span class="line">_EP = init_model_parallel_group(group_ranks, ..., group_name=<span class="string">"ep"</span>)</span><br></pre></td></tr></table></figure>
+
+<p>不变量断言（<code>parallel.py:726-734</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">assert</span> expert_parallel_size == data_parallel_size * tensor_parallel_size</span><br></pre></td></tr></table></figure>
+
+<h3 id="2-2-进程与-GPU-分配"><a href="#2-2-进程与-GPU-分配" class="headerlink" title="2.2 进程与 GPU 分配"></a>2.2 进程与 GPU 分配</h3><p>每个 DP rank 对应一个独立的 <code>EngineCore</code> 子进程（<code>utils.py:117-134</code>），每个子进程内部再派生 TP 个 <code>WorkerProc</code>。GPU 按 <code>[local_dp_rank * world_size, local_dp_rank * world_size + local_world_size)</code> 切片分配。</p>
+<p>跨机时，不同节点上的 DP rank 通过 <code>torch.distributed</code> 的 NCCL/gloo backend 进行通信。</p>
+<h3 id="2-3-DP-Lockstep-保证"><a href="#2-3-DP-Lockstep-保证" class="headerlink" title="2.3 DP Lockstep 保证"></a>2.3 DP Lockstep 保证</h3><p>由于 MoE 层在 EP group 上做跨所有 DP rank 的 all-to-all，一个 DP rank <strong>绝不能</strong>在其他 rank 还在 forward pass 时跳过——否则 collective 会死锁。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># core.py:2143-2191</span></span><br><span class="line"><span class="comment"># 空闲的 DP rank 仍须运行 execute_dummy_batch()</span></span><br><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.engines_running <span class="keyword">and</span> <span class="keyword">not</span> <span class="variable language_">self</span>.scheduler.has_unfinished_requests():</span><br><span class="line">    dummy_batch_future = <span class="variable language_">self</span>.model_executor.execute_dummy_batch(...)</span><br></pre></td></tr></table></figure>
+
+<p>终止同步每 32 步做一次 <code>all_reduce(MAX)</code> 来保证所有 rank 一起停止。</p>
+<hr>
+<h2 id="三、跨机-EP-的三种通信后端"><a href="#三、跨机-EP-的三种通信后端" class="headerlink" title="三、跨机 EP 的三种通信后端"></a>三、跨机 EP 的三种通信后端</h2><h3 id="3-1-后端选择"><a href="#3-1-后端选择" class="headerlink" title="3.1 后端选择"></a>3.1 后端选择</h3><p>通过 <code>VLLM_ALL2ALL_BACKEND</code> 环境变量（默认 <code>allgather_reducescatter</code>）选择，在 <code>cuda_communicator.py:92-118</code>：</p>
+<table>
+<thead>
+<tr>
+<th>后端</th>
+<th>dispatch</th>
+<th>combine</th>
+<th>跨机策略</th>
+<th>适用场景</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>allgather_reducescatter</code></td>
+<td><code>all_gatherv</code>(NCCL)</td>
+<td><code>reduce_scatterv</code>(NCCL)</td>
+<td>NCCL 自动处理跨机 ring/tree</td>
+<td>通用默认，简单但冗余</td>
+</tr>
+<tr>
+<td><code>naive</code></td>
+<td>broadcast per rank</td>
+<td>all_reduce + slice</td>
+<td>NCCL broadcast</td>
+<td>调试用，更慢</td>
+</tr>
+<tr>
+<td><code>pplx</code></td>
+<td>pplx AllToAll</td>
+<td>同</td>
+<td>跨机走 NVSHMEM RDMA；机内走 P2P</td>
+<td>需要安装 pplx_kernels</td>
+</tr>
+<tr>
+<td><code>deepep_high_throughput</code></td>
+<td><code>buffer.dispatch</code></td>
+<td><code>buffer.combine</code></td>
+<td>跨机分配 RDMA buffer；机内仅 NVLink</td>
+<td>高吞吐场景（prefill）</td>
+</tr>
+<tr>
+<td><code>deepep_low_latency</code></td>
+<td><code>buffer.low_latency_dispatch</code></td>
+<td><code>buffer.low_latency_combine</code></td>
+<td>RDMA 预注册 buffer + NVLink/MNNVL</td>
+<td>低延迟场景（decode）</td>
+</tr>
+</tbody></table>
+<h3 id="3-2-简单路径：allgather-reduce-scatter"><a href="#3-2-简单路径：allgather-reduce-scatter" class="headerlink" title="3.2 简单路径：allgather + reduce-scatter"></a>3.2 简单路径：allgather + reduce-scatter</h3><p><code>all2all.py:102-149</code>，<code>AgRsAll2AllManager</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">dispatch</span>(<span class="params">self, hidden_states, router_logits, is_sequence_parallel=<span class="literal">False</span></span>):</span><br><span class="line">    sizes = dp_metadata.get_chunk_sizes_across_dp_rank()</span><br><span class="line">    dist_group = get_ep_group() <span class="keyword">if</span> is_sequence_parallel <span class="keyword">else</span> get_dp_group()</span><br><span class="line">    hidden_states, router_logits = dist_group.all_gatherv(</span><br><span class="line">        [hidden_states, router_logits], dim=<span class="number">0</span>, sizes=sizes)</span><br><span class="line">    <span class="keyword">return</span> hidden_states, router_logits</span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">combine</span>(<span class="params">self, hidden_states, is_sequence_parallel=<span class="literal">False</span></span>):</span><br><span class="line">    sizes = dp_metadata.get_chunk_sizes_across_dp_rank()</span><br><span class="line">    dist_group = get_ep_group() <span class="keyword">if</span> is_sequence_parallel <span class="keyword">else</span> get_dp_group()</span><br><span class="line">    <span class="keyword">return</span> dist_group.reduce_scatterv(hidden_states, dim=<span class="number">0</span>, sizes=sizes)</span><br></pre></td></tr></table></figure>
+
+<p><strong>数据流</strong>：每个 rank 通过 allgather 收到<strong>完整的 token batch</strong>，对所有 token 运行自己的 local expert，再通过 reduce-scatter 求和并 scatter 回各自的 token 切片。</p>
+<ul>
+<li>优点：无需预分配 buffer，NCCL 自动选择最优跨机算法</li>
+<li>缺点：O(world_size) 冗余计算和带宽（每个 rank 都收到全量 token）</li>
+</ul>
+<h3 id="3-3-PPLX-路径：真正的-all-to-all"><a href="#3-3-PPLX-路径：真正的-all-to-all" class="headerlink" title="3.3 PPLX 路径：真正的 all-to-all"></a>3.3 PPLX 路径：真正的 all-to-all</h3><p><code>all2all.py:150-225</code>，<code>PPLXAll2AllManager</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.internode:</span><br><span class="line">    <span class="comment"># 跨机 → 初始化 NVSHMEM (Symmetric Heap + RDMA)</span></span><br><span class="line">    nvshmem_init(uid, <span class="variable language_">self</span>.rank, <span class="variable language_">self</span>.world_size)</span><br><span class="line"><span class="comment"># 根据 internode 选择不同底层实现</span></span><br><span class="line">pplx.AllToAll.internode <span class="keyword">if</span> <span class="variable language_">self</span>.internode <span class="keyword">else</span> pplx.AllToAll.intranode</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>跨机通信通过 <strong>NVSHMEM</strong>（NVIDIA Symmetric Memory + RDMA），建立全局可寻址的对称堆</li>
+<li>机内通信直接走 GPU P2P mapping（NVLink）</li>
+<li>只发送被路由到对应 rank 的 token，避免冗余</li>
+</ul>
+<h3 id="3-4-DeepEP-路径：RDMA-预注册-buffer"><a href="#3-4-DeepEP-路径：RDMA-预注册-buffer" class="headerlink" title="3.4 DeepEP 路径：RDMA 预注册 buffer"></a>3.4 DeepEP 路径：RDMA 预注册 buffer</h3><p><strong>High-Throughput</strong>（<code>all2all.py:230-310</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> <span class="variable language_">self</span>.internode <span class="keyword">and</span> <span class="keyword">not</span> envs.VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE:</span><br><span class="line">    num_rdma_bytes = envs.VLLM_DEEPEP_BUFFER_SIZE_MB * <span class="number">1024</span> * <span class="number">1024</span>  <span class="comment"># 跨机分配 RDMA buffer</span></span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    num_rdma_bytes = <span class="number">0</span>  <span class="comment"># 纯机内 NVLink</span></span><br></pre></td></tr></table></figure>
+
+<p><strong>Low-Latency</strong>（<code>all2all.py:315-380</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">num_rdma_bytes = deep_ep.Buffer.get_low_latency_rdma_size_hint(</span><br><span class="line">    num_max_dispatch_tokens_per_rank=max_num_tokens_per_dp_rank,</span><br><span class="line">    hidden=token_hidden_size,</span><br><span class="line">    num_ranks=num_ep_ranks,</span><br><span class="line">    num_experts=num_global_experts,</span><br><span class="line">)</span><br><span class="line"><span class="comment"># 允许 NVLink 加速 + 可选 MNNVL（Multi-Node NVLink）</span></span><br><span class="line">allow_nvlink_for_low_latency_mode=<span class="literal">True</span>,</span><br><span class="line">allow_mnnvl=envs.VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL,</span><br></pre></td></tr></table></figure>
+
+<blockquote>
+<p><strong>OOM 陷阱</strong>：DeepEP LL 的 RDMA buffer 大小由 <code>max_num_batched_tokens</code> 驱动（向上取整到 2 的幂），与 EP_size <strong>基本无关</strong>。实测在 ranks=2 和 ranks=4 下都是约 558.9 GB。增加节点数不会缓解 OOM，应调小 <code>max_num_batched_tokens</code> 或设置 <code>VLLM_NUM_MAX_DISPATCHED_TOKENS_PER_RANK</code>。</p>
+</blockquote>
+<hr>
+<h2 id="四、forward-路径中的-dispatch-combine"><a href="#四、forward-路径中的-dispatch-combine" class="headerlink" title="四、forward 路径中的 dispatch/combine"></a>四、forward 路径中的 dispatch/combine</h2><p>在 <code>FusedMoE.forward_impl</code>（<code>layer.py:2575-2730</code>）中，分两条互斥路径：</p>
+<h3 id="4-1-简单路径（naive-dispatch-combine）"><a href="#4-1-简单路径（naive-dispatch-combine）" class="headerlink" title="4.1 简单路径（naive dispatch/combine）"></a>4.1 简单路径（naive dispatch/combine）</h3><p>触发条件（<code>layer.py:2615-2630</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">do_naive_dispatch_combine = (</span><br><span class="line">    (<span class="keyword">not</span> envs.VLLM_MOE_USE_DEEPEP <span class="keyword">or</span> <span class="variable language_">self</span>.quant_method.__class__.__name__ <span class="keyword">not</span> <span class="keyword">in</span> [...])</span><br><span class="line">    <span class="keyword">and</span> <span class="variable language_">self</span>.dp_size &gt; <span class="number">1</span></span><br><span class="line">    <span class="keyword">and</span> <span class="keyword">not</span> <span class="built_in">isinstance</span>(<span class="variable language_">self</span>.quant_method, FusedMoEModularMethod)</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p>执行流程：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">① get_ep_group().dispatch(hidden_states, router_logits)   # allgather</span><br><span class="line">② quant_method.apply(hidden_states_combined, ...)          # expert GEMM on gathered batch</span><br><span class="line">③ get_ep_group().combine(output)                           # reduce-scatter</span><br></pre></td></tr></table></figure>
+
+<h3 id="4-2-模块化路径（DeepEP-pplx-modular-kernel）"><a href="#4-2-模块化路径（DeepEP-pplx-modular-kernel）" class="headerlink" title="4.2 模块化路径（DeepEP/pplx modular kernel）"></a>4.2 模块化路径（DeepEP/pplx modular kernel）</h3><p>当 <code>use_all2all_kernels=True</code> 时（<code>config.py:933</code>），<code>maybe_init_modular_kernel</code> 把 <code>quant_method</code> 替换为 <code>FusedMoEModularMethod</code>，内含 <code>FusedMoEModularKernel</code>（<code>modular_kernel.py:1206-1296</code>）：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">_prepare(dispatch+quantize) → _fused_experts(expert GEMM) → _finalize(combine+reduce)</span><br></pre></td></tr></table></figure>
+
+<p>此路径中 <code>do_naive_dispatch_combine</code> 为 False，所有通信都在 modular kernel 内部完成。</p>
+<hr>
+<h2 id="五、EPLB-分层均衡算法：跨机-EP-的关键优化"><a href="#五、EPLB-分层均衡算法：跨机-EP-的关键优化" class="headerlink" title="五、EPLB 分层均衡算法：跨机 EP 的关键优化"></a>五、EPLB 分层均衡算法：跨机 EP 的关键优化</h2><p>EPLB（Expert-Parallel Load Balancing）是跨机 EP 性能优化的核心，位于 <code>distributed/eplb/policy/default.py</code>。</p>
+<h3 id="5-1-问题"><a href="#5-1-问题" class="headerlink" title="5.1 问题"></a>5.1 问题</h3><p>MoE 路由是数据相关的：少数热点 expert 吸引远多于平均的 token。跨机 EP 下，如果热点 expert 分散在多台机器上，大量 token 必须跨机传输，成为瓶颈。</p>
+<h3 id="5-2-分层算法三步走"><a href="#5-2-分层算法三步走" class="headerlink" title="5.2 分层算法三步走"></a>5.2 分层算法三步走</h3><p><code>rebalance_experts_hierarchical</code>（<code>default.py:115-201</code>）感知节点拓扑，分三步：</p>
+<p><strong>Step 1：将 expert group 打包到节点</strong>（最小化跨机流量）</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">tokens_per_group = weight.unflatten(-<span class="number">1</span>, (num_groups, group_size)).<span class="built_in">sum</span>(-<span class="number">1</span>)</span><br><span class="line">group_pack_index, group_rank_in_pack = cls.balanced_packing(</span><br><span class="line">    tokens_per_group, num_nodes  <span class="comment"># 均衡打包到各节点</span></span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p><code>balanced_packing</code> 用贪心算法：按负载降序排列 group，每次把 group 放入当前负载最低且有容量的 node。</p>
+<p><strong>Step 2：在每个节点内部复制热点 expert</strong></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">tokens_per_mlog = weight.gather(-<span class="number">1</span>, mlog2log).view(-<span class="number">1</span>, num_logical_experts // num_nodes)</span><br><span class="line">phy2mlog, phyrank, mlogcnt = cls.replicate_experts(</span><br><span class="line">    tokens_per_mlog, num_physical_experts // num_nodes</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p><code>replicate_experts</code> 的贪心策略：每次把冗余物理槽位分配给当前”每副本负载最大”的 logical expert（<code>weight / logcnt</code> 的 argmax）。</p>
+<p><strong>Step 3：在每个节点内部将 physical expert 打包到各 GPU</strong></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">tokens_per_phy = (tokens_per_mlog / mlogcnt).gather(-<span class="number">1</span>, phy2mlog)</span><br><span class="line">pack_index, rank_in_pack = cls.balanced_packing(</span><br><span class="line">    tokens_per_phy, num_gpus // num_nodes  <span class="comment"># 节点内 GPU 间均衡</span></span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<h3 id="5-3-设计思想"><a href="#5-3-设计思想" class="headerlink" title="5.3 设计思想"></a>5.3 设计思想</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">    节点 A (NVLink 900GB/s)              节点 B (NVLink 900GB/s)</span><br><span class="line">┌──────────────────────────┐         ┌──────────────────────────┐</span><br><span class="line">│  GPU0: expert 0,1,5,7    │         │  GPU4: expert 256,258... │</span><br><span class="line">│  GPU1: expert 2,3,6,8    │  ← IB → │  GPU5: expert 257,259... │</span><br><span class="line">│  GPU2: expert 9,10...    │  50GB/s  │  GPU6: expert 300,301... │</span><br><span class="line">│  GPU3: expert 11,12...   │         │  GPU7: expert 400,401... │</span><br><span class="line">└──────────────────────────┘         └──────────────────────────┘</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>先把同一 expert group 的 expert 尽量放在同一节点，让大部分 token 路由走节点内 NVLink</li>
+<li>冗余 expert 的复制限制在节点内部</li>
+<li>最大化利用节点内带宽，最小化跨机流量</li>
+</ul>
+<h3 id="5-4-回退策略"><a href="#5-4-回退策略" class="headerlink" title="5.4 回退策略"></a>5.4 回退策略</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># default.py:242-249</span></span><br><span class="line"><span class="keyword">if</span> num_groups % num_nodes == <span class="number">0</span>:</span><br><span class="line">    <span class="comment"># 分层策略（推荐，利用节点拓扑）</span></span><br><span class="line">    phy2log, phyrank, logcnt = cls.rebalance_experts_hierarchical(</span><br><span class="line">        weight, num_replicas, num_groups, num_nodes, num_ranks)</span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    <span class="comment"># 回退到全局扁平均衡（num_groups=1, num_nodes=1）</span></span><br><span class="line">    phy2log, phyrank, logcnt = cls.rebalance_experts_hierarchical(</span><br><span class="line">        weight, num_replicas, <span class="number">1</span>, <span class="number">1</span>, num_ranks)</span><br></pre></td></tr></table></figure>
+
+<h3 id="5-5-权重搬运"><a href="#5-5-权重搬运" class="headerlink" title="5.5 权重搬运"></a>5.5 权重搬运</h3><p>重平衡后需要在 GPU 间物理搬运 expert 权重（<code>rebalance_execute.py:143-208</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 通过 P2P isend/irecv 在 EP group 的 rank 之间交换 expert 权重</span></span><br><span class="line"><span class="keyword">for</span> dst <span class="keyword">in</span> recv_ranks:</span><br><span class="line">    p2p_ops += [P2POp(torch.distributed.isend, weight[src],</span><br><span class="line">                      get_global_rank(ep_group, dst))</span><br><span class="line">                <span class="keyword">for</span> weight <span class="keyword">in</span> expert_weights]</span><br><span class="line">reqs = batch_isend_irecv(p2p_ops)</span><br><span class="line">[r.wait() <span class="keyword">for</span> r <span class="keyword">in</span> reqs]</span><br></pre></td></tr></table></figure>
+
+<p>异步模式下（<code>async_worker.py</code>），权重搬运在私有 CUDA stream 上执行，与推理重叠。</p>
+<hr>
+<h2 id="六、跨机通信量统计工具"><a href="#六、跨机通信量统计工具" class="headerlink" title="六、跨机通信量统计工具"></a>六、跨机通信量统计工具</h2><p><code>layer.py:318-386</code> 提供了一个 Triton kernel <code>fused_communication_ops</code>，用于分析跨机 EP 的实际通信模式：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@triton.jit</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">fused_communication_ops_kernel</span>(<span class="params"></span></span><br><span class="line"><span class="params">    topk_ids_ptr,</span></span><br><span class="line"><span class="params">    comm_ops_ptr,         <span class="comment"># [num_nodes]</span></span></span><br><span class="line"><span class="params">    expert_repeats_ptr,   <span class="comment"># [num_tokens, num_nodes]</span></span></span><br><span class="line"><span class="params">    n_tokens,</span></span><br><span class="line"><span class="params">    num_nodes: tl.constexpr,</span></span><br><span class="line"><span class="params">    num_experts_per_node: tl.constexpr,</span></span><br><span class="line"><span class="params">    enable_dedup_optimization: tl.constexpr,</span></span><br><span class="line"><span class="params">    ...</span></span><br><span class="line"><span class="params"></span>):</span><br><span class="line">    expert_nodes = expert_id // num_experts_per_node</span><br><span class="line">    <span class="keyword">if</span> enable_dedup_optimization:</span><br><span class="line">        <span class="comment"># 同一 token 路由到同一 node 的多个 expert → 只计一次跨机传输</span></span><br><span class="line">        tl.atomic_add(expert_repeats_ptr + pid * num_nodes + expert_nodes, <span class="number">1</span>, ...)</span><br></pre></td></tr></table></figure>
+
+<p>两种统计模式：</p>
+<ul>
+<li><strong>不去重</strong>（<code>comm_ops</code>）：每个 top-k expert 独立计入目标节点</li>
+<li><strong>去重</strong>（<code>comm_ops_with_dedup</code>）：同一 token 发往同一节点只计一次（因为物理上只需传一次 token 数据）</li>
+</ul>
+<hr>
+<h2 id="七、带宽需求分析"><a href="#七、带宽需求分析" class="headerlink" title="七、带宽需求分析"></a>七、带宽需求分析</h2><h3 id="7-1-各互联类型带宽对比"><a href="#7-1-各互联类型带宽对比" class="headerlink" title="7.1 各互联类型带宽对比"></a>7.1 各互联类型带宽对比</h3><table>
+<thead>
+<tr>
+<th>互联类型</th>
+<th>单向带宽</th>
+<th>双向带宽</th>
+<th>典型场景</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>NVLink 4.0（机内）</td>
+<td>450 GB/s</td>
+<td>900 GB/s</td>
+<td>同节点 GPU 间</td>
+</tr>
+<tr>
+<td>NVSwitch L2（机内全互联）</td>
+<td>900 GB/s（per GPU）</td>
+<td>1.8 TB/s</td>
+<td>H100/B200 DGX</td>
+</tr>
+<tr>
+<td>MNNVL（多节点 NVLink）</td>
+<td>900 GB/s</td>
+<td>1.8 TB/s</td>
+<td>GB200 NVL72</td>
+</tr>
+<tr>
+<td>InfiniBand HDR（跨机）</td>
+<td>25 GB/s</td>
+<td>50 GB/s</td>
+<td>常见跨机互联</td>
+</tr>
+<tr>
+<td>InfiniBand NDR（跨机）</td>
+<td>50 GB/s</td>
+<td>100 GB/s</td>
+<td>高端跨机互联</td>
+</tr>
+<tr>
+<td>InfiniBand NDR ×4（跨机）</td>
+<td>200 GB/s</td>
+<td>400 GB/s</td>
+<td>8 卡 4 端口聚合</td>
+</tr>
+<tr>
+<td>RoCE v2（跨机）</td>
+<td>12.5-25 GB/s</td>
+<td>25-50 GB/s</td>
+<td>以太网 RDMA</td>
+</tr>
+</tbody></table>
+<p><strong>关键差距</strong>：跨机 IB 带宽比机内 NVLink 低 <strong>~18-36 倍</strong>（单端口对比）。</p>
+<h3 id="7-2-每-MoE-层的通信量"><a href="#7-2-每-MoE-层的通信量" class="headerlink" title="7.2 每 MoE 层的通信量"></a>7.2 每 MoE 层的通信量</h3><p>以 <strong>Qwen3-Omni-Next</strong>（512 experts, hidden=4096, top-k=10, BF16）为例：</p>
+<h4 id="简单路径（allgather-reduce-scatter）"><a href="#简单路径（allgather-reduce-scatter）" class="headerlink" title="简单路径（allgather/reduce-scatter）"></a>简单路径（allgather/reduce-scatter）</h4><p>每层每 rank 的通信量：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">dispatch:  N_tokens × hidden × 2B × (EP-1)/EP    (allgather)</span><br><span class="line">combine:   N_tokens × hidden × 2B × (EP-1)/EP    (reduce-scatter)</span><br></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>EP size</th>
+<th>batch=1024 tokens</th>
+<th>batch=4096 tokens</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>EP=8</td>
+<td>7.2 MB/层</td>
+<td>28.7 MB/层</td>
+</tr>
+<tr>
+<td>EP=16</td>
+<td>7.7 MB/层</td>
+<td>30.7 MB/层</td>
+</tr>
+<tr>
+<td>EP=32</td>
+<td>7.9 MB/层</td>
+<td>31.7 MB/层</td>
+</tr>
+</tbody></table>
+<blockquote>
+<p>注：allgather 的通信量随 EP 增大趋于 <code>N × hidden × 2B</code>，因为 <code>(EP-1)/EP → 1</code>。</p>
+</blockquote>
+<h4 id="真-all-to-all-路径（DeepEP-pplx）"><a href="#真-all-to-all-路径（DeepEP-pplx）" class="headerlink" title="真 all-to-all 路径（DeepEP/pplx）"></a>真 all-to-all 路径（DeepEP/pplx）</h4><p>只发送被路由到其他 rank 的 token：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">每 token 发送次数 ≈ top_k 个 expert 分布在的不同远端 rank 数</span><br><span class="line">单 token 数据量 = hidden × 2B = 4096 × 2 = 8 KB</span><br></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>EP size</th>
+<th>batch=1024, top-k=10</th>
+<th>batch=4096, top-k=10</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>EP=8</td>
+<td>~3.2 MB/层（发送 ~60% token 到远端）</td>
+<td>~12.8 MB/层</td>
+</tr>
+<tr>
+<td>EP=16</td>
+<td>~5.6 MB/层（发送 ~70% token 到远端）</td>
+<td>~22.4 MB/层</td>
+</tr>
+<tr>
+<td>EP=32</td>
+<td>~6.8 MB/层（发送 ~83% token 到远端）</td>
+<td>~27.2 MB/层</td>
+</tr>
+</tbody></table>
+<blockquote>
+<p>dedup 优化后更低：同一 token 路由到同一节点的多个 expert 只传一次。</p>
+</blockquote>
+<h3 id="7-3-全模型单次-forward-总通信量"><a href="#7-3-全模型单次-forward-总通信量" class="headerlink" title="7.3 全模型单次 forward 总通信量"></a>7.3 全模型单次 forward 总通信量</h3><p>60 MoE 层 × 2 次通信（dispatch + combine）：</p>
+<table>
+<thead>
+<tr>
+<th>路径</th>
+<th>EP=16, batch=2048</th>
+<th>EP=32, batch=2048</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>allgather/RS（简单）</td>
+<td>~1.85 GB</td>
+<td>~1.90 GB</td>
+</tr>
+<tr>
+<td>真 all-to-all（DeepEP）</td>
+<td>~0.84 GB</td>
+<td>~0.97 GB</td>
+</tr>
+</tbody></table>
+<h3 id="7-4-跨机带宽需求估算"><a href="#7-4-跨机带宽需求估算" class="headerlink" title="7.4 跨机带宽需求估算"></a>7.4 跨机带宽需求估算</h3><p>假设跨机流量占比 = <code>(节点数-1) / 节点数</code>（均匀路由下）：</p>
+<h4 id="场景-A：4-节点-×-8-GPU-EP-32-简单路径"><a href="#场景-A：4-节点-×-8-GPU-EP-32-简单路径" class="headerlink" title="场景 A：4 节点 × 8 GPU, EP=32, 简单路径"></a>场景 A：4 节点 × 8 GPU, EP=32, 简单路径</h4><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">跨机流量 = 1.90 GB × 3/4 = 1.43 GB / forward</span><br><span class="line">目标延迟 = 50 ms（decode TPOT 预算中的通信部分）</span><br><span class="line">所需跨机带宽 ≥ 1.43 GB / 0.05 s = 28.6 GB/s ≈ 228 Gb/s</span><br><span class="line">→ 需要 IB NDR（单端口 50 GB/s 足够）或多端口 HDR</span><br></pre></td></tr></table></figure>
+
+<h4 id="场景-B：同上-DeepEP-all-to-all"><a href="#场景-B：同上-DeepEP-all-to-all" class="headerlink" title="场景 B：同上, DeepEP all-to-all"></a>场景 B：同上, DeepEP all-to-all</h4><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">跨机流量 = 0.97 GB × 3/4 = 0.73 GB / forward</span><br><span class="line">所需跨机带宽 ≥ 0.73 GB / 0.05 s = 14.6 GB/s ≈ 117 Gb/s</span><br><span class="line">→ IB HDR 单端口（25 GB/s）即可满足</span><br></pre></td></tr></table></figure>
+
+<h4 id="场景-C：2-节点-×-8-GPU-EP-16"><a href="#场景-C：2-节点-×-8-GPU-EP-16" class="headerlink" title="场景 C：2 节点 × 8 GPU, EP=16"></a>场景 C：2 节点 × 8 GPU, EP=16</h4><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">跨机流量比例 = 1/2</span><br><span class="line">简单路径: 1.85 GB × 1/2 = 0.93 GB → 需要 18.6 GB/s</span><br><span class="line">DeepEP:   0.84 GB × 1/2 = 0.42 GB → 需要 8.4 GB/s</span><br></pre></td></tr></table></figure>
+
+<h4 id="场景-D：有-EPLB-分层优化"><a href="#场景-D：有-EPLB-分层优化" class="headerlink" title="场景 D：有 EPLB 分层优化"></a>场景 D：有 EPLB 分层优化</h4><p>EPLB 把 expert group 打包到节点内，实际跨机流量可降低 **40-60%**：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">场景 A + EPLB: 跨机流量 ≈ 1.43 × 0.5 = 0.72 GB → 14.4 GB/s</span><br></pre></td></tr></table></figure>
+
+<h3 id="7-5-关键结论"><a href="#7-5-关键结论" class="headerlink" title="7.5 关键结论"></a>7.5 关键结论</h3><table>
+<thead>
+<tr>
+<th>因素</th>
+<th>影响</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>节点数增加</td>
+<td>跨机流量占比上升（<code>(N-1)/N</code>），单路 IB 压力增大</td>
+</tr>
+<tr>
+<td>batch size 增大</td>
+<td>通信量线性增长，但 GEMM 计算也同步增长，通信/计算比稳定</td>
+</tr>
+<tr>
+<td>top-k 增大</td>
+<td>真 all-to-all 路径的跨机 token 占比上升</td>
+</tr>
+<tr>
+<td>EPLB 分层打包</td>
+<td>有效降低跨机流量 40-60%，是跨机 EP 的核心优化手段</td>
+</tr>
+<tr>
+<td>DeepEP vs allgather</td>
+<td>DeepEP 减少约 50% 通信量，但需要预分配 RDMA buffer</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="八、Expert-分片与-expert-map"><a href="#八、Expert-分片与-expert-map" class="headerlink" title="八、Expert 分片与 expert_map"></a>八、Expert 分片与 expert_map</h2><p>每个 rank 只持有 <code>N/EP</code> 个完整 expert。<code>determine_expert_map</code>（<code>layer.py:166-185</code>）构建映射：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">base_experts = global_num_experts // ep_size</span><br><span class="line">remainder = global_num_experts % ep_size</span><br><span class="line">local_num_experts = base_experts + <span class="number">1</span> <span class="keyword">if</span> ep_rank &lt; remainder <span class="keyword">else</span> base_experts</span><br><span class="line"></span><br><span class="line">expert_map = torch.full((global_num_experts,), -<span class="number">1</span>, dtype=torch.int32)</span><br><span class="line"><span class="comment"># linear 模式：连续分配</span></span><br><span class="line">start_idx = ep_rank * base_experts + <span class="built_in">min</span>(ep_rank, remainder)</span><br><span class="line">expert_map[start_idx:start_idx + local_num_experts] = torch.arange(<span class="number">0</span>, local_num_experts)</span><br></pre></td></tr></table></figure>
+
+<p>开启 EP 时，<code>FusedMoEParallelConfig.make</code>（<code>config.py:1052-1095</code>）会<strong>关闭权重 TP sharding</strong>（<code>tp_size=1</code>），把 <code>tp_rank</code> 重新解释为 <code>ep_rank</code>。每个 rank 持有完整的 expert 权重，而不是每个 expert 的一个切片。</p>
+<hr>
+<h2 id="九、模型接入层"><a href="#九、模型接入层" class="headerlink" title="九、模型接入层"></a>九、模型接入层</h2><h3 id="Qwen3NextSparseMoeBlock（qwen3-next-py-160-298）"><a href="#Qwen3NextSparseMoeBlock（qwen3-next-py-160-298）" class="headerlink" title="Qwen3NextSparseMoeBlock（qwen3_next.py:160-298）"></a>Qwen3NextSparseMoeBlock（<code>qwen3_next.py:160-298</code>）</h3><p>模型层不直接操作 EP 通信，只负责：</p>
+<ol>
+<li>构造 <code>SharedFusedMoE</code>（持有 routed experts + shared expert + gate）</li>
+<li>调用 <code>self.experts(hidden_states, router_logits)</code></li>
+<li>折叠 shared expert 输出 + 最终 TP/SP reduction</li>
+</ol>
+<p>所有 EP dispatch/combine 都封装在 <code>FusedMoE.forward_impl</code> 内部。</p>
+<h3 id="SharedFusedMoE（shared-fused-moe-py）"><a href="#SharedFusedMoE（shared-fused-moe-py）" class="headerlink" title="SharedFusedMoE（shared_fused_moe.py）"></a>SharedFusedMoE（<code>shared_fused_moe.py</code>）</h3><p>支持 overlapped 模式：shared expert 的 GEMM 与 routed expert 的 all-to-all dispatch 交错执行，用计算掩盖跨机通信延迟。</p>
+<hr>
+<h2 id="十、激活格式契约（踩坑经验）"><a href="#十、激活格式契约（踩坑经验）" class="headerlink" title="十、激活格式契约（踩坑经验）"></a>十、激活格式契约（踩坑经验）</h2><p>modular kernel 的 PrepareAndFinalize（dispatch/combine）与 Experts kernel 的 <code>FusedMoEActivationFormat</code> 必须匹配：</p>
+<table>
+<thead>
+<tr>
+<th>激活格式</th>
+<th>dispatch 端</th>
+<th>expert 端</th>
+<th>场景</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Standard</strong></td>
+<td>AllGather/ReduceScatter</td>
+<td>FlashInfer CUTLASS</td>
+<td>naive 路径，无预分配 buffer</td>
+</tr>
+<tr>
+<td><strong>BatchedExperts</strong></td>
+<td>DeepEP-LL / pplx</td>
+<td>FlashInfer CUTEDSL (masked_gemm)</td>
+<td>需要 DeepEP/pplx buffer</td>
+</tr>
+</tbody></table>
+<p>错误配对（如 CUTEDSL + allgather）会报：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">RuntimeError: FlashInferAllGatherMoEPrepareAndFinalize.Standard</span><br><span class="line">    == FlashInferCuteDSLExperts.BatchedExperts</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="十一、总结"><a href="#十一、总结" class="headerlink" title="十一、总结"></a>十一、总结</h2><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>EP group 构成</strong></td>
+<td>EP = TP × DP，跨机时成员分布在多台物理机</td>
+</tr>
+<tr>
+<td><strong>跨机自动检测</strong></td>
+<td><code>self.internode = not all(in_the_same_node_as(...))</code></td>
+</tr>
+<tr>
+<td><strong>通信后端</strong></td>
+<td>naive（allgather/RS）冗余但简单；DeepEP/pplx 做真 all-to-all 减少流量</td>
+</tr>
+<tr>
+<td><strong>跨机优化核心</strong></td>
+<td>EPLB 分层算法按节点拓扑打包 expert，最小化跨机流量</td>
+</tr>
+<tr>
+<td><strong>机内带宽</strong></td>
+<td>NVLink 900GB/s+，几乎不是瓶颈</td>
+</tr>
+<tr>
+<td><strong>跨机带宽</strong></td>
+<td>IB NDR 50GB/s 是瓶颈；需 DeepEP RDMA + EPLB 分层打包缓解</td>
+</tr>
+<tr>
+<td><strong>RDMA buffer 陷阱</strong></td>
+<td>DeepEP LL buffer 大小随 <code>max_num_batched_tokens</code> 增长，与 EP_size <strong>无关</strong></td>
+</tr>
+<tr>
+<td><strong>激活格式契约</strong></td>
+<td>Standard ↔ CUTLASS, BatchedExperts ↔ CUTEDSL，不可混搭</td>
+</tr>
+</tbody></table>
+</div><div class="article-licensing box"><div class="licensing-title"><p>vLLM 跨机 Expert Parallelism (EP) 深度解析</p><p><a href="https://llx-08.github.io/notes/2026/06/17/2026-06-17-vllm-cross-node-expert-parallelism/">https://llx-08.github.io/notes/2026/06/17/2026-06-17-vllm-cross-node-expert-parallelism/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-06-17</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-06-17</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/06/08/2026-06-08-vllm-develop-pd-disagg-scheduler-worker-messaging/"><span class="level-item">vLLM Develop 分支 PD 分离：Scheduler-Worker 消息传递与 Bypass 路径深度分析</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">24</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-17T00:00:00.000Z">2026-06-17</time></p><p class="title"><a href="/notes/2026/06/17/2026-06-17-vllm-cross-node-expert-parallelism/">vLLM 跨机 Expert Parallelism (EP) 深度解析</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-08T00:00:00.000Z">2026-06-08</time></p><p class="title"><a href="/notes/2026/06/08/2026-06-08-vllm-develop-pd-disagg-scheduler-worker-messaging/">vLLM Develop 分支 PD 分离：Scheduler-Worker 消息传递与 Bypass 路径深度分析</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-08T00:00:00.000Z">2026-06-08</time></p><p class="title"><a href="/notes/2026/06/08/2026-06-08-vllm-epd-vineyard-encoder-cache-transfer/">vLLM EPD 分离与 Vineyard Encoder Cache Transfer 深度分析</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-08T00:00:00.000Z">2026-06-08</time></p><p class="title"><a href="/notes/2026/06/08/2026-06-08-vllm-pd-disaggregation-and-cpu-offloading/">vLLM PD 分离与 CPU Offloading 深度分析</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-06T00:00:00.000Z">2026-06-06</time></p><p class="title"><a href="/notes/2026/06/06/2026-06-06-vllm-pd-disaggregation-community-vs-develop/">vLLM PD 分离：社区方案 vs Develop 分支深度对比</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
