@@ -1,0 +1,4 @@
+interface:
+  display_name: "SGLang-Omni"
+  short_description: "Work on the remote SGLang-Omni repo"
+  default_prompt: "Use $sglang-omni to inspect the remote DSW SGLang-Omni repo and make a focused code change."

@@ -1,3 +1,5 @@
+╰────────┴───────────┴────────────────┴────────────────────────────┴───────────────────╯
+
 # vLLM HybridConnector 与其他 KV Connector 对比
 
 > 基于 vLLM 仓库 `zero_decode_0_refcnt_block` 分支源码整理（2026-05）。
@@ -549,3 +551,151 @@ HMA 多 group:          ████████░░  有 request_finished_all
 ```
 
 **结论**：HybridConnector 是「**继承社区类型 + 自建 PD 运行时**」；社区接口更多是**类型兼容与挂载点**，而非实际 I/O 控制面。理解这一点后，读 kvt/v6d 代码应优先跟 `HybridScheduler` 状态和 RPC，而不是只跟 `KVConnectorModelRunnerMixin` 的 forward 钩子。
+
+## 10. 社区 NixlConnector 的 TP 不一致支持与传输模型深度对比
+
+### 10.1 NixlConnector 如何在 block 粒度传输下支持 P/D TP 不一致
+
+社区方案的核心设计：**传输最小单元仍然是 block，但在 NIXL descriptor 注册阶段做 head 维度的偏移和切分，让 D 端每个 TP worker 只读取 P 端 block 中属于自己的那部分 KV heads。**
+
+关键代码：`tp_mapping.py` 的 `compute_tp_mapping()` 和 `worker.py` 的 `_build_fa_remote()` / `_build_local_splits_from_plan()`。
+
+#### 情况一：D_TP > P_TP（多个 D worker 读同一个 P worker）
+
+例如 P_TP=2, D_TP=4, `tp_ratio = 4//2 = 2`：
+
+```
+D-Worker0  ---- 读 P-Worker0 的前半 KV heads
+D-Worker1  ---- 读 P-Worker0 的后半 KV heads
+D-Worker2  ---- 读 P-Worker1 的前半 KV heads
+D-Worker3  ---- 读 P-Worker1 的后半 KV heads
+```
+
+实现方式：
+- `compute_tp_mapping` 计算 `rank_offset_factor = tp_rank % (tp_size // remote_tp_size)`
+- `_build_fa_remote` 注册远端 descriptor 时：
+  ```python
+  rank_offset = plan.rank_offset_factor * remote_kv_block_len
+  local_block_len = local_block_len // num_attn_reads  # 只读属于自己的 head 部分
+  addr = base_addr + block_offset + rank_offset         # 加上 head 偏移
+  ```
+- NIXL 的 descriptor 描述的不是整个 block，而是 **block 内特定 head 范围的一段连续内存**
+- 要求 KV cache 是 **HND layout**（head 维度在前），这样不同 head 的 KV 是连续子段，可直接用 offset+length RDMA 读取
+
+#### 情况二：P_TP > D_TP（一个 D worker 读多个 P worker）
+
+例如 P_TP=4, D_TP=2, `tp_ratio = -(4//2) = -2`：
+
+```
+D-Worker0  ---- 读 P-Worker0 的全部 + P-Worker1 的全部
+D-Worker1  ---- 读 P-Worker2 的全部 + P-Worker3 的全部
+```
+
+实现方式：
+- `handshake_target_ranks` 返回多个 P rank（如 D rank 0 handshake [P0, P1]）
+- `_read_blocks_for_req` 对每个 source rank 分别发起 `_read_blocks` 调用
+- 本地 descriptor 通过 `_build_local_splits_from_plan` 切成多段，每段对应一个 P rank 写入的位置
+- GQA 去重：`np.unique(heads, return_index=True)` 去除多个 remote rank 持有相同 KV head 的冗余读
+
+#### 特殊情况：MLA
+
+MLA 的 cache 在所有 TP rank 上是复制的，因此：
+- 只需读一个 remote rank，`rank_offset_factor = 0`
+- P_TP > D_TP 时也只发起一次读取，但仍需通过 `send_notif` 通知其他 P rank 释放 block
+
+#### 前提约束
+
+- **必须 HND layout**：验证代码明确检查，NHD 会 raise RuntimeError（除非开启 `enable_permute_local_kv`）
+- **TP size 必须整除**：`tp_size % remote_tp_size == 0` 或反向
+- **HMA 不支持异构 block size**：`assert block_size_ratio == 1`
+
+#### 与 develop 分支 kvtbackend 的对比
+
+| 维度 | develop 分支 (kvtbackend) | 社区方案 (NixlConnector) |
+|------|--------------------------|-------------------------|
+| TP 映射层 | C++（`tx_stub.cpp:compute_valid_ranks_pd`） | Python（`tp_mapping.py:compute_tp_mapping`） |
+| 切分粒度 | token 级（`parse_block_*.cpp` 逐 token 解析） | descriptor 级（注册时一次性计算 offset+length） |
+| Layout 要求 | 不要求 HND，适配各 attn 后端 | 必须 HND（head 连续才能 offset 切分） |
+| 额外计算 | 有（parse block 时做 rank 映射） | 零（注册时完成，传输时纯 RDMA read） |
+| 支持的 TP 比例 | 整除关系 | 整除关系（相同限制） |
+
+### 10.2 传输模型对比：P-Push vs D-Pull
+
+两种方案在传输发起方上有根本区别：
+
+#### develop 分支：P-Push 模型
+
+```
+1. 请求同时到达 P 和 D（通过 dashscope-serving 派发）
+2. D 给请求分配 block → D 通过 RPC 发 PREFILL_REQ 给 P
+3. P 收到 → P 做 prefill → P 主动 push KV 给 D
+4. D 通过 404 重试机制等待 KV 就绪
+```
+
+- D 和 P **并行运作**，D 发完 RPC 后就开始轮询等待
+- P 可能还在 prefill → D 收到 404 → 按 `_delay_s_list` 退避重试
+- 同步机制：`_dash_done` 字典 + 404/410 返回码 + 退避列表
+
+#### 社区方案：D-Pull 模型
+
+```
+1. 请求到达外部 Router
+2. Router 发给 P 做 prefill
+3. P prefill 完成 → 回报 Router（带 engine_id + block_ids）
+4. Router 把请求转发给 D，kv_transfer_params 里带着 P 的信息
+5. D 的 scheduler 看到 kv_transfer_params → 放入 _reqs_need_recv
+6. D 的 worker 发起 NIXL READ 从 P 拉取
+```
+
+- D **不可能在 P 没算完时 pull**——D 根本不知道请求存在，直到 Router 转发
+- Router 是同步点：等 P 完成后才转发给 D
+- 不需要 404 机制、`_dash_done`、`_delay_s_list`
+- 代价：多一跳路由延迟（P → Router → D），Router 成为单点
+
+### 10.3 增量传输能力对比
+
+| 传输粒度 | develop 分支 (kvtbackend) | 社区方案 (NixlConnector) |
+|---------|--------------------------|-------------------------|
+| Layer-wise（边算边传） | ✅ `submit_delta_send` 逐层提交 | ❌ 不支持 |
+| Chunked prefill（边 chunk 边传） | ✅ | ✅ 多批 `reqs_to_save` |
+| Request-level（算完再传） | ✅ | ✅ |
+
+#### Layer-wise 传输
+
+develop 分支的 `submit_delta_send` 允许 P 在 model forward 过程中，每完成一层就把该层的 KV 提交给 blade-kvt 发送，实现 **compute-transfer overlap**。整个 prefill 完成时，前面的层可能已经传完了。
+
+社区方案做不到这一点，原因是 D-Pull 模型的固有限制：
+- D 发起 NIXL READ 时，`_compute_desc_ids` 一次性把所有 region（所有 layer）的 descriptor 算好
+- 一个 `nixl_xfer` 调用把所有 layer 的 KV 一起拉过来
+- P 的数据必须**全部就绪**才能被 D 读取，没有"P 算完第 5 层就让 D 先读前 5 层"的机制
+
+要实现 layer-wise 传输，需要 P→D 的信令通道通知 D "第 N 层好了你可以来读了"——但这会改变整个架构。
+
+#### Chunked Prefill
+
+社区方案支持 chunked prefill 下的多批传输。从 `nixl/scheduler.py` 的 `_build_save_meta`：
+```python
+is_partial = (req.num_computed_tokens + num_scheduled_tokens) < req.num_prompt_tokens
+if not is_partial:
+    self._reqs_need_save.pop(req_id)
+# For partial prefill case, we will retain the request in _reqs_need_save
+# until all blocks are scheduled with req_meta.
+```
+
+P 每完成一个 chunk，新产出的 block 被逐批标记为可读，D 可在 P 完成部分 prefill 后就开始拉取已完成的 block。这是 **scheduler 层面的增量**，不是传输层面的增量。
+
+#### 延迟影响
+
+```
+develop 分支时序（Layer-wise）：
+P: |=== Layer 0 ===|=== Layer 1 ===|=== Layer 2 ===| ...
+KV:                |--- send L0 ---|--- send L1 ---|--- send L2 ---|
+                   ^^ compute-transfer overlap ^^
+
+社区方案时序（Request-level）：
+P: |=== Layer 0 ===|=== Layer 1 ===|=== Layer 2 ===| done → Router → D
+KV:                                                              |--- read all ---|
+                                                                 ^^ 串行，无 overlap ^^
+```
+
+对于长 prompt（层数多、prefill 耗时长），layer-wise 传输可以显著减少端到端延迟。
