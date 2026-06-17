@@ -3,6 +3,7 @@ title: Step-3 技术报告阅读笔记：AFD 系统设计
 date: 2026-06-17
 tags: []
 ---
+
 # Step-3 技术报告阅读笔记：AFD 系统设计
 
 > **论文**: Step-3 is Large yet Affordable: Model-System Co-design for Cost-effective Decoding
