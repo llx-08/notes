@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="820" viewBox="0 0 1160 820" font-family="Menlo,Consolas,monospace">
+  <rect width="1160" height="820" fill="#0f1117"/>
+  <text x="580" y="34" fill="#e6e6e6" font-size="21" text-anchor="middle" font-weight="bold">标准残差 (单 lane)  vs  HyperConnection (HC 条 lane)  —— 在 Transformer 层上的对比</text>
+  <text x="580" y="56" fill="#8a93a6" font-size="12.5" text-anchor="middle">被加宽的是"层间残差高速公路"(HS → HC×HS)；attn/MLP 本体始终在单通道 HS 上算，不因 HC 变贵</text>
+
+  <!-- ============ LEFT: standard residual ============ -->
+  <rect x="30" y="76" width="500" height="700" rx="10" fill="#0d1522" stroke="#33587f"/>
+  <text x="50" y="100" fill="#7fb0e6" font-size="15" font-weight="bold">① 标准残差：单条 lane</text>
+  <text x="50" y="120" fill="#8a93a6" font-size="11">x = x + Block(RMSNorm(x))，连接强度固定 = 1</text>
+
+  <!-- residual highway -->
+  <line x1="150" y1="140" x2="150" y2="740" stroke="#4a90d9" stroke-width="4"/>
+  <text x="150" y="135" fill="#7fa7d9" font-size="10.5" text-anchor="middle">residual [*, HS]</text>
+
+  <!-- Attn sublayer -->
+  <g>
+    <circle cx="150" cy="180" r="4" fill="#4a90d9"/>
+    <path d="M150 180 L228 180" stroke="#6b7688" stroke-width="1.6" marker-end="url(#g)"/>
+    <rect x="230" y="164" width="70" height="30" rx="4" fill="#1a2230" stroke="#5a90c0"/><text x="265" y="184" fill="#cfe0f0" font-size="11" text-anchor="middle">Norm</text>
+    <path d="M300 179 L328 179" stroke="#6b7688" stroke-width="1.6" marker-end="url(#g)"/>
+    <rect x="330" y="158" width="120" height="44" rx="6" fill="#1a2a1a" stroke="#5fa85f"/><text x="390" y="184" fill="#cfe6cf" font-size="12" text-anchor="middle" font-weight="bold">Attention</text>
+    <path d="M390 202 C 390 250, 210 250, 165 232" stroke="#6b7688" stroke-width="1.6" fill="none" marker-end="url(#g)"/>
+    <circle cx="150" cy="230" r="11" fill="#22262e" stroke="#d9a94a" stroke-width="1.6"/><text x="150" y="235" fill="#ffe9c0" font-size="13" text-anchor="middle">+</text>
+  </g>
+  <!-- MLP sublayer -->
+  <g>
+    <circle cx="150" cy="360" r="4" fill="#4a90d9"/>
+    <path d="M150 360 L228 360" stroke="#6b7688" stroke-width="1.6" marker-end="url(#g)"/>
+    <rect x="230" y="344" width="70" height="30" rx="4" fill="#1a2230" stroke="#5a90c0"/><text x="265" y="364" fill="#cfe0f0" font-size="11" text-anchor="middle">Norm</text>
+    <path d="M300 359 L328 359" stroke="#6b7688" stroke-width="1.6" marker-end="url(#g)"/>
+    <rect x="330" y="338" width="120" height="44" rx="6" fill="#1a2a1a" stroke="#5fa85f"/><text x="390" y="364" fill="#cfe6cf" font-size="12" text-anchor="middle" font-weight="bold">MLP / MoE</text>
+    <path d="M390 382 C 390 430, 210 430, 165 412" stroke="#6b7688" stroke-width="1.6" fill="none" marker-end="url(#g)"/>
+    <circle cx="150" cy="410" r="11" fill="#22262e" stroke="#d9a94a" stroke-width="1.6"/><text x="150" y="415" fill="#ffe9c0" font-size="13" text-anchor="middle">+</text>
+  </g>
+  <text x="150" y="470" fill="#8a93a6" font-size="20" text-anchor="middle">⋮</text>
+  <text x="290" y="474" fill="#8a93a6" font-size="11" text-anchor="middle">(下一层 ...)</text>
+
+  <!-- left problem note -->
+  <rect x="60" y="560" width="440" height="180" rx="8" fill="#161018" stroke="#6a4a4a"/>
+  <text x="76" y="584" fill="#f0a0a0" font-size="12.5" font-weight="bold">问题：跷跷板（连接强度写死 = 1）</text>
+  <text x="76" y="608" fill="#d9a0a0" font-size="11">• Pre-Norm：梯度不消失，但深层</text>
+  <text x="76" y="626" fill="#d9a0a0" font-size="11">  表示坍缩（深层特征高度相似）</text>
+  <text x="76" y="648" fill="#d9a0a0" font-size="11">• Post-Norm：不坍缩，但梯度消失</text>
+  <text x="76" y="672" fill="#d9a0a0" font-size="11">• 每层被迫以同一强度覆写同一条残差</text>
+  <text x="76" y="700" fill="#8a93a6" font-size="10.5">只有一条"高速公路"，浅层信息易被反复</text>
+  <text x="76" y="718" fill="#8a93a6" font-size="10.5">覆盖；保梯度 与 防坍缩 只能二选一。</text>
+
+  <!-- ============ RIGHT: HyperConnection ============ -->
+  <rect x="560" y="76" width="570" height="700" rx="10" fill="#150d1a" stroke="#8a6ac0"/>
+  <text x="580" y="100" fill="#c0a0e6" font-size="15" font-weight="bold">② HyperConnection：HC 条 lane（示例 HC=4）</text>
+  <text x="580" y="120" fill="#8a93a6" font-size="11">残差流 = HC×HS；mix 读 HC→1 · block 单通道 · combine 写 1→HC + lane 间混合</text>
+
+  <!-- 4 lanes -->
+  <g>
+    <line x1="620" y1="140" x2="620" y2="740" stroke="#8a6ac0" stroke-width="3"/>
+    <line x1="660" y1="140" x2="660" y2="740" stroke="#8a6ac0" stroke-width="3"/>
+    <line x1="700" y1="140" x2="700" y2="740" stroke="#8a6ac0" stroke-width="3"/>
+    <line x1="740" y1="140" x2="740" y2="740" stroke="#8a6ac0" stroke-width="3"/>
+    <text x="620" y="135" fill="#b79ad9" font-size="9" text-anchor="middle">lane0</text>
+    <text x="660" y="135" fill="#b79ad9" font-size="9" text-anchor="middle">lane1</text>
+    <text x="700" y="135" fill="#b79ad9" font-size="9" text-anchor="middle">lane2</text>
+    <text x="740" y="135" fill="#b79ad9" font-size="9" text-anchor="middle">lane3</text>
+    <text x="680" y="754" fill="#8a93a6" font-size="10.5" text-anchor="middle">HC 条并行残差 [*, HC×HS]</text>
+  </g>
+
+  <!-- Attn sublayer with mix/combine -->
+  <g>
+    <!-- mix: collapse 4 lanes -> 1 -->
+    <path d="M612 172 L748 172 L720 200 L640 200 Z" fill="#2a1f3a" stroke="#a07ad0"/>
+    <text x="680" y="190" fill="#e6d6f5" font-size="11" text-anchor="middle" font-weight="bold">mix()</text>
+    <path d="M680 200 L680 214 L860 214 L860 172 L892 172" stroke="#a07ad0" stroke-width="1.6" fill="none" marker-end="url(#gm)"/>
+    <text x="792" y="209" fill="#c0a7d9" font-size="9" text-anchor="middle">HC→1 (RMSNorm+低秩门控) [*,HS]</text>
+    <rect x="894" y="150" width="120" height="44" rx="6" fill="#1a2a1a" stroke="#5fa85f"/><text x="954" y="170" fill="#cfe6cf" font-size="12" text-anchor="middle" font-weight="bold">Attention</text><text x="954" y="186" fill="#8fbf8f" font-size="9" text-anchor="middle">单通道 HS</text>
+    <!-- combine: block out -> back to 4 lanes -->
+    <path d="M954 194 L954 230 L748 230" stroke="#5fa85f" stroke-width="1.6" fill="none" marker-end="url(#gc)"/>
+    <path d="M612 224 L748 224 L720 252 L640 252 Z" fill="#233a2a" stroke="#5fbf8f"/>
+    <text x="680" y="242" fill="#cfeeda" font-size="11" text-anchor="middle" font-weight="bold">combine()</text>
+    <text x="905" y="246" fill="#8fbf8f" font-size="9" text-anchor="middle">1→HC 每 lane 门控写回</text>
+    <!-- width mixing arrows between lanes -->
+    <path d="M628 265 L652 265" stroke="#d98ad9" stroke-width="1.3" marker-end="url(#gw)" marker-start="url(#gw)"/>
+    <path d="M668 265 L692 265" stroke="#d98ad9" stroke-width="1.3" marker-end="url(#gw)" marker-start="url(#gw)"/>
+    <path d="M708 265 L732 265" stroke="#d98ad9" stroke-width="1.3" marker-end="url(#gw)" marker-start="url(#gw)"/>
+    <text x="820" y="269" fill="#d98ad9" font-size="9" text-anchor="middle">width: lane 间横向混合</text>
+  </g>
+
+  <!-- MLP sublayer -->
+  <g>
+    <path d="M612 352 L748 352 L720 380 L640 380 Z" fill="#2a1f3a" stroke="#a07ad0"/>
+    <text x="680" y="370" fill="#e6d6f5" font-size="11" text-anchor="middle" font-weight="bold">mix()</text>
+    <path d="M680 380 L680 394 L860 394 L860 352 L892 352" stroke="#a07ad0" stroke-width="1.6" fill="none" marker-end="url(#gm)"/>
+    <rect x="894" y="330" width="120" height="44" rx="6" fill="#1a2a1a" stroke="#5fa85f"/><text x="954" y="350" fill="#cfe6cf" font-size="12" text-anchor="middle" font-weight="bold">MLP / MoE</text><text x="954" y="366" fill="#8fbf8f" font-size="9" text-anchor="middle">单通道 HS</text>
+    <path d="M954 374 L954 410 L748 410" stroke="#5fa85f" stroke-width="1.6" fill="none" marker-end="url(#gc)"/>
+    <path d="M612 404 L748 404 L720 432 L640 432 Z" fill="#233a2a" stroke="#5fbf8f"/>
+    <text x="680" y="422" fill="#cfeeda" font-size="11" text-anchor="middle" font-weight="bold">combine()</text>
+    <path d="M628 445 L652 445" stroke="#d98ad9" stroke-width="1.3" marker-end="url(#gw)" marker-start="url(#gw)"/>
+    <path d="M668 445 L692 445" stroke="#d98ad9" stroke-width="1.3" marker-end="url(#gw)" marker-start="url(#gw)"/>
+    <path d="M708 445 L732 445" stroke="#d98ad9" stroke-width="1.3" marker-end="url(#gw)" marker-start="url(#gw)"/>
+  </g>
+  <text x="680" y="484" fill="#8a93a6" font-size="20" text-anchor="middle">⋮</text>
+  <text x="820" y="488" fill="#8a93a6" font-size="11" text-anchor="middle">(下一层：combine+mix 可融合)</text>
+
+  <!-- right benefit note -->
+  <rect x="590" y="560" width="510" height="180" rx="8" fill="#101816" stroke="#4a6a5a"/>
+  <text x="606" y="584" fill="#8fe0b8" font-size="12.5" font-weight="bold">好处：打破跷跷板 + 多条可学习门控高速公路</text>
+  <text x="606" y="608" fill="#a9d6c0" font-size="11">• depth-connection：每层"读/写各 lane 的强度"可学，</text>
+  <text x="606" y="626" fill="#a9d6c0" font-size="11">  不再固定=1 → 自行平衡 保梯度 与 防坍缩</text>
+  <text x="606" y="648" fill="#a9d6c0" font-size="11">• width-connection：lane 间混合 → 保持表示多样、抗坍缩</text>
+  <text x="606" y="670" fill="#a9d6c0" font-size="11">• 不同 lane 承载不同"时间尺度"：某条 lane 把浅层信息</text>
+  <text x="606" y="688" fill="#a9d6c0" font-size="11">  原样保鲜到深层，另一条承载快速演化的高层特征</text>
+  <text x="606" y="712" fill="#8a93a6" font-size="10.5">• 代价 ≈ +0.03% 参数 + HC 倍层间激活；attn/MLP FLOPs 不变</text>
+  <text x="606" y="730" fill="#8a93a6" font-size="10.5">• 残差是其特例(HC=1)；实测收敛快 ~1.8×、更稳</text>
+
+  <defs>
+    <marker id="g" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 z" fill="#6b7688"/></marker>
+    <marker id="gm" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 z" fill="#a07ad0"/></marker>
+    <marker id="gc" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 z" fill="#5fa85f"/></marker>
+    <marker id="gw" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0 0 L5 2.5 L0 5 z" fill="#d98ad9"/></marker>
+  </defs>
+</svg>

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="620" viewBox="0 0 1140 620" font-family="Menlo,Consolas,monospace">
+  <rect width="1140" height="620" fill="#0f1117"/>
+  <text x="570" y="32" fill="#e6e6e6" font-size="20" text-anchor="middle" font-weight="bold">dashscope-api · 6 阶段 Handler Pipeline (Reactor)</text>
+  <text x="570" y="54" fill="#8a93a6" font-size="12" text-anchor="middle">每请求一条流水线, 共享 RequestContext; 第 2/5/6 阶段用 switchOnFirst 只对首帧执行路由与限流</text>
+
+  <!-- vertical stages -->
+  <g font-size="11.5">
+    <!-- stage 1 -->
+    <rect x="40" y="80" width="1060" height="60" rx="6" fill="#141a24" stroke="#4a90d9"/>
+    <text x="60" y="104" fill="#7fb0e6" font-size="13" font-weight="bold">① Pre-Request（每帧）</text>
+    <text x="60" y="126" fill="#b8c2d6">HeadErrorHandler · RequestMeterHandler</text>
+
+    <!-- stage 2 -->
+    <rect x="40" y="150" width="1060" height="150" rx="6" fill="#1f1526" stroke="#a05a9a" stroke-width="2"/>
+    <text x="60" y="174" fill="#e6b8e0" font-size="13" font-weight="bold">② First-Request（switchOnFirst, 仅首帧）— 限流 + 路由 + 负载均衡</text>
+    <g font-size="10.5">
+      <rect x="60" y="186" width="330" height="46" rx="4" fill="#2a1f2f" stroke="#c060c0"/>
+      <text x="225" y="204" fill="#f0cceb" text-anchor="middle" font-weight="bold">◆ 限流（准入）</text>
+      <text x="225" y="222" fill="#d9a7d2" text-anchor="middle">LocalRateLimit / UserLimit / IncreaseRateLimit</text>
+      <rect x="404" y="186" width="360" height="46" rx="4" fill="#211a2b" stroke="#8a6ac0"/>
+      <text x="584" y="204" fill="#cfc0e6" text-anchor="middle" font-weight="bold">路由</text>
+      <text x="584" y="222" fill="#b0a0d0" text-anchor="middle">Builtin/Scene/Virtual/Replicate Route + Forward</text>
+      <rect x="778" y="186" width="300" height="46" rx="4" fill="#2a1f2f" stroke="#c060c0"/>
+      <text x="928" y="204" fill="#f0cceb" text-anchor="middle" font-weight="bold">◆ PhysicalRoute + RequestLimit + Balance</text>
+      <text x="928" y="222" fill="#d9a7d2" text-anchor="middle">ClusterLimitService(Redis QPS) + RoundRobin</text>
+
+      <rect x="60" y="242" width="1018" height="46" rx="4" fill="#161022" stroke="#5a4a7a"/>
+      <text x="570" y="260" fill="#c0b0e0" text-anchor="middle">VirtualRoute: 8 Filter 依次收窄候选物理服务 → Selector(Groovy/内置) 选 1; 非本集群 → ctx.forward()</text>
+      <text x="570" y="278" fill="#9a8ac0" text-anchor="middle">ServiceRoute(Redis/File) + Nacos/PAI-EAS 发现 + ServerListCache(两级 Caffeine) → physicalServiceId → ip:port</text>
+    </g>
+
+    <!-- stage 3 -->
+    <rect x="40" y="310" width="1060" height="52" rx="6" fill="#141a24" stroke="#4a90d9"/>
+    <text x="60" y="332" fill="#7fb0e6" font-size="13" font-weight="bold">③ Post-Request</text>
+    <text x="60" y="352" fill="#b8c2d6">RequestHeaderRewrite · Replicate · RetryConfig · RequestDecrypt</text>
+
+    <!-- stage 4 -->
+    <rect x="40" y="372" width="1060" height="52" rx="6" fill="#14241a" stroke="#5fa85f"/>
+    <text x="60" y="394" fill="#8fd68f" font-size="13" font-weight="bold">④ Backend Invoke</text>
+    <text x="60" y="414" fill="#b8d6b8">BackendServiceSelector 按协议选实现: gRPC / HTTP(sse/raw/OpenAI) / WebSocket / batching / router / forward → 调后端(dashscope-serving)</text>
+
+    <!-- stage 5 -->
+    <rect x="40" y="434" width="1060" height="70" rx="6" fill="#141a24" stroke="#4a90d9"/>
+    <text x="60" y="456" fill="#7fb0e6" font-size="13" font-weight="bold">⑤ Pre-Response — 三级重试 + 超时 + 限流回收</text>
+    <text x="60" y="478" fill="#b8c2d6">ResponseCheck · PhysicalRetry(物理实例) → VirtualRetry(跨VS) → FallbackRetry · ResponseTimeout</text>
+    <text x="60" y="496" fill="#b8c2d6">UserLimitPost · IncreaseRateLimitPost（按结果回补/结算配额）</text>
+
+    <!-- stage 6 -->
+    <rect x="40" y="514" width="1060" height="70" rx="6" fill="#141a24" stroke="#4a90d9"/>
+    <text x="60" y="536" fill="#7fb0e6" font-size="13" font-weight="bold">⑥ Post-Response — 计量 / 日志 / 背压延迟</text>
+    <text x="60" y="558" fill="#b8c2d6">ResponseError · LocalRateLimitPost · BackoffDelay(增速限流退避) · ResponseMeter · RequestTrace/Log · CancelFlag</text>
+    <text x="60" y="576" fill="#8a93a6" font-size="10.5">◆ = 排队/限流点</text>
+  </g>
+
+  <!-- flow arrows on left -->
+  <g stroke="#4a90d9" stroke-width="2" fill="none" marker-end="url(#a)">
+    <path d="M28 110 L28 150"/><path d="M28 225 L28 310"/><path d="M28 336 L28 372"/>
+    <path d="M28 398 L28 434"/><path d="M28 469 L28 514"/>
+  </g>
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 z" fill="#4a90d9"/></marker>
+  </defs>
+</svg>

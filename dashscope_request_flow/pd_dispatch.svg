@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="880" viewBox="0 0 1200 880" font-family="Menlo,Consolas,monospace">
+  <rect width="1200" height="880" fill="#0f1117"/>
+  <text x="600" y="32" fill="#e6e6e6" font-size="21" text-anchor="middle" font-weight="bold">PD 分离：请求如何分发到 Prefill 节点与 Decode 节点</text>
+  <text x="600" y="54" fill="#8a93a6" font-size="12.5" text-anchor="middle">默认「Prefill 驱动」模式：网关只把请求发给 P；P 本地 prefill 后主动叫 D，D 从 P 拉 KV 后 decode，P 汇流回传</text>
+
+  <!-- legend -->
+  <rect x="820" y="70" width="360" height="70" rx="6" fill="#12161e" stroke="#333b4d"/>
+  <line x1="834" y1="88" x2="864" y2="88" stroke="#6b7688" stroke-width="2.4" marker-end="url(#lg)"/><text x="872" y="92" fill="#9fb0c6" font-size="10">请求/路由</text>
+  <line x1="834" y1="108" x2="864" y2="108" stroke="#c060c0" stroke-width="2.4" marker-end="url(#lp)"/><text x="872" y="112" fill="#d9a7d2" font-size="10">控制 RPC (StreamInfer + 握手)</text>
+  <line x1="990" y1="108" x2="1020" y2="108" stroke="#d9a94a" stroke-width="2.4" marker-end="url(#lk)"/><text x="1028" y="112" fill="#e0c68f" font-size="10">KV 传输</text>
+  <line x1="834" y1="128" x2="864" y2="128" stroke="#5fa85f" stroke-width="2.4" marker-end="url(#lt)"/><text x="872" y="132" fill="#a9d6a9" font-size="10">token 流(回传)</text>
+
+  <!-- Client -->
+  <rect x="40" y="80" width="150" height="44" rx="6" fill="#22262e" stroke="#6b7688"/>
+  <text x="115" y="107" fill="#e6e6e6" font-size="12" text-anchor="middle">Client</text>
+
+  <!-- Gateway -->
+  <rect x="40" y="160" width="720" height="86" rx="10" fill="#101826" stroke="#3f6ea5"/>
+  <text x="58" y="182" fill="#7fb0e6" font-size="13" font-weight="bold">① dashscope-platform 网关 + 全局批调度</text>
+  <rect x="58" y="192" width="330" height="42" rx="5" fill="#0d1a2a" stroke="#33587f"/>
+  <text x="223" y="210" fill="#cfd8e6" font-size="10.5" text-anchor="middle">VirtualRoute → 选中 Prefill vService</text>
+  <text x="223" y="226" fill="#9fb0c6" font-size="9.5" text-anchor="middle">(P 与 D 是两个不同的物理服务)</text>
+  <rect x="400" y="192" width="344" height="42" rx="5" fill="#2a1f3a" stroke="#8a6ac0"/>
+  <text x="572" y="210" fill="#e6d6f5" font-size="10.5" text-anchor="middle">PdPrefillScheduler：准入到 P 引擎</text>
+  <text x="572" y="226" fill="#c0a7d9" font-size="9.5" text-anchor="middle">P 经响应流回吐 capacity_len1/len2 反馈容量</text>
+  <path d="M115 124 L115 160" stroke="#6b7688" stroke-width="2" marker-end="url(#lg)"/>
+  <text x="128" y="146" fill="#8a93a6" font-size="9.5">chat 请求(prompt_token_ids)</text>
+
+  <!-- route to Prefill -->
+  <path d="M223 246 L223 300" stroke="#6b7688" stroke-width="2.2" marker-end="url(#lg)"/>
+  <text x="238" y="286" fill="#8a93a6" font-size="9.5">只发给 P</text>
+
+  <!-- ===== Prefill Node ===== -->
+  <rect x="40" y="304" width="520" height="360" rx="12" fill="#0d1522" stroke="#5fa85f" stroke-width="1.6"/>
+  <text x="60" y="328" fill="#8fd68f" font-size="14" font-weight="bold">② Prefill 节点 (P)  · vLLM kv_producer</text>
+  <text x="60" y="346" fill="#8a93a6" font-size="10">serving → dashllm _LLMBackend4DisaggregatedPrefilling → vLLM</text>
+
+  <rect x="60" y="360" width="220" height="70" rx="6" fill="#14241a" stroke="#5fa85f"/>
+  <text x="170" y="382" fill="#cfe6cf" font-size="11" text-anchor="middle" font-weight="bold">_call_prefill()</text>
+  <text x="170" y="400" fill="#8fbf8f" font-size="9.5" text-anchor="middle">本地 vLLM 跑 prefill</text>
+  <text x="170" y="416" fill="#8fbf8f" font-size="9.5" text-anchor="middle">产出 KV + 首 token</text>
+
+  <rect x="300" y="360" width="240" height="70" rx="6" fill="#241c10" stroke="#d9a94a"/>
+  <text x="420" y="382" fill="#f0c878" font-size="11" text-anchor="middle" font-weight="bold">KV 写入本地 vineyard(v6d)</text>
+  <text x="420" y="400" fill="#d9b87f" font-size="9.5" text-anchor="middle">build_disaggregated_context</text>
+  <text x="420" y="416" fill="#d9b87f" font-size="9.5" text-anchor="middle">暴露 prefill_ip : v6d_port</text>
+  <path d="M280 395 L298 395" stroke="#6b7688" stroke-width="1.6" marker-end="url(#lg)"/>
+
+  <rect x="60" y="450" width="480" height="70" rx="6" fill="#1f1526" stroke="#8a6ac0"/>
+  <text x="300" y="472" fill="#e6d6f5" font-size="11" text-anchor="middle" font-weight="bold">_call_decode()：StreamInfer RPC → Decode 节点</text>
+  <text x="300" y="490" fill="#c0a7d9" font-size="9.5" text-anchor="middle">握手带: disaggregated_prefill_ip / v6d_port · disaggregated_request_id</text>
+  <text x="300" y="506" fill="#c0a7d9" font-size="9.5" text-anchor="middle">· bootstrap_room · service_id(decode)  ← _resolve_pd_decode_service_id</text>
+
+  <rect x="60" y="540" width="480" height="100" rx="6" fill="#14201a" stroke="#5fa85f"/>
+  <text x="300" y="562" fill="#cfe6cf" font-size="11" text-anchor="middle" font-weight="bold">汇流 &amp; 回传 (dashllm generate 在 P 上)</text>
+  <text x="300" y="582" fill="#a9d6a9" font-size="9.5" text-anchor="middle">yield P 的首 token  +  转发 D 回来的 decode token 流</text>
+  <text x="300" y="600" fill="#a9d6a9" font-size="9.5" text-anchor="middle">→ serving → 网关 → Client（对客户端透明，像一个服务）</text>
+  <text x="300" y="620" fill="#8a93a6" font-size="9" text-anchor="middle">取消时 P abort 本地 prefill + 调用 decode abort (_decode_abort)</text>
+
+  <!-- ===== Decode Node ===== -->
+  <rect x="660" y="304" width="500" height="360" rx="12" fill="#0d1522" stroke="#d95f5f" stroke-width="1.6"/>
+  <text x="680" y="328" fill="#f09a9a" font-size="14" font-weight="bold">③ Decode 节点 (D)  · vLLM kv_consumer</text>
+  <text x="680" y="346" fill="#8a93a6" font-size="10">另一物理服务(service_id)，独立 vLLM 实例</text>
+
+  <rect x="680" y="360" width="460" height="76" rx="6" fill="#241c10" stroke="#d9a94a"/>
+  <text x="910" y="382" fill="#f0c878" font-size="11" text-anchor="middle" font-weight="bold">从 P 拉取 KV cache</text>
+  <text x="910" y="400" fill="#d9b87f" font-size="9.5" text-anchor="middle">按握手里的 prefill_ip:v6d_port 连回 P 的 vineyard / KVConnector</text>
+  <text x="910" y="416" fill="#d9b87f" font-size="9.5" text-anchor="middle">(vineyard v6d / mooncake / KVT，走 RDMA)</text>
+
+  <rect x="680" y="446" width="460" height="64" rx="6" fill="#2a1414" stroke="#d95f5f"/>
+  <text x="910" y="468" fill="#ffd0d0" font-size="11" text-anchor="middle" font-weight="bold">vLLM 调度: WAITING_FOR_REMOTE_KVS</text>
+  <text x="910" y="486" fill="#e0a0a0" font-size="9.5" text-anchor="middle">请求挂起在 waiting，直到 KV 到齐才进 running</text>
+  <text x="910" y="500" fill="#e0a0a0" font-size="9.5" text-anchor="middle">(scheduler.py:828)</text>
+
+  <rect x="680" y="520" width="460" height="70" rx="6" fill="#14201a" stroke="#5fa85f"/>
+  <text x="910" y="542" fill="#cfe6cf" font-size="11" text-anchor="middle" font-weight="bold">decode 逐 token 生成</text>
+  <text x="910" y="560" fill="#a9d6a9" font-size="9.5" text-anchor="middle">沿 StreamInfer 响应流把 token 增量回传给 P</text>
+  <text x="910" y="578" fill="#a9d6a9" font-size="9.5" text-anchor="middle">(incremental_output=1)</text>
+
+  <!-- P->D control -->
+  <path d="M540 485 L658 420" stroke="#c060c0" stroke-width="2.4" fill="none" marker-end="url(#lp)"/>
+  <text x="600" y="446" fill="#d9a7d2" font-size="9" text-anchor="middle" transform="rotate(-28 600 446)">StreamInfer</text>
+  <!-- KV pull D<-P (data flows P->D, initiated by D) -->
+  <path d="M678 398 C 600 398, 590 400, 542 400" stroke="#d9a94a" stroke-width="2.4" fill="none" marker-end="url(#lk)" stroke-dasharray="1 0"/>
+  <text x="610" y="392" fill="#e0c68f" font-size="9" text-anchor="middle">KV: D 拉 ← P</text>
+  <!-- D->P token stream -->
+  <path d="M700 590 C 640 660, 360 640, 300 642" stroke="#5fa85f" stroke-width="2.2" fill="none" marker-end="url(#lt)"/>
+  <text x="500" y="672" fill="#a9d6a9" font-size="9.5" text-anchor="middle">decode token 流 → 回到 P 汇流</text>
+
+  <!-- P -> up back to gateway/client -->
+  <path d="M120 540 C 90 440, 90 300, 100 248" stroke="#5fa85f" stroke-width="2.2" fill="none" marker-end="url(#lt)"/>
+  <text x="70" y="400" fill="#a9d6a9" font-size="9.5" text-anchor="middle" transform="rotate(-90 70 400)">合并流 → 网关 → Client</text>
+
+  <!-- two dispatch logics -->
+  <rect x="40" y="686" width="560" height="158" rx="10" fill="#141018" stroke="#5a4a6a"/>
+  <text x="58" y="708" fill="#c0a0e6" font-size="12.5" font-weight="bold">两套 P→D 分发逻辑（谁把请求接力到 D）</text>
+  <text x="58" y="730" fill="#e0b8f0" font-size="10.5" font-weight="bold">A. OLD PD · Python（默认 env=0，上图实线路径）</text>
+  <text x="58" y="748" fill="#b0a0c8" font-size="9.8">P 的 dashllm 主动 _call_decode → DashClient StreamInfer 叫</text>
+  <text x="58" y="763" fill="#b0a0c8" font-size="9.8">固定 decode_node；P 汇流。静态 P↔D 配对。</text>
+  <text x="58" y="784" fill="#e0b8f0" font-size="10.5" font-weight="bold">B. NEW PD · Rust（DS_LLM_PD_EXTERNAL_ROUTER=1）</text>
+  <text x="58" y="802" fill="#b0a0c8" font-size="9.8">P 只发 Pkg⓪/①/② 握手；serving 侧 Rust LLMClientV1</text>
+  <text x="58" y="817" fill="#b0a0c8" font-size="9.8">按 decode_service_id 动态选 D（vService 选择 + 资源池亲和）。</text>
+  <text x="58" y="835" fill="#8a93a6" font-size="9">decode_service_id 优先级 = prefill 强制 env > 实例 decode_node > client 传入。</text>
+
+  <!-- text vs multimodal -->
+  <rect x="616" y="686" width="544" height="158" rx="10" fill="#101618" stroke="#4a5a6a"/>
+  <text x="634" y="708" fill="#8fd0e0" font-size="12.5" font-weight="bold">文本 vs 多模态 的差异</text>
+  <text x="634" y="730" fill="#b8d0d8" font-size="10.5" font-weight="bold">文本模型：走 B（Rust NEW PD）为主</text>
+  <text x="634" y="748" fill="#a0c0c8" font-size="9.8">gpt3_serving 默认客户端 = dashserving.LLMClientV1(Rust)；</text>
+  <text x="634" y="763" fill="#a0c0c8" font-size="9.8">弹性 P/D 池 + 调度器 + 池亲和，只有 P、D 两段。</text>
+  <text x="634" y="784" fill="#b8d0d8" font-size="10.5" font-weight="bold">多模态/Omni：走 A（Python）+ 额外编码器分离</text>
+  <text x="634" y="802" fill="#a0c0c8" font-size="9.8">multimodal_serving 用 DashClient/进程内 dashllm(非 Rust)；</text>
+  <text x="634" y="817" fill="#a0c0c8" font-size="9.8">VL 多一段 ViT 分离(_disaggregated_vit → E-P-D)；</text>
+  <text x="634" y="832" fill="#a0c0c8" font-size="9.8">Omni 有 thinker/talker + vineyard 语音克隆(xvector)特判。</text>
+
+  <defs>
+    <marker id="lg" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 z" fill="#6b7688"/></marker>
+    <marker id="lp" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 z" fill="#c060c0"/></marker>
+    <marker id="lk" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 z" fill="#d9a94a"/></marker>
+    <marker id="lt" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 z" fill="#5fa85f"/></marker>
+  </defs>
+</svg>
