@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络 承接 RDMA学习笔记（1） 。这一篇聚焦 数据中心网络的层次结构 （ASW&amp;#x2F;PSW&amp;#x2F;DSW&amp;#x2F;DCC…），以及 RoCE 在以太网上跑 RDMA 时的 PFC &amp;#x2F; 拥塞 &amp;#x2F; N 倍重传 问题，最后落到对 PD 分离 跨机房传输的启示。 数据中心网络的层次（Spine-Leaf &amp;#x2F; CLOS） 现代大规模数据中心普遍用 CLOS &amp;#x2F; S"><meta property="og:type" content="blog"><meta property="og:title" content="RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/17/2026-07-17-rdma-learning-2/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络 承接 RDMA学习笔记（1） 。这一篇聚焦 数据中心网络的层次结构 （ASW&amp;#x2F;PSW&amp;#x2F;DSW&amp;#x2F;DCC…），以及 RoCE 在以太网上跑 RDMA 时的 PFC &amp;#x2F; 拥塞 &amp;#x2F; N 倍重传 问题，最后落到对 PD 分离 跨机房传输的启示。 数据中心网络的层次（Spine-Leaf &amp;#x2F; CLOS） 现代大规模数据中心普遍用 CLOS &amp;#x2F; S"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/pd_rdma_network_topology.svg"><meta property="article:published_time" content="2026-07-17T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-17T05:55:26.933Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/pd_rdma_network_topology.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/17/2026-07-17-rdma-learning-2/"},"headline":"RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络","image":[],"datePublished":"2026-07-17T00:00:00.000Z","dateModified":"2026-07-17T05:55:26.933Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络 承接 RDMA学习笔记（1） 。这一篇聚焦 数据中心网络的层次结构 （ASW&#x2F;PSW&#x2F;DSW&#x2F;DCC…），以及 RoCE 在以太网上跑 RDMA 时的 PFC &#x2F; 拥塞 &#x2F; N 倍重传 问题，最后落到对 PD 分离 跨机房传输的启示。 数据中心网络的层次（Spine-Leaf &#x2F; CLOS） 现代大规模数据中心普遍用 CLOS &#x2F; S"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/17/2026-07-17-rdma-learning-2/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-17T00:00:00.000Z" title="7/17/2026, 12:00:00 AM">2026-07-17</time>发表</span><span class="level-item"><time dateTime="2026-07-17T05:55:26.933Z" title="7/17/2026, 5:55:26 AM">2026-07-17</time>更新</span><span class="level-item">15 分钟读完 (大约2283个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络</h1><div class="content"><h1 id="RDMA学习笔记（2）：数据中心网络拓扑与-RoCE-无损网络"><a href="#RDMA学习笔记（2）：数据中心网络拓扑与-RoCE-无损网络" class="headerlink" title="RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络"></a>RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络</h1><p>承接 <a href="rdma_learning_1.md">RDMA学习笔记（1）</a>。这一篇聚焦<strong>数据中心网络的层次结构</strong>（ASW/PSW/DSW/DCC…），以及 RoCE 在以太网上跑 RDMA 时的 <strong>PFC / 拥塞 / N 倍重传</strong> 问题，最后落到对 <strong>PD 分离</strong>跨机房传输的启示。</p>
+<h2 id="数据中心网络的层次（Spine-Leaf-CLOS）"><a href="#数据中心网络的层次（Spine-Leaf-CLOS）" class="headerlink" title="数据中心网络的层次（Spine-Leaf / CLOS）"></a>数据中心网络的层次（Spine-Leaf / CLOS）</h2><p>现代大规模数据中心普遍用 <strong>CLOS / Spine-Leaf（叶脊）</strong> 架构，层层收敛。从服务器往上依次是：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line">骨干网 / 专网 (DCI, 跨机房)</span><br><span class="line">     │</span><br><span class="line">┌────┴────┐</span><br><span class="line">│   DCC   │  DCI 网关 / DC 出口（无损域 ↔ 骨干的边界）</span><br><span class="line">└────┬────┘</span><br><span class="line">┌────┴────┐</span><br><span class="line">│   DSW   │  DC Spine（数据中心核心，跨 POD 汇聚）</span><br><span class="line">└────┬────┘</span><br><span class="line">┌────┴────┐</span><br><span class="line">│   PSW   │  Pod Spine（POD 内脊交换机）</span><br><span class="line">└────┬────┘</span><br><span class="line">┌────┴────┐</span><br><span class="line">│   ASW   │  Access Switch / ToR（机架顶，直连服务器）</span><br><span class="line">└────┬────┘</span><br><span class="line">┌────┴────┐</span><br><span class="line">│ 服务器   │  GPU / PPU 节点</span><br><span class="line">└─────────┘</span><br></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>节点</th>
+<th>全称 / 角色</th>
+<th>层次</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>SERVER</strong></td>
+<td>GPU/PPU 服务器</td>
+<td>端</td>
+<td>P 节点或 D 节点，流量的起点/终点</td>
+</tr>
+<tr>
+<td><strong>ASW</strong></td>
+<td>Access Switch (ToR)</td>
+<td>接入层</td>
+<td>机架顶，服务器网卡直连。通常双上联做冗余</td>
+</tr>
+<tr>
+<td><strong>PSW</strong></td>
+<td>Pod Spine</td>
+<td>POD 脊</td>
+<td>一个 POD 内的脊交换机，汇聚该 POD 所有 ASW</td>
+</tr>
+<tr>
+<td><strong>DSW</strong></td>
+<td>DC Spine</td>
+<td>机房核心</td>
+<td>跨 POD 汇聚，数据中心级核心层</td>
+</tr>
+<tr>
+<td><strong>DCC</strong></td>
+<td>DCI 网关 / DC 出口</td>
+<td>出口边界</td>
+<td>机房内<strong>无损域</strong>与外部网络的边界</td>
+</tr>
+<tr>
+<td><strong>ESR</strong></td>
+<td>Edge Service Router</td>
+<td>边缘</td>
+<td>出口业务路由，对接专网</td>
+</tr>
+<tr>
+<td><strong>EAR</strong></td>
+<td>Edge Access Router</td>
+<td>骨干接入</td>
+<td>真正进入骨干/专网的接入点</td>
+</tr>
+</tbody></table>
+<p>跨机房的两台服务器，端到端完整路径为：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">SERVER ─ ASW ─ PSW ─ DSW ─ DCC ─ ESR ─ EAR ═══ EAR ─ ESR ─ DCC ─ DSW ─ PSW ─ ASW ─ SERVER</span><br><span class="line">└──────────── 数据中心 A ────────────┘   骨干   └──────────── 数据中心 B ────────────┘</span><br><span class="line">                                        (专网)</span><br></pre></td></tr></table></figure>
+
+<h2 id="东西向-vs-南北向流量"><a href="#东西向-vs-南北向流量" class="headerlink" title="东西向 vs 南北向流量"></a>东西向 vs 南北向流量</h2><ul>
+<li><strong>东西向流量</strong>：服务器↔服务器（AllReduce、KV Cache 传输），走 ASW→PSW→DSW，<strong>是 AI 训练/推理的大头</strong>。</li>
+<li><strong>南北向流量</strong>：进出数据中心的流量（用户请求、跨机房），走 DSW→DCC→骨干网。</li>
+</ul>
+<p>在拓扑可视化图里（全互联 CLOS），会看到一个重要现象：<strong>机房内部是”胖”的，骨干是”瘦”的</strong>。</p>
+<ul>
+<li>ASW→PSW→DSW→DCC 之间是<strong>密密麻麻的全互联</strong>（每个下层节点连到上层的每一个节点）——这是 CLOS 的<strong>多路径（ECMP）</strong>，提供巨大的等价带宽（几十上百条 400G 并行），任何单链路/单交换机故障都能自动绕行，<strong>无损域内几乎无单点瓶颈</strong>。</li>
+<li>到了 <code>ESR–EAR ═══ EAR–ESR</code> 骨干段，连线<strong>收敛成一条细线</strong>：<strong>机房内是海量并行的胖管道，跨机房骨干是少数几条链路的细管道。</strong></li>
+</ul>
+<h2 id="RoCE-PFC-拥塞与-N-倍重传"><a href="#RoCE-PFC-拥塞与-N-倍重传" class="headerlink" title="RoCE / PFC / 拥塞与 N 倍重传"></a>RoCE / PFC / 拥塞与 N 倍重传</h2><h3 id="RoCE-RDMA-over-Converged-Ethernet"><a href="#RoCE-RDMA-over-Converged-Ethernet" class="headerlink" title="RoCE (RDMA over Converged Ethernet)"></a>RoCE (RDMA over Converged Ethernet)</h3><ul>
+<li><strong>RDMA</strong> 绕过 CPU 和内核协议栈，网卡直接读写对端内存，做到超低延迟、超高吞吐、零拷贝。是 GPU 训练/PD 分离 KV 传输的基础。</li>
+<li>RDMA 最早跑在 InfiniBand 上。<strong>RoCE 让 RDMA 跑在以太网上</strong>（RoCEv2 用 UDP 封装，可路由）。好处是复用以太网生态，坏处是——<strong>以太网天生会丢包，而 RDMA 极度不耐丢包</strong>。</li>
+</ul>
+<h3 id="为什么-RDMA-怕丢包"><a href="#为什么-RDMA-怕丢包" class="headerlink" title="为什么 RDMA 怕丢包"></a>为什么 RDMA 怕丢包</h3><p>传统 TCP 丢一个包只重传那一个（选择性重传）且有成熟拥塞控制。而经典 RoCE 的传输是 <strong>go-back-N</strong> 语义：</p>
+<ul>
+<li>丢了第 N 个包，接收端后面的包<strong>全部丢弃</strong>，发送端要<strong>从第 N 个开始全部重传</strong>。</li>
+<li>这就是 **”N 倍重传”**——一次丢包可能触发一大段数据重发，吞吐断崖式下跌，尾延迟爆炸。</li>
+</ul>
+<p>所以 RoCE 要求底层网络<strong>尽量不丢包</strong>，这引出 PFC。</p>
+<h3 id="PFC-Priority-Flow-Control"><a href="#PFC-Priority-Flow-Control" class="headerlink" title="PFC (Priority Flow Control)"></a>PFC (Priority Flow Control)</h3><ul>
+<li>标准以太网流控是<strong>整个端口</strong>级别的暂停；PFC 更细，按<strong>优先级队列（8 个）</strong> 单独暂停。</li>
+<li>机制：当交换机某队列缓冲快满（要溢出丢包了），向<strong>上游</strong>发 <strong>PAUSE 帧</strong>，上游暂停发送，等缓冲腾空再恢复。用”暂停”代替”丢包”，构建<strong>无损网络</strong>。</li>
+</ul>
+<p><strong>PFC 的副作用：</strong></p>
+<ol>
+<li><strong>队头阻塞（HoL blocking）</strong>：PAUSE 暂停整个优先级队列，不区分具体是哪条流拥塞，会误伤同队列的无辜流量。</li>
+<li><strong>PFC 风暴 / 死锁</strong>：PAUSE 逐跳向上游传播，环形依赖下可能形成<strong>死锁</strong>，整片网络卡死。</li>
+<li>生产上通常配合 <strong>ECN + DCQCN</strong>：ECN 在拥塞<strong>早期</strong>就给包打标记（而非等到要丢包才 PAUSE），发送端收到标记后主动降速，把 PFC 当最后一道防线。</li>
+</ol>
+<h2 id="骨干网为什么会-N-倍重传"><a href="#骨干网为什么会-N-倍重传" class="headerlink" title="骨干网为什么会 N 倍重传"></a>骨干网为什么会 N 倍重传</h2><p><strong>数据中心内部（ASW/PSW/DSW）</strong> 是<strong>为 RDMA 精心设计的无损域</strong>：全程 PFC/ECN，交换机 buffer / 队列 / DCQCN 参数都按 RoCE 调优；链路短、跳数少、RTT 微秒级，拥塞能被快速反馈压下去，丢包率极低。</p>
+<p><strong>但”骨干网 / 新建专网”（DCC 以上）</strong> 是另一回事：</p>
+<ul>
+<li>设计初衷是承接<strong>南北向、TCP 为主</strong>的流量，拥塞管理假设是”TCP 自己会退让、丢包可接受”；</li>
+<li><strong>通常不保证端到端无损</strong>——中间设备可能不开 PFC，或跨厂商/跨自治域导致参数不一致、PFC 无法端到端传播；</li>
+<li><strong>长距离 + 大 RTT 是致命的</strong>：PFC/ECN 的反馈是闭环的，从检测拥塞到发送端降速要经历至少一个 RTT。RTT 越大反馈越慢，拥塞被压下去之前已积累了一个 <strong>BDP（带宽时延积）</strong> 量级的在途数据。<code>400G × 10ms 的 BDP ≈ 500MB</code>，一旦这堆数据撞上拥塞点又无法无损缓冲，就<strong>大规模丢包</strong>。</li>
+<li>丢包 → 触发 RoCE 的 <strong>go-back-N 重传</strong> → <strong>N 倍重传</strong> → 吞吐塌陷、尾延迟飙升。</li>
+</ul>
+<blockquote>
+<p><strong>结论</strong>：RDMA 的无损假设只在”精心调过的数据中心内部”成立；一旦打到”没为 RDMA 设计的骨干/专网”上，大 RTT 让拥塞反馈失效、跨域让 PFC 断链，拥塞就会变成真丢包，而 RoCE 的 go-back-N 让代价成 N 倍。</p>
+</blockquote>
+<h2 id="对-PD-分离的启示"><a href="#对-PD-分离的启示" class="headerlink" title="对 PD 分离的启示"></a>对 PD 分离的启示</h2><p><img src="/notes/imgs/pd_rdma_network_topology.svg" alt="PD 分离 KV Cache 传输：无损域 vs 骨干重传风险"></p>
+<ul>
+<li><strong>同 POD / 同机房内做 PD 分离</strong>：P↔D 只过 ASW/PSW，全程无损 RDMA，RTT μs 级，<strong>又快又稳</strong>。</li>
+<li><strong>跨机房做 PD 分离（P/D 分处不同机房）</strong>：KV Cache 必须穿过中间那条又细又不无损的骨干线——既有 ~10ms 的物理延迟下限（光在光纤约 5μs/km，1000km 往返 ~10ms，<strong>再优化也降不下去</strong>），又要在非无损骨干上跑 RDMA，极易踩到重传塌陷。<strong>高风险。</strong></li>
+</ul>
+<p><strong>实践建议：</strong></p>
+<ul>
+<li><strong>在线 KV Cache 走同 POD/同机房无损域</strong>；</li>
+<li>跨机房只做<strong>异步、可容忍丢包的</strong>数据搬运（如 Prefix Cache 预取，用 TCP 或带应用层重传的协议），而不是把在线 KV 传输直接压到骨干 RDMA 上；</li>
+<li>这也解释了为什么会有<strong>选择性重传的 RoCE 改进（SRD、IRN）</strong> 这类工作——让 RDMA 传输本身容忍乱序/丢包，摆脱 go-back-N 的 N 倍放大。</li>
+</ul>
+<h2 id="附：实验网环境要点"><a href="#附：实验网环境要点" class="headerlink" title="附：实验网环境要点"></a>附：实验网环境要点</h2><p>在跨三地（乌兰 NA130 / NO225、北京 NG152）的 AI 实验网中：</p>
+<ul>
+<li>乌兰内部两个 POD 之间：<code>25KM : 0.25ms</code></li>
+<li>乌兰 ↔ 北京跨城：<code>1000KM : 10ms</code>（RTT 物理下限，决定跨城 RDMA 的 RTT）</li>
+<li>链路：<code>2*400G</code> / <code>4*400G</code>（400G 光口做链路聚合）</li>
+<li>设备跨厂商混布：H3C Q4D、锐捷 Q3D/Q4D、自研 P200 等，EAR 扮演出口路由角色</li>
+</ul>
+<p>跨城 PD 分离的两个硬约束叠加——<strong>10ms 物理延迟</strong> + <strong>非无损骨干的重传风险</strong>——是决定”KV Cache 该不该跨机房传”的关键。</p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络</p><p><a href="https://llx-08.github.io/notes/2026/07/17/2026-07-17-rdma-learning-2/">https://llx-08.github.io/notes/2026/07/17/2026-07-17-rdma-learning-2/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-17</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-17</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/17/2026-07-17-blade-kvt-tcp-retransmission-investigation-20260716/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">Blade-KVT / Barex TCP 重传与传输长尾排查记录</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/06/23/2026-06-23-glm5.2%E4%B8%8Eindexshare/"><span class="level-item">GLM5.2与Indexshare</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">28</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">4</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-17T00:00:00.000Z">2026-07-17</time></p><p class="title"><a href="/notes/2026/07/17/2026-07-17-blade-kvt-tcp-retransmission-investigation-20260716/">Blade-KVT / Barex TCP 重传与传输长尾排查记录</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-17T00:00:00.000Z">2026-07-17</time></p><p class="title"><a href="/notes/2026/07/17/2026-07-17-rdma-learning-2/">RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-23T00:00:00.000Z">2026-06-23</time></p><p class="title"><a href="/notes/2026/06/23/2026-06-23-glm5.2%E4%B8%8Eindexshare/">GLM5.2与Indexshare</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-17T00:00:00.000Z">2026-06-17</time></p><p class="title"><a href="/notes/2026/06/17/2026-06-17-step3-afd-system-design/">Step-3 技术报告阅读笔记：AFD 系统设计</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-06-17T00:00:00.000Z">2026-06-17</time></p><p class="title"><a href="/notes/2026/06/17/2026-06-17-vllm-cross-node-expert-parallelism/">vLLM 跨机 Expert Parallelism (EP) 深度解析</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
