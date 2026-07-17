@@ -1,0 +1,196 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 940" font-family="Arial, 'PingFang SC', sans-serif">
+  <defs>
+    <marker id="aGreen" markerWidth="11" markerHeight="8" refX="9" refY="4" orient="auto">
+      <polygon points="0 0, 11 4, 0 8" fill="#16a34a"/>
+    </marker>
+    <marker id="aGreenR" markerWidth="11" markerHeight="8" refX="2" refY="4" orient="auto">
+      <polygon points="11 0, 0 4, 11 8" fill="#16a34a"/>
+    </marker>
+    <marker id="aRed" markerWidth="11" markerHeight="8" refX="9" refY="4" orient="auto">
+      <polygon points="0 0, 11 4, 0 8" fill="#dc2626"/>
+    </marker>
+    <marker id="aRedR" markerWidth="11" markerHeight="8" refX="2" refY="4" orient="auto">
+      <polygon points="11 0, 0 4, 11 8" fill="#dc2626"/>
+    </marker>
+    <marker id="aGray" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+    </marker>
+    <filter id="sh" x="-6%" y="-6%" width="112%" height="118%">
+      <feDropShadow dx="1.5" dy="2.5" stdDeviation="2.5" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="940" fill="#f8fafc" rx="12"/>
+
+  <!-- Title -->
+  <text x="640" y="40" text-anchor="middle" font-size="22" font-weight="bold" fill="#1e293b">PD 分离 KV Cache 传输：无损 RDMA 域 vs 骨干网重传风险</text>
+  <text x="640" y="66" text-anchor="middle" font-size="13" fill="#64748b">绿色 = 精调的无损 RDMA 域（PFC/ECN，RTT μs 级，安全）；红色 = 非无损骨干网（大 RTT，go-back-N 重传风险）</text>
+
+  <!-- ============ Backbone Zone (RISK) ============ -->
+  <rect x="330" y="95" width="620" height="90" rx="14" fill="#fef2f2" stroke="#dc2626" stroke-width="2.5" stroke-dasharray="10,5" filter="url(#sh)"/>
+  <text x="640" y="123" text-anchor="middle" font-size="16" font-weight="bold" fill="#b91c1c">骨干网 / 新建专网（非无损域）</text>
+  <text x="640" y="145" text-anchor="middle" font-size="12" fill="#dc2626">为南北向 TCP 设计 · 不保证端到端无损 · 跨域 PFC 断链</text>
+  <text x="640" y="165" text-anchor="middle" font-size="12" font-weight="bold" fill="#dc2626">RTT ~10ms（1000KM）· BDP≈500MB@400G · 丢包→go-back-N→N 倍重传</text>
+
+  <!-- ============ DC A (乌兰) ============ -->
+  <rect x="60" y="230" width="520" height="620" rx="16" fill="#f0fdf4" stroke="#16a34a" stroke-width="2" filter="url(#sh)"/>
+  <text x="320" y="260" text-anchor="middle" font-size="17" font-weight="bold" fill="#166534">数据中心 A（乌兰）</text>
+  <!-- lossless domain badge -->
+  <rect x="360" y="272" width="200" height="26" rx="13" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/>
+  <text x="460" y="290" text-anchor="middle" font-size="11" font-weight="bold" fill="#15803d">无损 RDMA 域 · PFC/ECN/DCQCN</text>
+
+  <!-- DCC A -->
+  <rect x="215" y="315" width="210" height="46" rx="9" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="320" y="335" text-anchor="middle" font-size="13" font-weight="bold" fill="#b91c1c">DCC（DCI 网关 / 出口）</text>
+  <text x="320" y="352" text-anchor="middle" font-size="10" fill="#dc2626">机房内无损域 ↔ 骨干网 的边界</text>
+
+  <!-- DSW A -->
+  <rect x="215" y="390" width="210" height="44" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="320" y="410" text-anchor="middle" font-size="13" font-weight="bold" fill="#166534">DSW（DC Spine 核心）</text>
+  <text x="320" y="426" text-anchor="middle" font-size="10" fill="#15803d">跨 POD 汇聚</text>
+
+  <!-- PSW A (two pods) -->
+  <rect x="90" y="465" width="200" height="44" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="190" y="485" text-anchor="middle" font-size="12" font-weight="bold" fill="#166534">PSW（POD-1 Spine）</text>
+  <text x="190" y="500" text-anchor="middle" font-size="10" fill="#15803d">POD 内脊交换</text>
+  <rect x="350" y="465" width="200" height="44" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="450" y="485" text-anchor="middle" font-size="12" font-weight="bold" fill="#166534">PSW（POD-2 Spine）</text>
+  <text x="450" y="500" text-anchor="middle" font-size="10" fill="#15803d">POD 内脊交换</text>
+
+  <!-- ASW A -->
+  <rect x="90" y="540" width="200" height="40" rx="9" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="190" y="558" text-anchor="middle" font-size="12" font-weight="bold" fill="#4338ca">ASW / ToR（机架顶）</text>
+  <text x="190" y="573" text-anchor="middle" font-size="10" fill="#6366f1">直连服务器</text>
+  <rect x="350" y="540" width="200" height="40" rx="9" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="450" y="558" text-anchor="middle" font-size="12" font-weight="bold" fill="#4338ca">ASW / ToR（机架顶）</text>
+  <text x="450" y="573" text-anchor="middle" font-size="10" fill="#6366f1">直连服务器</text>
+
+  <!-- Servers A -->
+  <rect x="95" y="610" width="90" height="70" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="140" y="635" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">P 节点</text>
+  <text x="140" y="653" text-anchor="middle" font-size="10" fill="#3b82f6">Prefill</text>
+  <text x="140" y="670" text-anchor="middle" font-size="9" fill="#3b82f6">GPU</text>
+  <rect x="195" y="610" width="90" height="70" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="240" y="635" text-anchor="middle" font-size="13" font-weight="bold" fill="#166534">D 节点</text>
+  <text x="240" y="653" text-anchor="middle" font-size="10" fill="#16a34a">Decode</text>
+  <text x="240" y="670" text-anchor="middle" font-size="9" fill="#16a34a">GPU</text>
+
+  <rect x="355" y="610" width="90" height="70" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="400" y="635" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">P 节点</text>
+  <text x="400" y="653" text-anchor="middle" font-size="10" fill="#3b82f6">Prefill</text>
+  <text x="400" y="670" text-anchor="middle" font-size="9" fill="#3b82f6">GPU</text>
+  <rect x="455" y="610" width="90" height="70" rx="9" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="500" y="640" text-anchor="middle" font-size="11" fill="#64748b">其它</text>
+  <text x="500" y="657" text-anchor="middle" font-size="11" fill="#64748b">GPU</text>
+
+  <!-- vertical links A (gray) -->
+  <line x1="320" y1="361" x2="320" y2="390" stroke="#64748b" stroke-width="2"/>
+  <line x1="320" y1="434" x2="190" y2="465" stroke="#64748b" stroke-width="2"/>
+  <line x1="320" y1="434" x2="450" y2="465" stroke="#64748b" stroke-width="2"/>
+  <line x1="190" y1="509" x2="190" y2="540" stroke="#64748b" stroke-width="2"/>
+  <line x1="450" y1="509" x2="450" y2="540" stroke="#64748b" stroke-width="2"/>
+  <line x1="150" y1="580" x2="140" y2="610" stroke="#64748b" stroke-width="1.5"/>
+  <line x1="230" y1="580" x2="240" y2="610" stroke="#64748b" stroke-width="1.5"/>
+  <line x1="410" y1="580" x2="400" y2="610" stroke="#64748b" stroke-width="1.5"/>
+  <line x1="490" y1="580" x2="500" y2="610" stroke="#64748b" stroke-width="1.5"/>
+
+  <!-- ============ DC B (北京) ============ -->
+  <rect x="700" y="230" width="520" height="620" rx="16" fill="#f0fdf4" stroke="#16a34a" stroke-width="2" filter="url(#sh)"/>
+  <text x="960" y="260" text-anchor="middle" font-size="17" font-weight="bold" fill="#166534">数据中心 B（北京）</text>
+  <rect x="1000" y="272" width="200" height="26" rx="13" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/>
+  <text x="1100" y="290" text-anchor="middle" font-size="11" font-weight="bold" fill="#15803d">无损 RDMA 域 · PFC/ECN/DCQCN</text>
+
+  <!-- DCC B -->
+  <rect x="855" y="315" width="210" height="46" rx="9" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="960" y="335" text-anchor="middle" font-size="13" font-weight="bold" fill="#b91c1c">DCC（DCI 网关 / 出口）</text>
+  <text x="960" y="352" text-anchor="middle" font-size="10" fill="#dc2626">机房内无损域 ↔ 骨干网 的边界</text>
+
+  <!-- DSW B -->
+  <rect x="855" y="390" width="210" height="44" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="960" y="410" text-anchor="middle" font-size="13" font-weight="bold" fill="#166534">DSW（DC Spine 核心）</text>
+  <text x="960" y="426" text-anchor="middle" font-size="10" fill="#15803d">跨 POD 汇聚</text>
+
+  <!-- PSW B -->
+  <rect x="730" y="465" width="200" height="44" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="830" y="485" text-anchor="middle" font-size="12" font-weight="bold" fill="#166534">PSW（POD-1 Spine）</text>
+  <text x="830" y="500" text-anchor="middle" font-size="10" fill="#15803d">POD 内脊交换</text>
+  <rect x="990" y="465" width="200" height="44" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="1090" y="485" text-anchor="middle" font-size="12" font-weight="bold" fill="#166534">PSW（POD-2 Spine）</text>
+  <text x="1090" y="500" text-anchor="middle" font-size="10" fill="#15803d">POD 内脊交换</text>
+
+  <!-- ASW B -->
+  <rect x="730" y="540" width="200" height="40" rx="9" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="830" y="558" text-anchor="middle" font-size="12" font-weight="bold" fill="#4338ca">ASW / ToR（机架顶）</text>
+  <text x="830" y="573" text-anchor="middle" font-size="10" fill="#6366f1">直连服务器</text>
+  <rect x="990" y="540" width="200" height="40" rx="9" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="1090" y="558" text-anchor="middle" font-size="12" font-weight="bold" fill="#4338ca">ASW / ToR（机架顶）</text>
+  <text x="1090" y="573" text-anchor="middle" font-size="10" fill="#6366f1">直连服务器</text>
+
+  <!-- Servers B -->
+  <rect x="735" y="610" width="90" height="70" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="780" y="635" text-anchor="middle" font-size="13" font-weight="bold" fill="#166534">D 节点</text>
+  <text x="780" y="653" text-anchor="middle" font-size="10" fill="#16a34a">Decode</text>
+  <text x="780" y="670" text-anchor="middle" font-size="9" fill="#16a34a">GPU</text>
+  <rect x="835" y="610" width="90" height="70" rx="9" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="880" y="640" text-anchor="middle" font-size="11" fill="#64748b">其它</text>
+  <text x="880" y="657" text-anchor="middle" font-size="11" fill="#64748b">GPU</text>
+  <rect x="995" y="610" width="90" height="70" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="1040" y="635" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">P 节点</text>
+  <text x="1040" y="653" text-anchor="middle" font-size="10" fill="#3b82f6">Prefill</text>
+  <text x="1040" y="670" text-anchor="middle" font-size="9" fill="#3b82f6">GPU</text>
+  <rect x="1095" y="610" width="90" height="70" rx="9" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="1140" y="635" text-anchor="middle" font-size="13" font-weight="bold" fill="#166534">D 节点</text>
+  <text x="1140" y="653" text-anchor="middle" font-size="10" fill="#16a34a">Decode</text>
+  <text x="1140" y="670" text-anchor="middle" font-size="9" fill="#16a34a">GPU</text>
+
+  <!-- vertical links B -->
+  <line x1="960" y1="361" x2="960" y2="390" stroke="#64748b" stroke-width="2"/>
+  <line x1="960" y1="434" x2="830" y2="465" stroke="#64748b" stroke-width="2"/>
+  <line x1="960" y1="434" x2="1090" y2="465" stroke="#64748b" stroke-width="2"/>
+  <line x1="830" y1="509" x2="830" y2="540" stroke="#64748b" stroke-width="2"/>
+  <line x1="1090" y1="509" x2="1090" y2="540" stroke="#64748b" stroke-width="2"/>
+  <line x1="790" y1="580" x2="780" y2="610" stroke="#64748b" stroke-width="1.5"/>
+  <line x1="870" y1="580" x2="880" y2="610" stroke="#64748b" stroke-width="1.5"/>
+  <line x1="1050" y1="580" x2="1040" y2="610" stroke="#64748b" stroke-width="1.5"/>
+  <line x1="1130" y1="580" x2="1140" y2="610" stroke="#64748b" stroke-width="1.5"/>
+
+  <!-- ============ DCC <-> Backbone links ============ -->
+  <line x1="320" y1="315" x2="400" y2="185" stroke="#64748b" stroke-width="2.5" marker-end="url(#aGray)"/>
+  <line x1="960" y1="315" x2="880" y2="185" stroke="#64748b" stroke-width="2.5" marker-end="url(#aGray)"/>
+  <text x="345" y="255" font-size="10" fill="#64748b">2*400G 上行</text>
+  <text x="895" y="255" font-size="10" fill="#64748b">2*400G 上行</text>
+
+  <!-- ============ Scenario 1: SAFE (same POD PD) ============ -->
+  <!-- P(140) <-> D(240) within POD-1 via ASW -->
+  <path d="M 140 655 C 60 605, 60 560, 140 555" fill="none" stroke="#16a34a" stroke-width="3" marker-end="url(#aGreen)" marker-start="url(#aGreenR)" opacity="0"/>
+  <line x1="185" y1="645" x2="195" y2="645" stroke="#16a34a" stroke-width="3.5" marker-start="url(#aGreenR)" marker-end="url(#aGreen)"/>
+  <circle cx="215" cy="720" r="13" fill="#16a34a"/>
+  <text x="215" y="725" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">✓</text>
+  <text x="235" y="716" font-size="12" font-weight="bold" fill="#166534">① 同 POD 内 PD 分离（推荐）</text>
+  <text x="235" y="733" font-size="10" fill="#15803d">P↔D 只过 ASW，全程无损 RDMA，RTT μs 级</text>
+
+  <!-- ============ Scenario 2: RISKY (cross-DC PD) ============ -->
+  <!-- P in DC-A POD-1 (140) up to DCC, backbone, down to D in DC-B (780) -->
+  <path d="M 140 610 C 140 400, 150 340, 250 320" fill="none" stroke="#dc2626" stroke-width="3" stroke-dasharray="9,5"/>
+  <path d="M 425 338 C 560 300, 720 300, 855 338" fill="none" stroke="#dc2626" stroke-width="3" stroke-dasharray="9,5"/>
+  <path d="M 900 320 C 990 335, 900 470, 810 540 C 790 570, 782 590, 780 610" fill="none" stroke="#dc2626" stroke-width="3" stroke-dasharray="9,5" marker-end="url(#aRed)"/>
+
+  <!-- risk badge on backbone -->
+  <rect x="500" y="200" width="280" height="22" rx="11" fill="#fee2e2" stroke="#dc2626" stroke-width="1"/>
+  <text x="640" y="215" text-anchor="middle" font-size="11" font-weight="bold" fill="#b91c1c">② 跨机房 PD：在线 KV 直传骨干 = 高风险</text>
+
+  <!-- ============ Legend / Guidance ============ -->
+  <rect x="60" y="865" width="1160" height="60" rx="10" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
+  <line x1="80" y1="885" x2="120" y2="885" stroke="#16a34a" stroke-width="3.5"/>
+  <text x="128" y="889" font-size="12" fill="#166534">无损 RDMA 路径（安全）</text>
+  <line x1="300" y1="885" x2="340" y2="885" stroke="#dc2626" stroke-width="3" stroke-dasharray="9,5"/>
+  <text x="348" y="889" font-size="12" fill="#b91c1c">跨骨干 RDMA（丢包→N 倍重传）</text>
+  <rect x="620" y="878" width="15" height="15" rx="3" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="643" y="890" font-size="12" fill="#b91c1c">非无损边界/骨干</text>
+  <text x="800" y="882" font-size="12" font-weight="bold" fill="#475569">建议：</text>
+  <text x="800" y="900" font-size="11" fill="#475569">在线 KV Cache 走同 POD/同机房无损域；跨机房仅做异步 Prefix 预取（TCP/应用层重传，容忍丢包）</text>
+
+  <!-- East-West note -->
+  <text x="320" y="838" text-anchor="middle" font-size="11" fill="#64748b">东西向流量（P↔D KV Cache）— 应尽量留在无损域内</text>
+  <text x="960" y="838" text-anchor="middle" font-size="11" fill="#64748b">东西向流量（P↔D KV Cache）— 应尽量留在无损域内</text>
+</svg>
