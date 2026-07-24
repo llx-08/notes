@@ -6,11 +6,11 @@ tags: [EP, MoE, 学习笔记]
 
 # 03 · DeepEP（High-Throughput / Low-Latency）
 
-> 上一章：[02a_deepgemm.md](/2026/07/24/ep-learning-02a-deepgemm/) ← [02_modular_kernel_and_moe_kernels.md](/2026/07/24/ep-learning-02-modular-kernel-and-moe-kernels/)  
-> 概念铺垫（A2A 原因/载荷/流程）：[01a_moe_all_to_all.md](/2026/07/24/ep-learning-01a-moe-all-to-all/)  
-> 下一章：[04_megamoe.md](/2026/07/24/ep-learning-04-megamoe/)  
-> 跨机实战补充：[../vllm_cross_node_expert_parallelism.md](/2026/06/17/vllm-cross-node-expert-parallelism/)  
-> RDMA 基础：[../rdma_learning_1.md](/2026/05/25/rdma-learning-1/)
+> 上一章：[02a_deepgemm.md](/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/) ← [02_modular_kernel_and_moe_kernels.md](/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/)  
+> 概念铺垫（A2A 原因/载荷/流程）：[01a_moe_all_to_all.md](/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/)  
+> 下一章：[04_megamoe.md](/notes/2026/07/24/2026-07-24-ep-learning-04-megamoe/)  
+> 跨机实战补充：[../vllm_cross_node_expert_parallelism.md](/notes/2026/06/17/2026-06-17-vllm-cross-node-expert-parallelism/)  
+> RDMA 基础：[../rdma_learning_1.md](/notes/2026/05/25/2026-05-25-rdma-learning-1/)
 
 ---
 

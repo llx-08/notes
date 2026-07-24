@@ -6,8 +6,8 @@ tags: [EP, MoE, 学习笔记]
 
 # 01 · MoE 与 Expert Parallelism 基础
 
-> 回到目录：[README.md](/2026/07/24/ep-learning/)  
-> 下一章：[01a_moe_all_to_all.md](/2026/07/24/ep-learning-01a-moe-all-to-all/)（All-to-All 细讲 + 图） → [02_modular_kernel_and_moe_kernels.md](/2026/07/24/ep-learning-02-modular-kernel-and-moe-kernels/)
+> 回到目录：[README.md](/notes/2026/07/24/2026-07-24-ep-learning/)  
+> 下一章：[01a_moe_all_to_all.md](/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/)（All-to-All 细讲 + 图） → [02_modular_kernel_and_moe_kernels.md](/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/)
 
 ---
 
@@ -251,7 +251,7 @@ Combine: 把结果送回 token 的 home，并按 topk weight 归约
 - 需要更复杂的元数据：每 expert token 数、排序、padding、handle。
 - DeepEP / PPLX / FlashInfer A2A 都属于这一类。
 
-> **细讲（原因 / 传什么 / 流程图）** → [01a_moe_all_to_all.md](/2026/07/24/ep-learning-01a-moe-all-to-all/)
+> **细讲（原因 / 传什么 / 流程图）** → [01a_moe_all_to_all.md](/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/)
 
 ### 3.3 「token 原 rank / home」指什么（易混点）
 

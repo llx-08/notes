@@ -6,9 +6,9 @@ tags: [EP, MoE, 学习笔记]
 
 # 05 · EPLB 与 Expert 负载均衡
 
-> 上一章：[04_megamoe.md](/2026/07/24/ep-learning-04-megamoe/)  
-> 下一章：[06_code_reading_map.md](/2026/07/24/ep-learning-06-code-reading-map/)  
-> 算法细节展开：[../vllm_cross_node_expert_parallelism.md](/2026/06/17/vllm-cross-node-expert-parallelism/) §五
+> 上一章：[04_megamoe.md](/notes/2026/07/24/2026-07-24-ep-learning-04-megamoe/)  
+> 下一章：[06_code_reading_map.md](/notes/2026/07/24/2026-07-24-ep-learning-06-code-reading-map/)  
+> 算法细节展开：[../vllm_cross_node_expert_parallelism.md](/notes/2026/06/17/2026-06-17-vllm-cross-node-expert-parallelism/) §五
 
 ---
 

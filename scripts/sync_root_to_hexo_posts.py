@@ -13,8 +13,15 @@ Convention:
   - Existing post ``YYYY-MM-DD-<slug>.md`` is updated (front matter kept).
   - New post: ``today-<slug>.md`` with title from first ``#`` heading.
   - Image links ``imgs/`` ``./imgs/`` ``../imgs/`` → ``/imgs/`` (Hexo root).
-  - In-series ``*.md`` / ``README.md`` links → ``/YYYY/MM/DD/<slug>/`` permalinks.
+  - In-series ``*.md`` / ``README.md`` links → Hexo permalinks.
   - Root note links ``../foo_bar.md`` → matching _posts permalink when found.
+
+Hexo permalink note (this site):
+  ``permalink: :year/:month/:day/:title/`` uses the *full* post filename
+  stem as ``:title`` (date is not stripped), e.g.
+  ``2026-07-24-ep-learning.md`` → ``/notes/2026/07/24/2026-07-24-ep-learning/``.
+  Markdown absolute links are not auto-prefixed with ``root``, so rewritten
+  links include the configured ``root`` (default ``/notes/``).
 
 Run from anywhere; repo root is inferred from this script's location.
 """
@@ -99,23 +106,44 @@ def date_and_slug_from_post_name(name: str) -> tuple[str, str, str, str] | None:
     return m.group(1), m.group(2), m.group(3), m.group(4)
 
 
-def permalink_for_post_file(post_path: Path) -> str | None:
+def hexo_root_prefix(root: Path) -> str:
+    """Read ``root:`` from hexo-site/_config.yml (e.g. ``/notes/``)."""
+    cfg = root / "hexo-site" / "_config.yml"
+    if not cfg.is_file():
+        return "/notes/"
+    for line in cfg.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^root:\s*['\"]?([^'\"#\s]+)", line)
+        if m:
+            val = m.group(1).strip()
+            if not val.startswith("/"):
+                val = "/" + val
+            if not val.endswith("/"):
+                val += "/"
+            return val
+    return "/notes/"
+
+
+def permalink_for_post_file(post_path: Path, *, site_root: str) -> str | None:
+    """Build site permalink matching this Hexo deploy's actual URLs."""
     parsed = date_and_slug_from_post_name(post_path.name)
     if not parsed:
         return None
-    y, mo, d, slug = parsed
-    # Matches hexo-site _config.yml: permalink :year/:month/:day/:title/
-    return f"/{y}/{mo}/{d}/{slug}/"
+    y, mo, d, _slug = parsed
+    # :title is the full filename stem (includes YYYY-MM-DD-), not slug alone.
+    stem = post_path.stem
+    return f"{site_root}{y}/{mo}/{d}/{stem}/"
 
 
-def build_slug_permalink_map(posts: Path) -> dict[str, str]:
+def build_slug_permalink_map(posts: Path, *, site_root: str) -> dict[str, str]:
     mapping: dict[str, str] = {}
     for p in posts.glob("*.md"):
         parsed = date_and_slug_from_post_name(p.name)
         if not parsed:
             continue
-        y, mo, d, slug = parsed
-        mapping[slug] = f"/{y}/{mo}/{d}/{slug}/"
+        _y, _mo, _d, slug = parsed
+        pl = permalink_for_post_file(p, site_root=site_root)
+        if pl:
+            mapping[slug] = pl
     return mapping
 
 
@@ -152,6 +180,7 @@ def rewrite_md_links(
     link_basename_to_slug: dict[str, str],
     slug_to_permalink: dict[str, str],
     today: date,
+    site_root: str,
 ) -> str:
     """Rewrite ](foo.md) / ](../foo.md) / ](README.md) to Hexo permalinks."""
 
@@ -167,7 +196,8 @@ def rewrite_md_links(
         permalink = slug_to_permalink.get(slug)
         if permalink is None:
             y, mo, d = today.isoformat().split("-")
-            permalink = f"/{y}/{mo}/{d}/{slug}/"
+            stem = f"{y}-{mo}-{d}-{slug}"
+            permalink = f"{site_root}{y}/{mo}/{d}/{stem}/"
         return f"]({permalink}{anchor})"
 
     return _MD_LINK_RE.sub(repl, body)
@@ -183,6 +213,7 @@ def sync_one(
     tags: list[str] | None,
     link_basename_to_slug: dict[str, str],
     slug_to_permalink: dict[str, str],
+    site_root: str,
 ) -> str:
     stem = root_md.stem.lower()
     # Skip root README etc.; allow ep_learning/README.md
@@ -198,6 +229,7 @@ def sync_one(
         link_basename_to_slug=link_basename_to_slug,
         slug_to_permalink=slug_to_permalink,
         today=today,
+        site_root=site_root,
     )
 
     existing = find_post_for_slug(posts, slug)
@@ -216,7 +248,7 @@ def sync_one(
         else:
             merged = "---\n" + old_fm + "\n---\n\n" + body.strip() + "\n"
         action = f"update {existing.name}"
-        pl = permalink_for_post_file(existing)
+        pl = permalink_for_post_file(existing, site_root=site_root)
         if pl:
             slug_to_permalink[slug] = pl
     else:
@@ -227,8 +259,9 @@ def sync_one(
         )
         existing = posts / name
         action = f"create {name}"
-        y, mo, d = today.isoformat().split("-")
-        slug_to_permalink[slug] = f"/{y}/{mo}/{d}/{slug}/"
+        pl = permalink_for_post_file(existing, site_root=site_root)
+        if pl:
+            slug_to_permalink[slug] = pl
 
     if dry_run:
         print(f"[dry-run] would {action} <- {root_md.relative_to(repo_root())}")
@@ -274,8 +307,9 @@ def main() -> int:
         return 1
 
     today = date.today()
+    site_root = hexo_root_prefix(root)
     link_map = collect_link_map(root)
-    slug_to_permalink = build_slug_permalink_map(posts)
+    slug_to_permalink = build_slug_permalink_map(posts, site_root=site_root)
 
     updated = created = skipped = 0
 
@@ -289,6 +323,7 @@ def main() -> int:
             tags=None,
             link_basename_to_slug=link_map,
             slug_to_permalink=slug_to_permalink,
+            site_root=site_root,
         )
         if r == "update":
             updated += 1
@@ -311,6 +346,7 @@ def main() -> int:
                 tags=ep_tags,
                 link_basename_to_slug=link_map,
                 slug_to_permalink=slug_to_permalink,
+                site_root=site_root,
             )
             if r == "update":
                 updated += 1
@@ -331,6 +367,7 @@ def main() -> int:
                     tags=ep_tags,
                     link_basename_to_slug=link_map,
                     slug_to_permalink=slug_to_permalink,
+                    site_root=site_root,
                 )
 
     if not args.dry_run:

@@ -6,7 +6,7 @@ tags: []
 
 # vLLM 跨机 Expert Parallelism (EP) 解析
 
-> 系统学习入口（EP / Kernel / DeepEP / MegaMoE / EPLB）：[ep_learning/README.md](/2026/07/24/ep-learning/)
+> 系统学习入口（EP / Kernel / DeepEP / MegaMoE / EPLB）：[ep_learning/README.md](/notes/2026/07/24/2026-07-24-ep-learning/)
 >
 > 基于 vLLM v0.11.1 (`/mnt/data/llx/vllm`) + `vllm_ep_deepdive.html` 活体追踪文档
 > 撰写日期：2026-06-09
@@ -73,7 +73,7 @@ assert expert_parallel_size == data_parallel_size * tensor_parallel_size
 ≈「还没 EOS/结束条件、还在账本里」；**不是**「这一步 GPU 正在 forward」。  
 本步有没有真跑看 `executed`；没真跑但 wave/别人还有活 → dummy。
 
-更细说明见 [ep_learning/01_ep_fundamentals.md](/2026/07/24/ep-learning-01-ep-fundamentals/) §2.3。
+更细说明见 [ep_learning/01_ep_fundamentals.md](/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/) §2.3。
 
 ```python
 # 空闲/无可调度时仍可能 execute_dummy_batch()（与 engines_running / 全局 unfinished 配合）
@@ -164,7 +164,7 @@ allow_mnnvl=envs.VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL,
 
 > **OOM 陷阱**：DeepEP LL 的 RDMA buffer 大小由 `max_num_batched_tokens` 驱动（向上取整到 2 的幂），与 EP_size **基本无关**。实测在 ranks=2 和 ranks=4 下都是约 558.9 GB。增加节点数不会缓解 OOM，应调小 `max_num_batched_tokens` 或设置 `VLLM_NUM_MAX_DISPATCHED_TOKENS_PER_RANK`。
 >
-> **显存语义（简答）**：这是 GPU 上 **额外预分配** 的 RDMA 注册工作区（GDR 可直写），**不是**模型 hidden 原址；会挤占 KV/激活可用显存。容量按 **worst-case per-rank token 上限** 在创建时定死，运行中超上限通常 assert 而非再扩池。详见 [ep_learning/03_deepep.md](/2026/07/24/ep-learning-03-deepep/) §3.1。
+> **显存语义（简答）**：这是 GPU 上 **额外预分配** 的 RDMA 注册工作区（GDR 可直写），**不是**模型 hidden 原址；会挤占 KV/激活可用显存。容量按 **worst-case per-rank token 上限** 在创建时定死，运行中超上限通常 assert 而非再扩池。详见 [ep_learning/03_deepep.md](/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/) §3.1。
 
 ---
 

@@ -6,8 +6,8 @@ tags: [EP, MoE, 学习笔记]
 
 # 07 · 实践清单与常见坑
 
-> 精读地图：[06_code_reading_map.md](/2026/07/24/ep-learning-06-code-reading-map/)  
-> 目录：[README.md](/2026/07/24/ep-learning/)
+> 精读地图：[06_code_reading_map.md](/notes/2026/07/24/2026-07-24-ep-learning-06-code-reading-map/)  
+> 目录：[README.md](/notes/2026/07/24/2026-07-24-ep-learning/)
 
 把实验命令、现象、结论直接记在本文「实验日志」区。
 

@@ -6,8 +6,8 @@ tags: [EP, MoE, 学习笔记]
 
 # 04 · MegaMoE（DeepSeek V4 + DeepGEMM）
 
-> 上一章：[03_deepep.md](/2026/07/24/ep-learning-03-deepep/)  
-> 下一章：[05_eplb_and_load_balance.md](/2026/07/24/ep-learning-05-eplb-and-load-balance/)
+> 上一章：[03_deepep.md](/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/)  
+> 下一章：[05_eplb_and_load_balance.md](/notes/2026/07/24/2026-07-24-ep-learning-05-eplb-and-load-balance/)
 
 ---
 

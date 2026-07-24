@@ -6,9 +6,9 @@ tags: [EP, MoE, 学习笔记]
 
 # 01a · MoE All-to-All：原因、载荷与流程
 
-> 上一章：[01_ep_fundamentals.md](/2026/07/24/ep-learning-01-ep-fundamentals/)（§3 抽象）  
-> 下一章：[02_modular_kernel_and_moe_kernels.md](/2026/07/24/ep-learning-02-modular-kernel-and-moe-kernels/)  
-> 实现侧加深：[03_deepep.md](/2026/07/24/ep-learning-03-deepep/)
+> 上一章：[01_ep_fundamentals.md](/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/)（§3 抽象）  
+> 下一章：[02_modular_kernel_and_moe_kernels.md](/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/)  
+> 实现侧加深：[03_deepep.md](/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/)
 
 > **现有文档里有没有？**  
 > `01` 只有 AG+RS vs 真 A2A 的抽象对比；`03` 讲 DeepEP 库差异。  

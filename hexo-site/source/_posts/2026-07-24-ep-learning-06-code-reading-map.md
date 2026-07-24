@@ -6,8 +6,8 @@ tags: [EP, MoE, 学习笔记]
 
 # 06 · 本地代码精读地图
 
-> 上一章：[05_eplb_and_load_balance.md](/2026/07/24/ep-learning-05-eplb-and-load-balance/)  
-> 实践：[07_practice_checklist.md](/2026/07/24/ep-learning-07-practice-checklist/)
+> 上一章：[05_eplb_and_load_balance.md](/notes/2026/07/24/2026-07-24-ep-learning-05-eplb-and-load-balance/)  
+> 实践：[07_practice_checklist.md](/notes/2026/07/24/2026-07-24-ep-learning-07-practice-checklist/)
 
 默认根目录：`~/codes/vllm_comm`。括号内为次要对照仓库。
 
@@ -28,7 +28,7 @@ tags: [EP, MoE, 学习笔记]
 
 ## Day B · Modular MoE 骨架（1 日）
 
-先读完 [01a_moe_all_to_all.md](/2026/07/24/ep-learning-01a-moe-all-to-all/)，再进代码。
+先读完 [01a_moe_all_to_all.md](/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/)，再进代码。
 
 | 顺序 | 文件 | 看什么 |
 |------|------|--------|
@@ -37,7 +37,7 @@ tags: [EP, MoE, 学习笔记]
 | 3 | `.../prepare_finalize/no_dp_ep.py` | 无通信基线 |
 | 4 | `.../prepare_finalize/naive_dp_ep.py` | AG/RS 如何实现 prepare/finalize |
 | 5 | `.../moe_align_block_size.py` | 文档例子手推 |
-| 6 | `.../experts/deep_gemm_moe.py` 或 `triton_moe.py` | align 输出如何喂给 GEMM；DeepGEMM 细读见 [02a](/2026/07/24/ep-learning-02a-deepgemm/) |
+| 6 | `.../experts/deep_gemm_moe.py` 或 `triton_moe.py` | align 输出如何喂给 GEMM；DeepGEMM 细读见 [02a](/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/) |
 
 产出：用文字写出一次 forward 的张量名字与 shape 变化。
 

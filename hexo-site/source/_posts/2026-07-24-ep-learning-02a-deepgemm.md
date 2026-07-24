@@ -6,8 +6,8 @@ tags: [EP, MoE, 学习笔记]
 
 # 02a · DeepGEMM（MoE Expert 计算后端）
 
-> 上一章：[02_modular_kernel_and_moe_kernels.md](/2026/07/24/ep-learning-02-modular-kernel-and-moe-kernels/)  
-> 相关：[03_deepep.md](/2026/07/24/ep-learning-03-deepep/)（通信）· [04_megamoe.md](/2026/07/24/ep-learning-04-megamoe/)（V4 特化）  
+> 上一章：[02_modular_kernel_and_moe_kernels.md](/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/)  
+> 相关：[03_deepep.md](/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/)（通信）· [04_megamoe.md](/notes/2026/07/24/2026-07-24-ep-learning-04-megamoe/)（V4 特化）  
 > 代码主路径：`~/codes/vllm_comm`  
 > 配图：矢量稿 `ep_learning/imgs/*.svg`，预览用 PNG 在 `notes/imgs/` 与 `ep_learning/imgs/`
 
