@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420">
+  <defs>
+    <style>
+      .title { font: 700 22px sans-serif; fill: #1a2332; }
+      .h { font: 600 14px sans-serif; fill: #1a2332; }
+      .p { font: 12px sans-serif; fill: #334155; }
+      .small { font: 11px sans-serif; fill: #64748b; }
+    </style>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect width="960" height="420" fill="#f7f4ef"/>
+  <text x="40" y="42" class="title">DeepGEMM in the MoE stack</text>
+  <text x="40" y="68" class="small">Comm != Compute: DeepEP = dispatch/combine; DeepGEMM = local expert GEMMs</text>
+
+  <rect x="40" y="110" width="140" height="70" rx="10" fill="#e8f1ea" stroke="#3d6b4f" stroke-width="1.5"/>
+  <text x="110" y="140" text-anchor="middle" class="h">Router</text>
+  <text x="110" y="160" text-anchor="middle" class="p">topk_ids / weights</text>
+
+  <path d="M185 145 H215" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="220" y="100" width="170" height="90" rx="10" fill="#e7eef8" stroke="#3b5b8c" stroke-width="1.5"/>
+  <text x="305" y="130" text-anchor="middle" class="h">Prepare / DeepEP</text>
+  <text x="305" y="150" text-anchor="middle" class="p">quantize + dispatch</text>
+  <text x="305" y="170" text-anchor="middle" class="small">communication (optional)</text>
+
+  <path d="M395 145 H425" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="430" y="90" width="220" height="110" rx="10" fill="#f3e9d8" stroke="#8a5a2b" stroke-width="1.5"/>
+  <text x="540" y="120" text-anchor="middle" class="h">DeepGEMM Experts</text>
+  <text x="540" y="142" text-anchor="middle" class="p">permute -&gt; grouped GEMM</text>
+  <text x="540" y="162" text-anchor="middle" class="p">act+quant -&gt; GEMM -&gt; reduce</text>
+  <text x="540" y="182" text-anchor="middle" class="small">compute (this chapter)</text>
+
+  <path d="M655 145 H685" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="690" y="100" width="170" height="90" rx="10" fill="#e7eef8" stroke="#3b5b8c" stroke-width="1.5"/>
+  <text x="775" y="130" text-anchor="middle" class="h">Finalize</text>
+  <text x="775" y="150" text-anchor="middle" class="p">combine / all-reduce</text>
+  <text x="775" y="170" text-anchor="middle" class="small">comm or local reduce</text>
+
+  <rect x="40" y="250" width="280" height="130" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="55" y="278" class="h">DeepEP</text>
+  <text x="55" y="300" class="p">- EP all-to-all only</text>
+  <text x="55" y="320" class="p">- HT / LL kernels</text>
+  <text x="55" y="340" class="p">- no expert matmul</text>
+  <text x="55" y="360" class="small">package: deep_ep</text>
+
+  <rect x="340" y="250" width="280" height="130" rx="10" fill="#fff8ef" stroke="#8a5a2b" stroke-width="1.5"/>
+  <text x="355" y="278" class="h">DeepGEMM</text>
+  <text x="355" y="300" class="p">- FP8 / FP4 GEMM</text>
+  <text x="355" y="320" class="p">- MoE grouped contiguous</text>
+  <text x="355" y="340" class="p">- Hopper / Blackwell</text>
+  <text x="355" y="360" class="small">vllm.utils.deep_gemm</text>
+
+  <rect x="640" y="250" width="280" height="130" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="655" y="278" class="h">MegaMoE</text>
+  <text x="655" y="300" class="p">- DeepSeek V4 path</text>
+  <text x="655" y="320" class="p">- fused DeepGEMM API</text>
+  <text x="655" y="340" class="p">- optional symm buffer</text>
+  <text x="655" y="360" class="small">see 04_megamoe.md</text>
+</svg>

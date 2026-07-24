@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="440" viewBox="0 0 960 440">
+  <defs>
+    <style>
+      .title { font: 700 22px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .p { font: 12px sans-serif; fill: #334155; }
+      .tiny { font: 11px monospace; fill: #475569; }
+      .lab { font: 11px sans-serif; fill: #64748b; }
+    </style>
+  </defs>
+  <rect width="960" height="440" fill="#f7f4ef"/>
+  <text x="36" y="40" class="title">FP8 block quant feeding DeepGEMM</text>
+  <text x="36" y="64" class="lab">Typical recipe block_shape ~ [128,128] (Hopper FP8); MXFP8 may use [1,32]; see DeepGemmQuantScaleFMT</text>
+
+  <text x="36" y="100" class="h">Activation a (dynamic per-token-group)</text>
+  <rect x="36" y="115" width="420" height="140" rx="8" fill="#fff" stroke="#cbd5e1"/>
+  <text x="50" y="140" class="tiny">token row -&gt; groups of BLOCK_K</text>
+  <rect x="50" y="155" width="90" height="70" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="95" y="185" text-anchor="middle" class="tiny">g0</text>
+  <text x="95" y="205" text-anchor="middle" class="tiny">fp8 + s0</text>
+  <rect x="150" y="155" width="90" height="70" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="195" y="185" text-anchor="middle" class="tiny">g1</text>
+  <text x="195" y="205" text-anchor="middle" class="tiny">fp8 + s1</text>
+  <rect x="250" y="155" width="90" height="70" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="295" y="185" text-anchor="middle" class="tiny">g2</text>
+  <text x="295" y="205" text-anchor="middle" class="tiny">fp8 + s2</text>
+  <text x="360" y="195" class="tiny">...</text>
+  <text x="50" y="245" class="lab">per_token_group_quant_fp8 / packed UE8M0</text>
+
+  <text x="500" y="100" class="h">Weight w (static block scales)</text>
+  <rect x="500" y="115" width="420" height="140" rx="8" fill="#fff" stroke="#cbd5e1"/>
+  <rect x="520" y="145" width="110" height="80" fill="#fde68a" stroke="#b45309"/>
+  <text x="575" y="180" text-anchor="middle" class="tiny">block</text>
+  <text x="575" y="200" text-anchor="middle" class="tiny">fp8 + sw</text>
+  <rect x="650" y="145" width="110" height="80" fill="#fde68a" stroke="#b45309"/>
+  <text x="705" y="180" text-anchor="middle" class="tiny">block</text>
+  <text x="705" y="200" text-anchor="middle" class="tiny">fp8 + sw</text>
+  <rect x="780" y="145" width="110" height="80" fill="#fde68a" stroke="#b45309"/>
+  <text x="835" y="180" text-anchor="middle" class="tiny">...</text>
+  <text x="520" y="245" class="lab">w1_scale / w2_scale from checkpoint</text>
+
+  <rect x="180" y="290" width="600" height="110" rx="10" fill="#fff8ef" stroke="#8a5a2b"/>
+  <text x="480" y="325" text-anchor="middle" class="h">DeepGEMM: FP8 GEMM with scales</text>
+  <text x="480" y="350" text-anchor="middle" class="p">m_grouped_fp8_gemm_nt_contiguous((a,as),(w,ws), out, expert_ids)</text>
+  <text x="480" y="375" text-anchor="middle" class="lab">NT = B-transpose convention; grouped = pick w[e] via expert_ids segments</text>
+</svg>

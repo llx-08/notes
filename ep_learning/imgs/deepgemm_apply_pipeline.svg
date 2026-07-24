@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560">
+  <defs>
+    <style>
+      .title { font: 700 22px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .tiny { font: 11px monospace; fill: #475569; }
+      .lab { font: 11px sans-serif; fill: #64748b; }
+    </style>
+    <marker id="a2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect width="980" height="560" fill="#f7f4ef"/>
+  <text x="36" y="40" class="title">DeepGemmExperts.apply dataflow (vLLM)</text>
+  <text x="36" y="64" class="lab">Code: fused_moe/experts/deep_gemm_moe.py :: DeepGemmExperts.apply</text>
+
+  <rect x="80" y="90" width="820" height="52" rx="8" fill="#e8f1ea" stroke="#3d6b4f"/>
+  <text x="100" y="122" class="h">In: a1q [T,H] FP8 + scales | topk_ids/weights | w1/w2 FP8 + scales</text>
+
+  <path d="M490 142 V160" stroke="#64748b" stroke-width="2" marker-end="url(#a2)"/>
+
+  <rect x="80" y="160" width="820" height="52" rx="8" fill="#f3e9d8" stroke="#8a5a2b"/>
+  <text x="100" y="182" class="h">1. deepgemm_moe_permute</text>
+  <text x="100" y="200" class="tiny">-&gt; a1q_perm [M_sum, K], expert_ids, inv_perm | M_sum aligned to BLOCK_M</text>
+
+  <path d="M490 212 V230" stroke="#64748b" stroke-width="2" marker-end="url(#a2)"/>
+
+  <rect x="80" y="230" width="820" height="52" rx="8" fill="#fff8ef" stroke="#8a5a2b"/>
+  <text x="100" y="252" class="h">2. m_grouped_fp8_gemm_nt_contiguous  (GEMM1 / w1 = gate_up)</text>
+  <text x="100" y="270" class="tiny">mm1_out [M_sum, N]  |  under mk_alignment_scope(align_used)</text>
+
+  <path d="M490 282 V300" stroke="#64748b" stroke-width="2" marker-end="url(#a2)"/>
+
+  <rect x="80" y="300" width="820" height="52" rx="8" fill="#e7eef8" stroke="#3b5b8c"/>
+  <text x="100" y="322" class="h">3. _act_mul_quant  (SiLU x Mul / SwiGLU + requantize FP8)</text>
+  <text x="100" y="340" class="tiny">optional fused silu_mul_*_quant_fp8 | scale_fmt = FLOAT32 / UE8M0</text>
+
+  <path d="M490 352 V370" stroke="#64748b" stroke-width="2" marker-end="url(#a2)"/>
+
+  <rect x="80" y="370" width="820" height="52" rx="8" fill="#fff8ef" stroke="#8a5a2b"/>
+  <text x="100" y="392" class="h">4. m_grouped_fp8_gemm_nt_contiguous  (GEMM2 / w2 = down)</text>
+  <text x="100" y="410" class="tiny">mm2_out [M_sum, K]</text>
+
+  <path d="M490 422 V440" stroke="#64748b" stroke-width="2" marker-end="url(#a2)"/>
+
+  <rect x="80" y="440" width="820" height="52" rx="8" fill="#f3e9d8" stroke="#8a5a2b"/>
+  <text x="100" y="462" class="h">5. deepgemm_unpermute_and_reduce</text>
+  <text x="100" y="480" class="tiny">x topk_weights, scatter via inv_perm -&gt; output [T, H] | TopKWeightAndReduceNoOP</text>
+
+  <text x="80" y="530" class="lab">FP4 weights variant: DeepGemmFP4Experts -&gt; m_grouped_fp8_fp4_gemm_nt_contiguous (SM100+)</text>
+</svg>

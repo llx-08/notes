@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420">
+  <defs>
+    <style>
+      .t { font: 700 20px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .p { font: 11px sans-serif; fill: #334155; }
+      .s { font: 10px sans-serif; fill: #64748b; }
+    </style>
+  </defs>
+  <rect width="980" height="420" fill="#f7f4ef"/>
+  <text x="32" y="36" class="t">Collectives compared: All-Gather / All-Reduce / All-to-All</text>
+
+  <rect x="30" y="70" width="290" height="300" rx="10" fill="#fff" stroke="#cbd5e1"/>
+  <text x="45" y="100" class="h">All-Gather</text>
+  <text x="45" y="125" class="p">Everyone ends with the SAME</text>
+  <text x="45" y="145" class="p">concatenated full table</text>
+  <rect x="50" y="170" width="60" height="40" fill="#dbeafe" stroke="#2563eb"/><text x="80" y="195" text-anchor="middle" class="s">R0</text>
+  <rect x="120" y="170" width="60" height="40" fill="#bbf7d0" stroke="#15803d"/><text x="150" y="195" text-anchor="middle" class="s">R1</text>
+  <rect x="190" y="170" width="60" height="40" fill="#fecaca" stroke="#b91c1c"/><text x="220" y="195" text-anchor="middle" class="s">R2</text>
+  <text x="45" y="240" class="s">after AG: each rank has</text>
+  <rect x="50" y="255" width="200" height="40" fill="#e2e8f0" stroke="#64748b"/>
+  <text x="150" y="280" text-anchor="middle" class="s">R0|R1|R2 (full copy)</text>
+  <text x="45" y="330" class="p">Metaphor: photocopy entire class</text>
+  <text x="45" y="350" class="p">MoE: fake-EP dispatch path</text>
+
+  <rect x="345" y="70" width="290" height="300" rx="10" fill="#fff" stroke="#cbd5e1"/>
+  <text x="360" y="100" class="h">All-Reduce</text>
+  <text x="360" y="125" class="p">Same shape everywhere;</text>
+  <text x="360" y="145" class="p">everyone gets SAME reduced value</text>
+  <rect x="370" y="175" width="70" height="50" fill="#dbeafe" stroke="#2563eb"/><text x="405" y="205" text-anchor="middle" class="s">partial</text>
+  <rect x="455" y="175" width="70" height="50" fill="#bbf7d0" stroke="#15803d"/><text x="490" y="205" text-anchor="middle" class="s">partial</text>
+  <rect x="540" y="175" width="70" height="50" fill="#fecaca" stroke="#b91c1c"/><text x="575" y="205" text-anchor="middle" class="s">partial</text>
+  <text x="360" y="255" class="s">after AR (sum):</text>
+  <rect x="370" y="270" width="240" height="40" fill="#fde68a" stroke="#b45309"/>
+  <text x="490" y="295" text-anchor="middle" class="s">identical full result on all</text>
+  <text x="360" y="340" class="p">Metaphor: grade the same exam</text>
+  <text x="360" y="360" class="p">MoE: TP=EP DP=1 combine path</text>
+
+  <rect x="660" y="70" width="290" height="300" rx="10" fill="#fff8ef" stroke="#8a5a2b"/>
+  <text x="675" y="100" class="h">All-to-All</text>
+  <text x="675" y="125" class="p">Each sends different bags;</text>
+  <text x="675" y="145" class="p">each receives DIFFERENT inbox</text>
+  <text x="675" y="180" class="s">R0 sends to R1,R2 ...</text>
+  <text x="675" y="200" class="s">R1 sends to R0,R2 ...</text>
+  <text x="675" y="230" class="s">After:</text>
+  <text x="675" y="250" class="s">R0 inbox != R1 inbox</text>
+  <text x="675" y="280" class="p">Metaphor: mail by address</text>
+  <text x="675" y="305" class="p">MoE: true EP when DP&gt;1</text>
+  <text x="675" y="330" class="p">(DeepEP / alltoallv)</text>
+  <text x="675" y="350" class="s">Highlighted = MoE dispatch</text>
+</svg>

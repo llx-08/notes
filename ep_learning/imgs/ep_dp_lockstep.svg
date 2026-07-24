@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400">
+  <defs>
+    <style>
+      .t { font: 700 20px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .p { font: 11px sans-serif; fill: #334155; }
+      .s { font: 10px sans-serif; fill: #64748b; }
+    </style>
+  </defs>
+  <rect width="960" height="400" fill="#f7f4ef"/>
+  <text x="32" y="36" class="t">DP Lockstep: keep every rank in the same MoE step</text>
+
+  <text x="40" y="80" class="h">One step while engines_running = True</text>
+
+  <rect x="40" y="100" width="280" height="120" rx="8" fill="#e8f1ea" stroke="#3d6b4f"/>
+  <text x="55" y="130" class="h">DP0</text>
+  <text x="55" y="155" class="p">has unfinished requests</text>
+  <text x="55" y="180" class="p">-&gt; execute_model (real)</text>
+  <text x="55" y="205" class="s">enters MoE A2A</text>
+
+  <rect x="340" y="100" width="280" height="120" rx="8" fill="#fee2e2" stroke="#b91c1c"/>
+  <text x="355" y="130" class="h">DP1 (idle this step)</text>
+  <text x="355" y="155" class="p">no schedulable batch</text>
+  <text x="355" y="180" class="p">-&gt; execute_dummy_batch</text>
+  <text x="355" y="205" class="s">still enters MoE A2A</text>
+
+  <rect x="640" y="100" width="280" height="120" rx="8" fill="#e8f1ea" stroke="#3d6b4f"/>
+  <text x="655" y="130" class="h">DP2</text>
+  <text x="655" y="155" class="p">has unfinished requests</text>
+  <text x="655" y="180" class="p">-&gt; execute_model (real)</text>
+  <text x="655" y="205" class="s">enters MoE A2A</text>
+
+  <rect x="40" y="250" width="880" height="120" rx="8" fill="#fff" stroke="#cbd5e1"/>
+  <text x="55" y="280" class="h">Sync criterion</text>
+  <text x="55" y="305" class="p">local: has_unfinished_requests = waiting+running still alive (not &quot;in GPU forward now&quot;)</text>
+  <text x="55" y="325" class="p">global: OR(local unfinished) via all-reduce -&gt; engines_running</text>
+  <text x="55" y="350" class="p">If any DP still has work, idle DPs must dummy so collectives do not hang.</text>
+</svg>

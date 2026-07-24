@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420">
+  <defs>
+    <style>
+      .t { font: 700 20px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .p { font: 11px sans-serif; fill: #334155; }
+      .s { font: 10px sans-serif; fill: #64748b; }
+    </style>
+  </defs>
+  <rect width="980" height="420" fill="#f7f4ef"/>
+  <text x="32" y="36" class="t">DeepEP HT vs LL (and RDMA buffer as EXTRA GPU memory)</text>
+
+  <rect x="40" y="70" width="430" height="160" rx="10" fill="#e7eef8" stroke="#3b5b8c"/>
+  <text x="55" y="100" class="h">HT High-Throughput</text>
+  <text x="55" y="125" class="p">Prefill / large batches</text>
+  <text x="55" y="145" class="p">dispatch / combine</text>
+  <text x="55" y="165" class="p">hidden: byte-align (e.g. 512B atom)</text>
+  <text x="55" y="185" class="p">NVLink + RDMA domain forward</text>
+  <text x="55" y="210" class="s">more general H; uses SMs for comm queue</text>
+
+  <rect x="510" y="70" width="430" height="160" rx="10" fill="#fff8ef" stroke="#8a5a2b"/>
+  <text x="525" y="100" class="h">LL Low-Latency</text>
+  <text x="525" y="125" class="p">Decode / tiny steps</text>
+  <text x="525" y="145" class="p">low_latency_dispatch/combine</text>
+  <text x="525" y="165" class="p">hidden: FIXED supported list</text>
+  <text x="525" y="185" class="p">pure RDMA + recv hook overlap</text>
+  <text x="525" y="210" class="s">specialize H for latency; worst-case VRAM</text>
+
+  <rect x="40" y="260" width="900" height="130" rx="10" fill="#fff" stroke="#cbd5e1"/>
+  <text x="55" y="290" class="h">GPU memory (same device)</text>
+  <rect x="55" y="310" width="280" height="50" fill="#bbf7d0" stroke="#15803d"/>
+  <text x="195" y="340" text-anchor="middle" class="p">weights + KV + activations</text>
+  <rect x="360" y="310" width="280" height="50" fill="#fecaca" stroke="#b91c1c"/>
+  <text x="500" y="340" text-anchor="middle" class="p">DeepEP RDMA/NVL Buffer (EXTRA)</text>
+  <text x="55" y="380" class="s">LL size ~ get_low_latency_rdma_size_hint(max_tokens_per_rank, H, ranks, experts) -- often from max_num_batched_tokens</text>
+</svg>

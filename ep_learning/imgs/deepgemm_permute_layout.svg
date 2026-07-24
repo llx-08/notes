@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520">
+  <defs>
+    <style>
+      .title { font: 700 22px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .tiny { font: 10px monospace; fill: #475569; }
+      .lab { font: 11px sans-serif; fill: #64748b; }
+    </style>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect width="980" height="520" fill="#f7f4ef"/>
+  <text x="36" y="40" class="title">Grouped Contiguous GEMM: why permute?</text>
+  <text x="36" y="64" class="lab">m_grouped_fp8_gemm_nt_contiguous needs tokens of the same expert contiguous and padded to BLOCK_M</text>
+
+  <text x="36" y="100" class="h">1) After Router (token order, Standard layout)</text>
+  <rect x="36" y="115" width="420" height="90" rx="8" fill="#fff" stroke="#cbd5e1"/>
+  <rect x="50" y="135" width="70" height="50" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="85" y="165" text-anchor="middle" class="tiny">t0-&gt;e2,e0</text>
+  <rect x="130" y="135" width="70" height="50" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="165" y="165" text-anchor="middle" class="tiny">t1-&gt;e1,e2</text>
+  <rect x="210" y="135" width="70" height="50" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="245" y="165" text-anchor="middle" class="tiny">t2-&gt;e0,e1</text>
+  <rect x="290" y="135" width="70" height="50" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="325" y="165" text-anchor="middle" class="tiny">t3-&gt;e2,e1</text>
+  <text x="380" y="165" class="tiny">...</text>
+  <text x="36" y="225" class="lab">[T, H] + topk_ids[T,K] -- experts interleaved; cannot feed grouped GEMM directly</text>
+
+  <path d="M246 240 V270" stroke="#64748b" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="258" y="260" class="tiny">deepgemm_moe_permute</text>
+
+  <text x="36" y="300" class="h">2) Contiguous layout (gather by expert + pad to alignment)</text>
+  <rect x="36" y="315" width="900" height="100" rx="8" fill="#fff" stroke="#cbd5e1"/>
+
+  <rect x="50" y="335" width="160" height="60" fill="#fde68a" stroke="#b45309"/>
+  <text x="130" y="360" text-anchor="middle" class="tiny">expert 0 tokens</text>
+  <text x="130" y="378" text-anchor="middle" class="tiny">+ pad -&gt; x BLOCK_M</text>
+
+  <rect x="230" y="335" width="200" height="60" fill="#bbf7d0" stroke="#15803d"/>
+  <text x="330" y="360" text-anchor="middle" class="tiny">expert 1 tokens</text>
+  <text x="330" y="378" text-anchor="middle" class="tiny">+ pad -&gt; x BLOCK_M</text>
+
+  <rect x="450" y="335" width="240" height="60" fill="#fecaca" stroke="#b91c1c"/>
+  <text x="570" y="360" text-anchor="middle" class="tiny">expert 2 tokens</text>
+  <text x="570" y="378" text-anchor="middle" class="tiny">+ pad -&gt; x BLOCK_M</text>
+
+  <rect x="710" y="335" width="100" height="60" fill="#e2e8f0" stroke="#64748b"/>
+  <text x="760" y="370" text-anchor="middle" class="tiny">...</text>
+
+  <text x="36" y="440" class="h">3) expert_ids / m_indices (which expert owns each BLOCK_M row)</text>
+  <rect x="36" y="455" width="900" height="45" rx="6" fill="#1a2332"/>
+  <text x="50" y="483" class="tiny" fill="#fde68a">e0 e0 e0 ...</text>
+  <text x="200" y="483" class="tiny" fill="#bbf7d0">e1 e1 e1 e1 ...</text>
+  <text x="400" y="483" class="tiny" fill="#fecaca">e2 e2 e2 e2 e2 ...</text>
+  <text x="680" y="483" class="tiny" fill="#94a3b8">-&gt; m_grouped_fp8_gemm_nt_contiguous</text>
+</svg>

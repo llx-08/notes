@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="380" viewBox="0 0 960 380">
+  <defs>
+    <style>
+      .t { font: 700 20px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .p { font: 11px sans-serif; fill: #334155; }
+      .s { font: 10px sans-serif; fill: #64748b; }
+    </style>
+    <marker id="a" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#64748b"/></marker>
+  </defs>
+  <rect width="960" height="380" fill="#f7f4ef"/>
+  <text x="32" y="36" class="t">MoE EP end-to-end (learning map overview)</text>
+
+  <rect x="40" y="70" width="150" height="70" rx="8" fill="#e8f1ea" stroke="#3d6b4f"/>
+  <text x="115" y="100" text-anchor="middle" class="h">Router</text>
+  <text x="115" y="120" text-anchor="middle" class="p">topk_ids / weights</text>
+  <path d="M195 105 H225" stroke="#64748b" stroke-width="2" marker-end="url(#a)"/>
+
+  <rect x="230" y="60" width="180" height="90" rx="8" fill="#e7eef8" stroke="#3b5b8c"/>
+  <text x="320" y="90" text-anchor="middle" class="h">Dispatch</text>
+  <text x="320" y="110" text-anchor="middle" class="p">DeepEP / AG+RS / ...</text>
+  <text x="320" y="130" text-anchor="middle" class="s">01a / 03</text>
+  <path d="M415 105 H445" stroke="#64748b" stroke-width="2" marker-end="url(#a)"/>
+
+  <rect x="450" y="60" width="200" height="90" rx="8" fill="#f3e9d8" stroke="#8a5a2b"/>
+  <text x="550" y="90" text-anchor="middle" class="h">Local Experts</text>
+  <text x="550" y="110" text-anchor="middle" class="p">DeepGEMM / Triton / ...</text>
+  <text x="550" y="130" text-anchor="middle" class="s">02 / 02a / 04</text>
+  <path d="M655 105 H685" stroke="#64748b" stroke-width="2" marker-end="url(#a)"/>
+
+  <rect x="690" y="60" width="180" height="90" rx="8" fill="#e7eef8" stroke="#3b5b8c"/>
+  <text x="780" y="90" text-anchor="middle" class="h">Combine</text>
+  <text x="780" y="110" text-anchor="middle" class="p">A2A back / All-Reduce</text>
+  <text x="780" y="130" text-anchor="middle" class="s">01a / 01 sec 1.5</text>
+
+  <rect x="40" y="200" width="270" height="140" rx="8" fill="#fff" stroke="#cbd5e1"/>
+  <text x="55" y="228" class="h">01 Fundamentals</text>
+  <text x="55" y="250" class="p">EP = TP x DP, home, lockstep</text>
+  <text x="55" y="270" class="p">dummy_batch, unfinished sync</text>
+  <text x="55" y="300" class="s">when DP&gt;1 collectives matter</text>
+
+  <rect x="330" y="200" width="270" height="140" rx="8" fill="#fff" stroke="#cbd5e1"/>
+  <text x="345" y="228" class="h">01a / 03 Communication</text>
+  <text x="345" y="250" class="p">Why all-to-all, payloads</text>
+  <text x="345" y="270" class="p">DeepEP HT vs LL, RDMA buffer</text>
+  <text x="345" y="300" class="s">vs NCCL AG / alltoall</text>
+
+  <rect x="620" y="200" width="270" height="140" rx="8" fill="#fff" stroke="#cbd5e1"/>
+  <text x="635" y="228" class="h">02 / 02a / 04 / 05 Compute</text>
+  <text x="635" y="250" class="p">Modular kernel, DeepGEMM</text>
+  <text x="635" y="270" class="p">MegaMoE, EPLB rebalance</text>
+  <text x="635" y="300" class="s">experts + load balance</text>
+</svg>

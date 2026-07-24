@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420">
+  <defs>
+    <style>
+      .t { font: 700 20px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .p { font: 11px sans-serif; fill: #334155; }
+      .s { font: 10px sans-serif; fill: #64748b; }
+    </style>
+  </defs>
+  <rect width="980" height="420" fill="#f7f4ef"/>
+  <text x="32" y="36" class="t">EPLB hierarchical rebalance (idea)</text>
+  <text x="32" y="58" class="s">Goal: hot experts get replicas; keep traffic on NVLink; minimize cross-node dispatch</text>
+
+  <rect x="40" y="90" width="280" height="280" rx="10" fill="#fff" stroke="#cbd5e1"/>
+  <text x="55" y="120" class="h">Step 1: packs to Nodes</text>
+  <text x="55" y="150" class="p">Pack expert groups onto</text>
+  <text x="55" y="170" class="p">nodes to cut IB traffic</text>
+  <rect x="70" y="200" width="100" height="60" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="120" y="235" text-anchor="middle" class="s">Node A</text>
+  <rect x="190" y="200" width="100" height="60" fill="#fde68a" stroke="#b45309"/>
+  <text x="240" y="235" text-anchor="middle" class="s">Node B</text>
+  <text x="55" y="300" class="s">balanced_packing(groups)</text>
+
+  <rect x="350" y="90" width="280" height="280" rx="10" fill="#fff" stroke="#cbd5e1"/>
+  <text x="365" y="120" class="h">Step 2: replicate hot</text>
+  <text x="365" y="150" class="p">Inside a node, give extra</text>
+  <text x="365" y="170" class="p">physical slots to hot logical</text>
+  <rect x="380" y="200" width="70" height="50" fill="#fecaca" stroke="#b91c1c"/>
+  <text x="415" y="230" text-anchor="middle" class="s">hot</text>
+  <rect x="460" y="200" width="70" height="50" fill="#fecaca" stroke="#b91c1c"/>
+  <text x="495" y="230" text-anchor="middle" class="s">hot'</text>
+  <rect x="540" y="200" width="60" height="50" fill="#e2e8f0" stroke="#64748b"/>
+  <text x="570" y="230" text-anchor="middle" class="s">...</text>
+  <text x="365" y="290" class="s">logical -&gt; physical replicas</text>
+  <text x="365" y="315" class="s">replicate_experts</text>
+
+  <rect x="660" y="90" width="280" height="280" rx="10" fill="#fff" stroke="#cbd5e1"/>
+  <text x="675" y="120" class="h">Step 3: pack to GPUs</text>
+  <text x="675" y="150" class="p">Inside node, pack physical</text>
+  <text x="675" y="170" class="p">experts onto GPUs evenly</text>
+  <rect x="690" y="200" width="50" height="50" fill="#bbf7d0" stroke="#15803d"/><text x="715" y="230" text-anchor="middle" class="s">G0</text>
+  <rect x="755" y="200" width="50" height="50" fill="#bbf7d0" stroke="#15803d"/><text x="780" y="230" text-anchor="middle" class="s">G1</text>
+  <rect x="820" y="200" width="50" height="50" fill="#bbf7d0" stroke="#15803d"/><text x="845" y="230" text-anchor="middle" class="s">G2</text>
+  <rect x="885" y="200" width="40" height="50" fill="#bbf7d0" stroke="#15803d"/><text x="905" y="230" text-anchor="middle" class="s">G3</text>
+  <text x="675" y="290" class="s">then P2P move weights</text>
+  <text x="675" y="315" class="s">rebalance_execute</text>
+</svg>

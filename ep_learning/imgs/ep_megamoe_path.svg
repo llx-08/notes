@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="380" viewBox="0 0 960 380">
+  <defs>
+    <style>
+      .t { font: 700 20px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .p { font: 11px sans-serif; fill: #334155; }
+      .s { font: 10px sans-serif; fill: #64748b; }
+    </style>
+    <marker id="c" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" fill="#64748b"/></marker>
+  </defs>
+  <rect width="960" height="380" fill="#f7f4ef"/>
+  <text x="32" y="36" class="t">MegaMoE path (DeepSeek V4 + DeepGEMM)</text>
+
+  <rect x="50" y="80" width="160" height="70" rx="8" fill="#e8f1ea" stroke="#3d6b4f"/>
+  <text x="130" y="110" text-anchor="middle" class="h">Router</text>
+  <text x="130" y="130" text-anchor="middle" class="s">sqrtsoftplus</text>
+  <path d="M215 115 H245" stroke="#64748b" stroke-width="2" marker-end="url(#c)"/>
+
+  <rect x="250" y="80" width="200" height="70" rx="8" fill="#e7eef8" stroke="#3b5b8c"/>
+  <text x="350" y="110" text-anchor="middle" class="h">prepare_megamoe</text>
+  <text x="350" y="130" text-anchor="middle" class="s">FP8 + E8M0 + pack topk</text>
+  <path d="M455 115 H485" stroke="#64748b" stroke-width="2" marker-end="url(#c)"/>
+
+  <rect x="490" y="70" width="240" height="90" rx="8" fill="#f3e9d8" stroke="#8a5a2b"/>
+  <text x="610" y="100" text-anchor="middle" class="h">fp8_fp4_mega_moe</text>
+  <text x="610" y="120" text-anchor="middle" class="p">+ symm_buffer (EP group)</text>
+  <text x="610" y="140" text-anchor="middle" class="s">SM100, H/I % 128 == 0</text>
+  <path d="M735 115 H765" stroke="#64748b" stroke-width="2" marker-end="url(#c)"/>
+
+  <rect x="770" y="80" width="140" height="70" rx="8" fill="#e8f1ea" stroke="#3d6b4f"/>
+  <text x="840" y="110" text-anchor="middle" class="h">y out</text>
+  <text x="840" y="130" text-anchor="middle" class="s">often reduced</text>
+
+  <rect x="50" y="210" width="860" height="130" rx="8" fill="#fff" stroke="#cbd5e1"/>
+  <text x="65" y="240" class="h">vs Modular DeepEP + DeepGEMM</text>
+  <text x="65" y="265" class="p">MegaMoE: more fused inside DeepGEMM (incl. EP-related symm buffer); V4 + fp4 + EP required.</text>
+  <text x="65" y="290" class="p">Modular: PrepareAndFinalize and Experts stay separate; more backends combinable.</text>
+  <text x="65" y="315" class="s">moe_backend = deep_gemm_mega_moe</text>
+</svg>

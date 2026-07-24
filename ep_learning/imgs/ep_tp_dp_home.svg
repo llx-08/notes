@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="460" viewBox="0 0 960 460">
+  <defs>
+    <style>
+      .t { font: 700 20px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .p { font: 11px sans-serif; fill: #334155; }
+      .s { font: 10px sans-serif; fill: #64748b; }
+      .m { font: 10px monospace; fill: #475569; }
+    </style>
+  </defs>
+  <rect width="960" height="460" fill="#f7f4ef"/>
+  <text x="32" y="36" class="t">vLLM: EP = TP x DP  (example 2 nodes x 4 GPUs)</text>
+  <text x="32" y="58" class="s">Attn uses TP (same tokens, shard weights). MoE EP shards experts across TP*DP ranks.</text>
+
+  <!-- Node A -->
+  <rect x="40" y="90" width="420" height="200" rx="10" fill="#fff" stroke="#94a3b8"/>
+  <text x="55" y="115" class="h">Node A</text>
+  <rect x="60" y="130" width="90" height="70" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="105" y="158" text-anchor="middle" class="m">GPU0</text>
+  <text x="105" y="178" text-anchor="middle" class="s">DP0 TP0</text>
+  <rect x="160" y="130" width="90" height="70" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="205" y="158" text-anchor="middle" class="m">GPU1</text>
+  <text x="205" y="178" text-anchor="middle" class="s">DP0 TP1</text>
+  <rect x="260" y="130" width="90" height="70" rx="6" fill="#fde68a" stroke="#b45309"/>
+  <text x="305" y="158" text-anchor="middle" class="m">GPU2</text>
+  <text x="305" y="178" text-anchor="middle" class="s">DP1 TP0</text>
+  <rect x="360" y="130" width="90" height="70" rx="6" fill="#fde68a" stroke="#b45309"/>
+  <text x="405" y="158" text-anchor="middle" class="m">GPU3</text>
+  <text x="405" y="178" text-anchor="middle" class="s">DP1 TP1</text>
+  <text x="60" y="230" class="p">Blue = one DP home (same tokens after Attn AR)</text>
+  <text x="60" y="250" class="p">Yellow = other DP home (different request batch)</text>
+  <text x="60" y="275" class="s">EP ranks 0..3 span both colors when enable_expert_parallel</text>
+
+  <!-- Node B -->
+  <rect x="500" y="90" width="420" height="200" rx="10" fill="#fff" stroke="#94a3b8"/>
+  <text x="515" y="115" class="h">Node B</text>
+  <rect x="520" y="130" width="90" height="70" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="565" y="158" text-anchor="middle" class="m">GPU4</text>
+  <text x="565" y="178" text-anchor="middle" class="s">DP0 TP2</text>
+  <rect x="620" y="130" width="90" height="70" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="665" y="158" text-anchor="middle" class="m">GPU5</text>
+  <text x="665" y="178" text-anchor="middle" class="s">DP0 TP3</text>
+  <rect x="720" y="130" width="90" height="70" rx="6" fill="#fde68a" stroke="#b45309"/>
+  <text x="765" y="158" text-anchor="middle" class="m">GPU6</text>
+  <text x="765" y="178" text-anchor="middle" class="s">DP1 TP2</text>
+  <rect x="820" y="130" width="90" height="70" rx="6" fill="#fde68a" stroke="#b45309"/>
+  <text x="865" y="158" text-anchor="middle" class="m">GPU7</text>
+  <text x="865" y="178" text-anchor="middle" class="s">DP1 TP3</text>
+  <text x="520" y="250" class="p">Cross-node: same DP color still one home</text>
+  <text x="520" y="275" class="s">MoE A2A may cross IB between nodes</text>
+
+  <rect x="40" y="320" width="880" height="110" rx="8" fill="#fff8ef" stroke="#8a5a2b"/>
+  <text x="55" y="350" class="h">Takeaway</text>
+  <text x="55" y="375" class="p">TP: every rank in a DP color holds FULL hidden for that home (after Attn all-reduce).</text>
+  <text x="55" y="395" class="p">EP: experts are split across ALL GPUs in the EP group (TP*DP). Tokens move only when DP&gt;1 (or SP).</text>
+  <text x="55" y="415" class="p">Home = DP data ownership (color), not &quot;the only TP that ran Attn&quot;.</text>
+</svg>

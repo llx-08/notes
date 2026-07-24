@@ -8,6 +8,8 @@
 
 源码在 `hexo-site/`，仓库根目录下的 `*.md` 为原始笔记副本，已同步到 `source/_posts/`；根目录 **`imgs/`** 会通过脚本同步到 **`source/imgs/`**（`npm run sync-imgs` 或 `npm run build` 会自动执行）。
 
+**系列目录 `ep_learning/`**：`scripts/sync_root_to_hexo_posts.py` 会把其中每个 `*.md` 同步为独立文章（slug 形如 `ep-learning-01-ep-fundamentals`，目录页为 `ep-learning`），并把 `../imgs/` 图链改成 `/imgs/`，系列内 `.md` 互链改成 Hexo permalink。CI / pre-commit 都会跑该脚本。
+
 **提交前自动同步**：在仓库根目录执行一次 **`./scripts/install-git-hooks.sh`**，之后每次 **`git commit`** 会先运行上述两个同步脚本，并把 `source/_posts/`、`source/imgs/` 的变更自动 **git add** 进本次提交。若某次不想跑钩子：**`git commit --no-verify`**。
 
 **首页摘要**：未写 `<!-- more -->` 时，脚本会按纯文本约 **420 字**截断（`_config.yml` 里 `auto_excerpt_length`）。单篇若要自定截断位置，在正文插入一行 `<!-- more -->` 即可。

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="360" viewBox="0 0 980 360">
+  <defs>
+    <style>
+      .t { font: 700 20px sans-serif; fill: #1a2332; }
+      .h { font: 600 13px sans-serif; fill: #1a2332; }
+      .p { font: 11px sans-serif; fill: #334155; }
+      .s { font: 10px sans-serif; fill: #64748b; }
+    </style>
+  </defs>
+  <rect width="980" height="360" fill="#f7f4ef"/>
+  <text x="32" y="36" class="t">Two EP modes: DP=1 (local+AR) vs DP&gt;1 (token A2A)</text>
+
+  <rect x="40" y="70" width="430" height="250" rx="10" fill="#fff" stroke="#cbd5e1"/>
+  <text x="55" y="100" class="h">TP=EP, DP=1 (e.g. tp8 ep8)</text>
+  <text x="55" y="125" class="p">Every rank already has full hidden</text>
+  <text x="55" y="150" class="p">1) Run only local experts (expert_map)</text>
+  <text x="55" y="170" class="p">2) partial_y on each rank</text>
+  <text x="55" y="190" class="p">3) All-Reduce -&gt; full y everywhere</text>
+  <text x="55" y="220" class="s">No token Dispatch needed</text>
+  <text x="55" y="245" class="s">use_all2all_kernels = False</text>
+  <text x="55" y="270" class="s">path: no_dp_ep + TP all-reduce</text>
+  <text x="55" y="295" class="p">Combine == All-Reduce of partials</text>
+
+  <rect x="510" y="70" width="430" height="250" rx="10" fill="#fff8ef" stroke="#8a5a2b"/>
+  <text x="525" y="100" class="h">DP&gt;1 (tokens sharded by home)</text>
+  <text x="525" y="125" class="p">Each home only has its token slice</text>
+  <text x="525" y="150" class="p">1) Dispatch tokens to expert ranks</text>
+  <text x="525" y="170" class="p">2) Local expert GEMM</text>
+  <text x="525" y="190" class="p">3) Combine outputs back to home</text>
+  <text x="525" y="220" class="s">True All-to-All (or AG+RS fake)</text>
+  <text x="525" y="245" class="s">use_all2all_kernels = True</text>
+  <text x="525" y="270" class="s">path: DeepEP / AG+RS / ...</text>
+  <text x="525" y="295" class="p">Combine == A2A mail back + weight</text>
+</svg>

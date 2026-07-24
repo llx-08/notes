@@ -6,6 +6,8 @@ tags: []
 
 # vLLM 跨机 Expert Parallelism (EP) 解析
 
+> 系统学习入口（EP / Kernel / DeepEP / MegaMoE / EPLB）：[ep_learning/README.md](/2026/07/24/ep-learning/)
+>
 > 基于 vLLM v0.11.1 (`/mnt/data/llx/vllm`) + `vllm_ep_deepdive.html` 活体追踪文档
 > 撰写日期：2026-06-09
 
@@ -63,16 +65,22 @@ assert expert_parallel_size == data_parallel_size * tensor_parallel_size
 
 ### 2.3 DP Lockstep 保证
 
-由于 MoE 层在 EP group 上做跨所有 DP rank 的 all-to-all，一个 DP rank **绝不能**在其他 rank 还在 forward pass 时跳过——否则 collective 会死锁。
+由于 MoE 层在 EP group 上做跨所有 DP rank 的 all-to-all，一个 DP rank **绝不能**在其他 rank 还在 forward pass 时整步跳过——否则 collective 会死锁。
+
+**Lockstep** = 只要全局 wave 还在跑，每个 DP rank **每一拍都要进同一次 model step**（有真 batch 就正常执行，否则 `dummy_batch`），一起过 MoE 路口。
+
+`has_unfinished_requests()`：**调度器里是否还有未结束生命周期的请求**（`waiting` + `running` 等），  
+≈「还没 EOS/结束条件、还在账本里」；**不是**「这一步 GPU 正在 forward」。  
+本步有没有真跑看 `executed`；没真跑但 wave/别人还有活 → dummy。
+
+更细说明见 [ep_learning/01_ep_fundamentals.md](/2026/07/24/ep-learning-01-ep-fundamentals/) §2.3。
 
 ```python
-# core.py:2143-2191
-# 空闲的 DP rank 仍须运行 execute_dummy_batch()
-if self.engines_running and not self.scheduler.has_unfinished_requests():
-    dummy_batch_future = self.model_executor.execute_dummy_batch(...)
+# 空闲/无可调度时仍可能 execute_dummy_batch()（与 engines_running / 全局 unfinished 配合）
+# 终止同步：周期性 all-reduce 同步全局是否还有 unfinished，全员一起停 wave
 ```
 
-终止同步每 32 步做一次 `all_reduce(MAX)` 来保证所有 rank 一起停止。
+终止同步每 32 步做一次同步（如 `all_reduce`）来保证所有 rank 一起停止。
 
 ---
 
@@ -155,6 +163,8 @@ allow_mnnvl=envs.VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL,
 ```
 
 > **OOM 陷阱**：DeepEP LL 的 RDMA buffer 大小由 `max_num_batched_tokens` 驱动（向上取整到 2 的幂），与 EP_size **基本无关**。实测在 ranks=2 和 ranks=4 下都是约 558.9 GB。增加节点数不会缓解 OOM，应调小 `max_num_batched_tokens` 或设置 `VLLM_NUM_MAX_DISPATCHED_TOKENS_PER_RANK`。
+>
+> **显存语义（简答）**：这是 GPU 上 **额外预分配** 的 RDMA 注册工作区（GDR 可直写），**不是**模型 hidden 原址；会挤占 KV/激活可用显存。容量按 **worst-case per-rank token 上限** 在创建时定死，运行中超上限通常 assert 而非再扩池。详见 [ep_learning/03_deepep.md](/2026/07/24/ep-learning-03-deepep/) §3.1。
 
 ---
 

@@ -6,7 +6,7 @@ tags: []
 
 # RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络
 
-承接 [RDMA学习笔记（1）](rdma_learning_1.md)。这一篇聚焦**数据中心网络的层次结构**（ASW/PSW/DSW/DCC…），以及 RoCE 在以太网上跑 RDMA 时的 **PFC / 拥塞 / N 倍重传** 问题，最后落到对 **PD 分离**跨机房传输的启示。
+承接 [RDMA学习笔记（1）](/2026/05/25/rdma-learning-1/)。这一篇聚焦**数据中心网络的层次结构**（ASW/PSW/DSW/DCC…），以及 RoCE 在以太网上跑 RDMA 时的 **PFC / 拥塞 / N 倍重传** 问题，最后落到对 **PD 分离**跨机房传输的启示。
 
 ## 数据中心网络的层次（Spine-Leaf / CLOS）
 
