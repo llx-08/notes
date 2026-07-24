@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>03 · DeepEP（High-Throughput / Low-Latency） - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="03 · DeepEP（High-Throughput &amp;#x2F; Low-Latency） 上一章： 02a_deepgemm.md ← 02_modular_kernel_and_moe_kernels.md 概念铺垫（A2A 原因&amp;#x2F;载荷&amp;#x2F;流程）： 01a_moe_all_to_all.md 下一章： 04_megamoe.md 跨机实战补充： ..&amp;#x2F;vllm_cross_node_expert_pa"><meta property="og:type" content="blog"><meta property="og:title" content="03 · DeepEP（High-Throughput / Low-Latency）"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="03 · DeepEP（High-Throughput &amp;#x2F; Low-Latency） 上一章： 02a_deepgemm.md ← 02_modular_kernel_and_moe_kernels.md 概念铺垫（A2A 原因&amp;#x2F;载荷&amp;#x2F;流程）： 01a_moe_all_to_all.md 下一章： 04_megamoe.md 跨机实战补充： ..&amp;#x2F;vllm_cross_node_expert_pa"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/ep_deepep_ht_ll.png"><meta property="article:published_time" content="2026-07-24T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-24T09:30:09.413Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="EP"><meta property="article:tag" content="MoE"><meta property="article:tag" content="学习笔记"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/ep_deepep_ht_ll.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/"},"headline":"03 · DeepEP（High-Throughput / Low-Latency）","image":["https://llx-08.github.io/notes/imgs/ep_deepep_ht_ll.png"],"datePublished":"2026-07-24T00:00:00.000Z","dateModified":"2026-07-24T09:30:09.413Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"03 · DeepEP（High-Throughput &#x2F; Low-Latency） 上一章： 02a_deepgemm.md ← 02_modular_kernel_and_moe_kernels.md 概念铺垫（A2A 原因&#x2F;载荷&#x2F;流程）： 01a_moe_all_to_all.md 下一章： 04_megamoe.md 跨机实战补充： ..&#x2F;vllm_cross_node_expert_pa"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.413Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">24 分钟读完 (大约3533个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">03 · DeepEP（High-Throughput / Low-Latency）</h1><div class="content"><h1 id="03-·-DeepEP（High-Throughput-Low-Latency）"><a href="#03-·-DeepEP（High-Throughput-Low-Latency）" class="headerlink" title="03 · DeepEP（High-Throughput / Low-Latency）"></a>03 · DeepEP（High-Throughput / Low-Latency）</h1><blockquote>
+<p>上一章：<a href="/2026/07/24/ep-learning-02a-deepgemm/">02a_deepgemm.md</a> ← <a href="/2026/07/24/ep-learning-02-modular-kernel-and-moe-kernels/">02_modular_kernel_and_moe_kernels.md</a><br>概念铺垫（A2A 原因/载荷/流程）：<a href="/2026/07/24/ep-learning-01a-moe-all-to-all/">01a_moe_all_to_all.md</a><br>下一章：<a href="/2026/07/24/ep-learning-04-megamoe/">04_megamoe.md</a><br>跨机实战补充：<a href="/2026/06/17/vllm-cross-node-expert-parallelism/">../vllm_cross_node_expert_parallelism.md</a><br>RDMA 基础：<a href="/2026/05/25/rdma-learning-1/">../rdma_learning_1.md</a></p>
+</blockquote>
+<hr>
+<h2 id="1-DeepEP-是什么"><a href="#1-DeepEP-是什么" class="headerlink" title="1. DeepEP 是什么"></a>1. DeepEP 是什么</h2><p><strong>DeepEP</strong>（DeepSeek Expert Parallelism 通信库，Python 包名常为 <code>deep_ep</code>）为 MoE 提供 <strong>GPU 侧高效的 dispatch / combine</strong>：</p>
+<ul>
+<li>机内：NVLink / NVSwitch  </li>
+<li>跨机：RDMA（IB/RoCE），常配合预注册 buffer、NVSHMEM 类对称内存思路</li>
+</ul>
+<p>它 <strong>不是</strong> expert GEMM 本身；GEMM 仍由 Triton / DeepGEMM / MegaMoE 等完成。<br>vLLM / SGLang 通过适配层调用 <code>deep_ep.Buffer.dispatch</code> / <code>combine</code>（及 LL 变体）。</p>
+<p>上游项目：<a target="_blank" rel="noopener" href="https://github.com/deepseek-ai/DeepEP">https://github.com/deepseek-ai/DeepEP</a>  </p>
+<p>本地适配（<code>vllm_comm</code>）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">fused_moe/prepare_finalize/deepep_ht.py   # High Throughput</span><br><span class="line">fused_moe/prepare_finalize/deepep_ll.py   # Low Latency</span><br><span class="line">fused_moe/prepare_finalize/deepep_v2.py   # 较新 API 适配</span><br><span class="line">distributed/device_communicators/all2all.py  # Buffer 创建、backend 选择</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="2-两条产品线：HT-vs-LL"><a href="#2-两条产品线：HT-vs-LL" class="headerlink" title="2. 两条产品线：HT vs LL"></a>2. 两条产品线：HT vs LL</h2><table>
+<thead>
+<tr>
+<th></th>
+<th><strong>HT（High Throughput）</strong></th>
+<th><strong>LL（Low Latency）</strong></th>
+</tr>
+</thead>
+<tbody><tr>
+<td>目标阶段</td>
+<td>Prefill / 大 batch</td>
+<td>Decode / 小步延迟</td>
+</tr>
+<tr>
+<td>典型 API</td>
+<td><code>buffer.dispatch</code> / <code>combine</code></td>
+<td><code>low_latency_dispatch</code> / <code>low_latency_combine</code></td>
+</tr>
+<tr>
+<td>布局</td>
+<td>偏 Standard</td>
+<td>偏 BatchedExperts（按 expert 槽位）</td>
+</tr>
+<tr>
+<td>Hidden</td>
+<td>有字节对齐要求（如按 512B 原子拷贝取整）</td>
+<td><strong>编译期支持的固定 hidden 列表</strong></td>
+</tr>
+<tr>
+<td>Buffer</td>
+<td>跨机才需较大 RDMA；纯机内可为 0</td>
+<td>常按 <code>max_tokens_per_rank</code> 预分配，易 OOM</td>
+</tr>
+<tr>
+<td>量化</td>
+<td>可与外部 quant 配合</td>
+<td>可在 dispatch 路径做 fp8（块大小常 128）</td>
+</tr>
+</tbody></table>
+<p>vLLM 适配类：</p>
+<ul>
+<li><code>DeepEPHTPrepareAndFinalize</code>  </li>
+<li><code>DeepEPLLPrepareAndFinalize</code></li>
+</ul>
+<p><img src="/notes/imgs/ep_deepep_ht_ll.png" alt="DeepEP HT vs LL，以及 RDMA Buffer 是额外显存"></p>
+<p><em>图：左 HT / 右 LL；底部红块是预注册通信池，会挤占 KV/激活可用显存。</em></p>
+<h3 id="2-1-HT：hidden-对齐例子"><a href="#2-1-HT：hidden-对齐例子" class="headerlink" title="2.1 HT：hidden 对齐例子"></a>2.1 HT：hidden 对齐例子</h3><p><code>deepep_ht.py</code> 中：<code>xfer_atom_size = 512</code>（32×int4）。<br>若 <code>hidden=2880</code>、<code>bf16</code> → 字节数需向上对齐 → hidden 可能被 round 到 <code>3072</code>。<br><strong>含义</strong>：通信库按固定原子大小搬数据；模型层要配合 pad/round。</p>
+<h3 id="2-2-LL：支持的-hidden-——-为什么要「固定列表」？"><a href="#2-2-LL：支持的-hidden-——-为什么要「固定列表」？" class="headerlink" title="2.2 LL：支持的 hidden —— 为什么要「固定列表」？"></a>2.2 LL：支持的 hidden —— 为什么要「固定列表」？</h3><p><code>DeepEPLLPrepareAndFinalize.SUPPORTED_HIDDEN_SIZES</code> 类似：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">2048, 2560, 3072, 4096, 5120, 6144, 7168, 8192</span><br></pre></td></tr></table></figure>
+
+<p>不在列表中则 round up 到最近支持值；超过最大值直接报错。</p>
+<p><strong>是的，这句话说的就是：LL kernel 不为任意 <code>H</code> 写通用路径，只为若干常见 hidden 做特化。</strong></p>
+<h4 id="为什么要特化？好处是什么？"><a href="#为什么要特化？好处是什么？" class="headerlink" title="为什么要特化？好处是什么？"></a>为什么要特化？好处是什么？</h4><p>通信 kernel 里，每个 token 要搬 <code>H * sizeof(dtype)</code> 字节。若 <code>H</code> 是<strong>编译期常量</strong>（C++ template / 特化实例）：</p>
+<table>
+<thead>
+<tr>
+<th>好处</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>少分支、可展开</strong></td>
+<td>拷贝循环、向量化宽度、每 warp 负责的字节数可按 <code>H</code> 写死，少 runtime <code>if</code></td>
+</tr>
+<tr>
+<td><strong>对齐与指令友好</strong></td>
+<td>固定 <code>H</code> 更容易保证 int4/vector load 对齐，打满 NVLink/RDMA 包</td>
+</tr>
+<tr>
+<td><strong>布局可静态算</strong></td>
+<td>BatchedExperts 槽位、RDMA 槽 stride、<code>[E, capacity, H]</code> 偏移在编译期可知</td>
+</tr>
+<tr>
+<td><strong>延迟更稳</strong></td>
+<td>Decode 每步 token 少，延迟占比高；省掉「通用 H」带来的额外指令与同步更值</td>
+</tr>
+</tbody></table>
+<p>代价（牺牲通用性）：</p>
+<ul>
+<li>新模型若 <code>H=3200</code> 这类不在表里 → pad 到下一个支持值（多搬空气）或直接不支持  </li>
+<li>库要为每个 <code>H</code>（再乘 rank 配置等）维护/编译多套实例 → 二进制变大、支持面变窄</li>
+</ul>
+<p>HT 相对更「通用」：往往只要求 <strong>按原子大小对齐</strong>（如 512B），不必绑死在那几个数上；LL 为极致延迟绑得更死。</p>
+<p>和「假通用 alltoall」对比：NCCL 的 <code>alltoall</code>/<code>alltoallv</code> 对任意 shape 都能跑，但不会为 MoE 的 <code>H=7168, topk=8</code> 去手写一条 RDMA+overlap 的特化路径。</p>
+<hr>
+<h2 id="2-5-DeepEP-主要在优化什么？和「普通-all-to-all」差在哪？"><a href="#2-5-DeepEP-主要在优化什么？和「普通-all-to-all」差在哪？" class="headerlink" title="2.5 DeepEP 主要在优化什么？和「普通 all-to-all」差在哪？"></a>2.5 DeepEP 主要在优化什么？和「普通 all-to-all」差在哪？</h2><h3 id="定位"><a href="#定位" class="headerlink" title="定位"></a>定位</h3><p><strong>对：DeepEP 主要就是给 MoE EP 的 dispatch / combine（语义上的 all-to-all）做的专用通信库。</strong><br>它不做 expert GEMM；只把 token（及 topk 元数据等）在 EP ranks 间高效搬走、再搬回来。</p>
+<h3 id="「普通-all-to-all」通常指什么"><a href="#「普通-all-to-all」通常指什么" class="headerlink" title="「普通 all-to-all」通常指什么"></a>「普通 all-to-all」通常指什么</h3><table>
+<thead>
+<tr>
+<th>普通路径</th>
+<th>特点</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>NCCL <code>alltoall</code> / <code>alltoallv</code></td>
+<td>通用集合通信；等长或按 counts 可变长；不感知 MoE</td>
+</tr>
+<tr>
+<td>AG + RS「冒充」EP</td>
+<td>实现简单，但每卡拿到远多于需要的 token</td>
+</tr>
+</tbody></table>
+<p>它们：<strong>能完成数据交换</strong>，但通常：</p>
+<ul>
+<li>不内置「按 expert 路由 → 直接打成 expert 友好布局」  </li>
+<li>跨机不一定走 <strong>GPU 发起的 RDMA（如 IBGDA）+ 预注册对称缓冲</strong> 的极致路径  </li>
+<li>缺少为 decode 定制的 <strong>发完就退、用 hook 等收完、尽量不长期占 SM</strong> 的 overlap 模型  </li>
+<li>不会在通信路径里融合 <strong>FP8 dispatch</strong> 等 MoE 常见套路</li>
+</ul>
+<h3 id="DeepEP-相对做了哪些优化（概念清单）"><a href="#DeepEP-相对做了哪些优化（概念清单）" class="headerlink" title="DeepEP 相对做了哪些优化（概念清单）"></a>DeepEP 相对做了哪些优化（概念清单）</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">普通 NCCL A2A          DeepEP（面向 MoE EP）</span><br><span class="line">─────────────          ─────────────────────</span><br><span class="line">通用 shape             感知 topk / expert / MoE 两阶段</span><br><span class="line">CPU/库调度为主         GPU kernel 直接搬 +（LL）GPU 发起 RDMA</span><br><span class="line">一次 collective        dispatch 与 combine 成对 API + handle</span><br><span class="line">不关心布局             可直接产出 Standard 或 BatchedExperts</span><br><span class="line">跨机通用算法           NVLink↔RDMA 域转发（HT，适配非对称带宽）</span><br><span class="line">占 SM 做完整通信       LL：快速 issue 后可退；recv hook 与计算重叠</span><br></pre></td></tr></table></figure>
+
+<p>更具体一点：</p>
+<ol>
+<li><p><strong>API 贴合 MoE</strong><br><code>dispatch(x, topk_idx, topk_weights)</code> / <code>combine(..., handle)</code>，而不是先自己算 permute 再调一次裸 <code>alltoallv</code>。</p>
+</li>
+<li><p><strong>机内 NVLink + 跨机 RDMA 分工（尤其 HT）</strong><br>节点内走 NVLink；跨节点走 RDMA；并针对「NVLink 域 ↔ RDMA 域」的转发做吞吐向优化（DeepSeek-V3 类 group-limited 场景）。</p>
+</li>
+<li><p><strong>预注册 Buffer / 对称内存</strong><br>减少每步注册、分配；LL 按 worst-case token 预留，换延迟。</p>
+</li>
+<li><p><strong>LL：纯 RDMA + 低延迟 overlap</strong>  </p>
+<ul>
+<li>面向 decode 小 batch  </li>
+<li>IBGDA 等：GPU 直接发 RDMA  </li>
+<li><code>return_recv_hook</code>：通信可与 expert 计算重叠，且设计目标是 <strong>数据搬运阶段尽量不长期占满 SM</strong>（issue 很快结束）  </li>
+<li>固定 hidden、FP8 dispatch / BF16 combine 等生产向特化</li>
+</ul>
+</li>
+<li><p><strong>HT：高吞吐 + 可控占 SM</strong><br>Prefill/训练大流量；可用部分 SM 做通信队列与 NVLink forward，换带宽与稳定性。</p>
+</li>
+</ol>
+<h3 id="一张对照表"><a href="#一张对照表" class="headerlink" title="一张对照表"></a>一张对照表</h3><table>
+<thead>
+<tr>
+<th></th>
+<th><strong>普通 NCCL alltoall(v)</strong></th>
+<th><strong>DeepEP</strong></th>
+</tr>
+</thead>
+<tbody><tr>
+<td>服务对象</td>
+<td>任意分布式张量交换</td>
+<td><strong>MoE EP dispatch/combine</strong></td>
+</tr>
+<tr>
+<td>路由感知</td>
+<td>无（你自己先排好）</td>
+<td><strong>内置 topk → 目的 rank/expert</strong></td>
+</tr>
+<tr>
+<td>跨机路径</td>
+<td>NCCL 通用算法</td>
+<td><strong>RDMA 专用 +（HT）NVLink 转发</strong></td>
+</tr>
+<tr>
+<td>Decode 延迟</td>
+<td>通常不是第一优化目标</td>
+<td><strong>LL 内核专攻</strong></td>
+</tr>
+<tr>
+<td>与计算重叠</td>
+<td>靠 stream，较粗</td>
+<td><strong>LL hook 等细粒度设计</strong></td>
+</tr>
+<tr>
+<td>通用性</td>
+<td>高</td>
+<td>较低（hidden/rank 配置有约束）</td>
+</tr>
+<tr>
+<td>显存</td>
+<td>相对灵活</td>
+<td>LL 预分配可很大（OOM 风险）</td>
+</tr>
+</tbody></table>
+<p>口播：</p>
+<blockquote>
+<p>DeepEP ≈「给 MoE 寄信」的专用邮政系统；NCCL alltoall ≈ 通用快递。都能把包裹送到，但 DeepEP 认专家地址、走 NVLink/RDMA 专线，并给 decode 单独开了快线（LL）。</p>
+</blockquote>
+<hr>
+<h2 id="3-Buffer-生命周期（概念）"><a href="#3-Buffer-生命周期（概念）" class="headerlink" title="3. Buffer 生命周期（概念）"></a>3. Buffer 生命周期（概念）</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line">初始化 EP group / CUDA device</span><br><span class="line">        │</span><br><span class="line">        ▼</span><br><span class="line">deep_ep.Buffer(</span><br><span class="line">  group,</span><br><span class="line">  num_nvl_bytes=...,</span><br><span class="line">  num_rdma_bytes=...,   # 跨机或 LL 场景</span><br><span class="line">  low_latency_mode=...,</span><br><span class="line">  allow_nvlink_for_low_latency_mode=...,</span><br><span class="line">  allow_mnnvl=...,      # Multi-Node NVLink</span><br><span class="line">)</span><br><span class="line">        │</span><br><span class="line">        ▼</span><br><span class="line">每层 MoE:</span><br><span class="line">  dispatch(x, topk_idx, topk_weights, ...) → (recv_x, recv_meta, handle, ...)</span><br><span class="line">  local experts(recv_x, ...)</span><br><span class="line">  combine(expert_out, handle, ...) → y</span><br></pre></td></tr></table></figure>
+
+<p>要点：</p>
+<ul>
+<li><strong>handle</strong> 必须从同一次 dispatch 传到 combine；DBO 下按 ubatch 存多份。  </li>
+<li>RDMA 内存通常 <strong>提前注册</strong>；大小由 hint API 估算（LL 尤其敏感）。  </li>
+<li>纯机内 HT 可将 <code>num_rdma_bytes=0</code>，只走 NVLink 路径。</li>
+</ul>
+<h3 id="OOM-直觉（来自跨机笔记）"><a href="#OOM-直觉（来自跨机笔记）" class="headerlink" title="OOM 直觉（来自跨机笔记）"></a>OOM 直觉（来自跨机笔记）</h3><p>LL 的 RDMA 占用往往由 <strong><code>max_num_batched_tokens</code> / per-rank dispatch 上限</strong> 驱动，<strong>几乎不随 EP world size 线性减小</strong>。<br>加机器 ≠ 缓解 DeepEP LL OOM；应降 batch、设 <code>VLLM_NUM_MAX_DISPATCHED_TOKENS_PER_RANK</code> 等。</p>
+<h3 id="3-1-RDMA-Buffer-与显存：FAQ"><a href="#3-1-RDMA-Buffer-与显存：FAQ" class="headerlink" title="3.1 RDMA Buffer 与显存：FAQ"></a>3.1 RDMA Buffer 与显存：FAQ</h3><p><strong>Q1：是不是在 GPU 上申请一块显存，给 RDMA GDR 写？</strong></p>
+<p><strong>对。</strong> DeepEP LL 创建 <code>Buffer</code> 时按 <code>num_rdma_bytes</code> 在 <strong>GPU 显存</strong>里划一块（常经 NVSHMEM/对称堆一类路径），并做 <strong>RDMA 注册</strong>。对端 NIC 可 <strong>GPU Direct RDMA</strong> 直接写入这块显存，少经主机内存拷贝。</p>
+<p><strong>Q2：和模型里的 hidden state 是同一块吗？</strong></p>
+<p><strong>不是，是额外的通信工作区。</strong></p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">模型侧 activation / KV / 权重     ← 引擎本来就要用的显存</span><br><span class="line">        ＋</span><br><span class="line">DeepEP Buffer（NVL + RDMA 区）   ← 额外预分配，dispatch/combine 的收发槽</span><br></pre></td></tr></table></figure>
+
+<p>dispatch 会把 token（及元数据）<strong>搬进/搬出</strong>这套 buffer（或返回指向 buffer 的 view；DeepEP 文档也提醒 LL 结果会复用有限个 buffer，不能长期挂着多个未消费结果）。<br><strong>不是</strong>「远程直接写进你当前那一层的 <code>hidden_states</code> Parameter/Tensor 原址」这种零额外池（即便有 zero-copy 优化，也仍要先有这块已注册池）。</p>
+<p><strong>Q3：会不会挤占引擎可用显存？</strong></p>
+<p><strong>会。</strong> Buffer 在初始化 <code>deep_ep.Buffer(...)</code> 时就占上，profile KV 可用空间时已经少了一块。<br>LL 按 <strong>worst-case token 上限</strong> 预留，所以可能非常大（笔记里实测约数百 GB 量级的 size hint → 直接分配失败/OOM），和「这一步实际只有几个 decode token」无关。</p>
+<p><strong>Q4：写入数据超过 buffer 会不会再 OOM？</strong></p>
+<p>要分两种「OOM」：</p>
+<table>
+<thead>
+<tr>
+<th>时机</th>
+<th>原因</th>
+<th>典型表现</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>创建 Buffer 时</strong></td>
+<td><code>get_low_latency_rdma_size_hint(...)</code> 算出来的 <code>num_rdma_bytes</code> 太大</td>
+<td>初始化/第一次 get_handle 就炸（笔记里的 558GB 陷阱）</td>
+</tr>
+<tr>
+<td><strong>运行中某步 token 过多</strong></td>
+<td>超过创建时约定的 <code>num_max_dispatch_tokens_per_rank</code></td>
+<td>一般是 <strong>assert / 非法使用</strong>，<strong>不会</strong>再动态把 RDMA 池扩到更大；LL 设计就是固定容量</td>
+</tr>
+</tbody></table>
+<p>也就是说：LL <strong>先按上限把坑挖够</strong>；运行中超上限通常不是「再申请一块导致二次 OOM」，而是配置/调度不应让单 rank dispatch 超过该上限。</p>
+<p><strong>Q5：分配大小怎么定？</strong></p>
+<p>vLLM 侧（<code>DeepEPLLAll2AllManager._make_all2all_kwargs</code>）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">num_rdma_bytes = deep_ep.Buffer.get_low_latency_rdma_size_hint(</span><br><span class="line">    num_max_dispatch_tokens_per_rank=...,  # 关键：每 rank 最多 dispatch 多少 token</span><br><span class="line">    hidden=token_hidden_size,</span><br><span class="line">    num_ranks=num_ep_ranks,</span><br><span class="line">    num_experts=num_global_experts,</span><br><span class="line">)</span><br><span class="line"># 另有 num_nvl_bytes ≈ VLLM_DEEPEP_BUFFER_SIZE_MB（NVLink 侧）</span><br></pre></td></tr></table></figure>
+
+<p><code>num_max_dispatch_tokens_per_rank</code> 从哪来（不同分支略有差异，思想一致）：</p>
+<ol>
+<li>优先环境变量 <code>VLLM_NUM_MAX_DISPATCHED_TOKENS_PER_RANK</code>（若设置）  </li>
+<li>否则由 <code>max_num_batched_tokens</code>（或相关 seq 配置）推导  </li>
+<li>常再 <strong>向上取整到 2 的幂</strong>（DeepEP/对齐需要）</li>
+</ol>
+<p>直觉公式量级（非精确实现）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">RDMA 池 ∝  f( max_tokens_per_rank, hidden, num_ranks, num_experts, 双缓冲/元数据开销 )</span><br></pre></td></tr></table></figure>
+
+<p>因此：<strong>降 <code>max_num_batched_tokens</code> 或显式设较小的 <code>VLLM_NUM_MAX_DISPATCHED_TOKENS_PER_RANK</code></strong> 才能缩小池子；<strong>加 EP/加节点几乎不缩小</strong>（hint 对 ranks 不敏感或很弱，笔记实测 ranks=2/4 同为 ~558GB）。</p>
+<hr>
+<h2 id="4-与其它-All2All-后端对比"><a href="#4-与其它-All2All-后端对比" class="headerlink" title="4. 与其它 All2All 后端对比"></a>4. 与其它 All2All 后端对比</h2><table>
+<thead>
+<tr>
+<th>Backend</th>
+<th>机制</th>
+<th>冗余</th>
+<th>适用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>allgather_reducescatter</code></td>
+<td>NCCL AG + RS</td>
+<td>高</td>
+<td>默认/简单</td>
+</tr>
+<tr>
+<td><code>naive</code></td>
+<td>broadcast 类</td>
+<td>更高</td>
+<td>调试</td>
+</tr>
+<tr>
+<td><code>pplx</code></td>
+<td>NVSHMEM / P2P A2A</td>
+<td>低</td>
+<td>需 pplx_kernels</td>
+</tr>
+<tr>
+<td><code>deepep_high_throughput</code></td>
+<td>DeepEP HT</td>
+<td>低</td>
+<td>Prefill</td>
+</tr>
+<tr>
+<td><code>deepep_low_latency</code></td>
+<td>DeepEP LL</td>
+<td>低</td>
+<td>Decode</td>
+</tr>
+</tbody></table>
+<p>选择逻辑集中在 <code>device_communicators/all2all.py</code> 与 <code>cuda_communicator.py</code>；环境变量 <code>VLLM_ALL2ALL_BACKEND</code>。</p>
+<hr>
+<h2 id="5-vLLM-适配层该怎么读"><a href="#5-vLLM-适配层该怎么读" class="headerlink" title="5. vLLM 适配层该怎么读"></a>5. vLLM 适配层该怎么读</h2><h3 id="5-1-HT（deepep-ht-py）"><a href="#5-1-HT（deepep-ht-py）" class="headerlink" title="5.1 HT（deepep_ht.py）"></a>5.1 HT（<code>deepep_ht.py</code>）</h3><p>阅读顺序：</p>
+<ol>
+<li><code>__init__</code>：保存 <code>Buffer</code>、dispatcher 数、DBO handle 槽  </li>
+<li><code>_get_dispatch_config</code>：rank 数需落在 DeepEP 支持的 config 集合（如 2,4,8,…,160）  </li>
+<li><code>prepare</code> / <code>dispatch</code> 路径：量化 → <code>buffer.dispatch</code> → 整理 <code>ExpertTokensMetadata</code>  </li>
+<li><code>finalize</code>：<code>buffer.combine</code> + TopKWeightAndReduce 策略  </li>
+<li>DBO：<code>dbo_switch_to_comm/compute</code>、ROCm 上可能强制 sync（workspace 复用）</li>
+</ol>
+<h3 id="5-2-LL（deepep-ll-py）"><a href="#5-2-LL（deepep-ll-py）" class="headerlink" title="5.2 LL（deepep_ll.py）"></a>5.2 LL（<code>deepep_ll.py</code>）</h3><p>阅读顺序：</p>
+<ol>
+<li><code>SUPPORTED_HIDDEN_SIZES</code>、<code>maybe_roundup_layer_hidden_size</code>  </li>
+<li><code>use_fp8_dispatch</code> 与 <code>DEEPEP_QUANT_BLOCK_SIZE=128</code>  </li>
+<li><code>max_tokens_per_rank</code> 如何限制 capacity  </li>
+<li>与 EPLB 相关的 <code>global_to_physical</code> / <code>physical_to_global</code>（若构造函数传入）  </li>
+<li><code>dequant_fp8</code>：专家侧若需要非 fp8 计算时的回退路径</li>
+</ol>
+<h3 id="5-3-测试入口"><a href="#5-3-测试入口" class="headerlink" title="5.3 测试入口"></a>5.3 测试入口</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">vllm_comm/tests/kernels/moe/test_deepep_moe.py</span><br><span class="line">vllm_comm/tests/kernels/moe/test_deepep_deepgemm_moe.py</span><br><span class="line">vllm_comm/tests/kernels/moe/test_deepep_v2_moe.py</span><br><span class="line">sglang/test/manual/ep/test_deepep_*.py</span><br></pre></td></tr></table></figure>
+
+<p>有 GPU + 已装 <code>deep_ep</code> 时，优先跑单测建立「数值正确」基线，再上多节点。</p>
+<hr>
+<h2 id="6-建议下沉到-DeepEP-源码的主题（第二阶段）"><a href="#6-建议下沉到-DeepEP-源码的主题（第二阶段）" class="headerlink" title="6. 建议下沉到 DeepEP 源码的主题（第二阶段）"></a>6. 建议下沉到 DeepEP 源码的主题（第二阶段）</h2><p>在适配层跑通后，再读 DeepEP 仓库（若本机有 clone，可链到笔记）：</p>
+<ol>
+<li><strong>Intranode</strong>：warp/SM 如何打包 token、NVLink 拷贝粒度  </li>
+<li><strong>Internode</strong>：RDMA write 路径、credit / 通知、与 CPU 同步点  </li>
+<li><strong>LL 特化</strong>：固定 hidden 的 layout、对称堆、polling vs event  </li>
+<li><strong>与量化融合</strong>：dispatch 时 inplace fp8 的 scale 布局</li>
+</ol>
+<p>不必一开始就改 CUDA；先能画出「一次 dispatch 的数据从哪块显存写到哪块」。</p>
+<hr>
+<h2 id="7-SGLang-对照"><a href="#7-SGLang-对照" class="headerlink" title="7. SGLang 对照"></a>7. SGLang 对照</h2><p><code>sglang/.../token_dispatcher/deepep.py</code>：同样包一层 <code>deep_ep.Buffer</code>，接口命名偏 dispatcher。<br>Benchmark：<code>sglang/benchmark/kernels/deepep/</code>（含 tuning 脚本）。</p>
+<p>对比同一 DeepEP 版本在 vLLM vs SGLang 的：</p>
+<ul>
+<li>何时创建 Buffer  </li>
+<li>HT/LL 切换策略  </li>
+<li>与 CUDA Graph / overlap 的交互</li>
+</ul>
+<p>能快速区分「库行为」与「框架策略」。</p>
+<hr>
+<h2 id="自检"><a href="#自检" class="headerlink" title="自检"></a>自检</h2><ul>
+<li><input disabled="" type="checkbox"> 能一句话说清 DeepEP 与 DeepGEMM / MegaMoE 的分工  </li>
+<li><input disabled="" type="checkbox"> 能列出 HT vs LL 至少 4 条差异  </li>
+<li><input disabled="" type="checkbox"> 能解释 LL 固定 hidden 列表是为了什么、牺牲了什么  </li>
+<li><input disabled="" type="checkbox"> 能对比 DeepEP 与普通 NCCL alltoall 的至少 3 点不同  </li>
+<li><input disabled="" type="checkbox"> 知道 LL OOM 主要跟什么配置相关  </li>
+<li><input disabled="" type="checkbox"> 能在 <code>vllm_comm</code> 里指出 HT/LL 适配类与 all2all 创建 Buffer 的位置</li>
+</ul>
+<hr>
+<h2 id="环境变量速记（常见）"><a href="#环境变量速记（常见）" class="headerlink" title="环境变量速记（常见）"></a>环境变量速记（常见）</h2><p>以实际 <code>envs.py</code> 为准，学习时重点盯：</p>
+<ul>
+<li><code>VLLM_ALL2ALL_BACKEND</code>  </li>
+<li><code>VLLM_DEEPEP_BUFFER_SIZE_MB</code>  </li>
+<li><code>VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE</code>  </li>
+<li><code>VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL</code>  </li>
+<li><code>VLLM_NUM_MAX_DISPATCHED_TOKENS_PER_RANK</code>  </li>
+<li>以及与 DBO / MoE 相关的开关</li>
+</ul>
+<p>把「每个变量影响 HT 还是 LL、影响显存还是算法」记在实践清单里。</p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>03 · DeepEP（High-Throughput / Low-Latency）</p><p><a href="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/">https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-24</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-24</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/EP/">EP</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/MoE/">MoE</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">02a · DeepGEMM（MoE Expert 计算后端）</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-04-megamoe/"><span class="level-item">04 · MegaMoE（DeepSeek V4 + DeepGEMM）</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">39</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">7</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-cuda-learning/">Cuda Learning</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/">01 · MoE 与 Expert Parallelism 基础</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/">01a · MoE All-to-All：原因、载荷与流程</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/">02 · Modular Kernel 与 MoE 相关 Kernel</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/">02a · DeepGEMM（MoE Expert 计算后端）</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

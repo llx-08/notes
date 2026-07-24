@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>01 · MoE 与 Expert Parallelism 基础 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="01 · MoE 与 Expert Parallelism 基础 回到目录： README.md 下一章： 01a_moe_all_to_all.md （All-to-All 细讲 + 图） → 02_modular_kernel_and_moe_kernels.md 1. MoE 层在算什么 稠密 Transformer 的 FFN 对每个 token 做同一套线性变换。MoE 把它换成「多专家"><meta property="og:type" content="blog"><meta property="og:title" content="01 · MoE 与 Expert Parallelism 基础"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="01 · MoE 与 Expert Parallelism 基础 回到目录： README.md 下一章： 01a_moe_all_to_all.md （All-to-All 细讲 + 图） → 02_modular_kernel_and_moe_kernels.md 1. MoE 层在算什么 稠密 Transformer 的 FFN 对每个 token 做同一套线性变换。MoE 把它换成「多专家"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/ep_tp_dp_home.png"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/ep_dp_lockstep.png"><meta property="article:published_time" content="2026-07-24T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-24T09:30:09.411Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="EP"><meta property="article:tag" content="MoE"><meta property="article:tag" content="学习笔记"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/ep_tp_dp_home.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/"},"headline":"01 · MoE 与 Expert Parallelism 基础","image":["https://llx-08.github.io/notes/imgs/ep_tp_dp_home.png","https://llx-08.github.io/notes/imgs/ep_dp_lockstep.png"],"datePublished":"2026-07-24T00:00:00.000Z","dateModified":"2026-07-24T09:30:09.411Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"01 · MoE 与 Expert Parallelism 基础 回到目录： README.md 下一章： 01a_moe_all_to_all.md （All-to-All 细讲 + 图） → 02_modular_kernel_and_moe_kernels.md 1. MoE 层在算什么 稠密 Transformer 的 FFN 对每个 token 做同一套线性变换。MoE 把它换成「多专家"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.411Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">25 分钟读完 (大约3805个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">01 · MoE 与 Expert Parallelism 基础</h1><div class="content"><h1 id="01-·-MoE-与-Expert-Parallelism-基础"><a href="#01-·-MoE-与-Expert-Parallelism-基础" class="headerlink" title="01 · MoE 与 Expert Parallelism 基础"></a>01 · MoE 与 Expert Parallelism 基础</h1><blockquote>
+<p>回到目录：<a href="/2026/07/24/ep-learning/">README.md</a><br>下一章：<a href="/2026/07/24/ep-learning-01a-moe-all-to-all/">01a_moe_all_to_all.md</a>（All-to-All 细讲 + 图） → <a href="/2026/07/24/ep-learning-02-modular-kernel-and-moe-kernels/">02_modular_kernel_and_moe_kernels.md</a></p>
+</blockquote>
+<hr>
+<h2 id="1-MoE-层在算什么"><a href="#1-MoE-层在算什么" class="headerlink" title="1. MoE 层在算什么"></a>1. MoE 层在算什么</h2><p>稠密 Transformer 的 FFN 对每个 token 做同一套线性变换。MoE 把它换成「多专家 + 门控」：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">h = LayerNorm(x)</span><br><span class="line">gate_logits = Gate(h)                    # [T, E]</span><br><span class="line">topk_ids, topk_weights = TopK(gate)      # [T, K], [T, K]</span><br><span class="line">y_e = Expert_e(h)                        # 仅对路由到 e 的 token</span><br><span class="line">y = Σ_k topk_weights[...,k] * y_{topk_ids[...,k]}</span><br></pre></td></tr></table></figure>
+
+<p>要点：</p>
+<ul>
+<li><strong>稀疏激活</strong>：每 token 只算 K 个 expert（K≪E），算力随 K 增长而非 E。</li>
+<li><strong>参数随 E 增长</strong>：容量大，但单 token 算力可控。</li>
+<li><strong>通信新瓶颈</strong>：一旦 expert 分到多卡，就必须 <strong>dispatch / combine</strong>。</li>
+</ul>
+<p>常见变体：</p>
+<table>
+<thead>
+<tr>
+<th>变体</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Shared Expert</td>
+<td>所有 token 额外过一个共享 FFN，再与 routed 输出相加</td>
+</tr>
+<tr>
+<td>Grouped TopK</td>
+<td>DeepSeek 风格：先选 group 再组内选 expert</td>
+</tr>
+<tr>
+<td>Hash / simulated routing</td>
+<td>调试或负载研究用</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="2-并行轴：TP-DP-EP-的关系"><a href="#2-并行轴：TP-DP-EP-的关系" class="headerlink" title="2. 并行轴：TP / DP / EP 的关系"></a>2. 并行轴：TP / DP / EP 的关系</h2><h3 id="2-1-直觉"><a href="#2-1-直觉" class="headerlink" title="2.1 直觉"></a>2.1 直觉</h3><table>
+<thead>
+<tr>
+<th>轴</th>
+<th>切什么</th>
+<th>MoE 相关影响</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>TP</td>
+<td>单层权重矩阵按列/行切</td>
+<td>同一 expert 可被 TP 切开；通信多为 all-reduce</td>
+</tr>
+<tr>
+<td>DP</td>
+<td>数据切分，权重复制</td>
+<td>各 DP 持有完整模型副本；需梯度/激活同步</td>
+</tr>
+<tr>
+<td>EP</td>
+<td><strong>按 expert 切分</strong></td>
+<td>每卡只持有 <code>E / EP</code> 个完整 expert；需要 token all-to-all</td>
+</tr>
+</tbody></table>
+<h3 id="2-2-vLLM-中的关键事实：EP-TP-×-DP"><a href="#2-2-vLLM-中的关键事实：EP-TP-×-DP" class="headerlink" title="2.2 vLLM 中的关键事实：EP = TP × DP"></a>2.2 vLLM 中的关键事实：<code>EP = TP × DP</code></h3><p>在 vLLM 里，EP <strong>不是</strong>独立于 TP/DP 的第三条进程轴，而是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">EP world size = tensor_parallel_size × data_parallel_size</span><br></pre></td></tr></table></figure>
+
+<p>含义：</p>
+<ul>
+<li>开启 DP 后，不同 DP rank 上的「同位置」TP rank 组成更大的 EP group。</li>
+<li>MoE 的 dispatch/combine 在 <strong>EP group</strong> 上做集体通信。</li>
+<li>因此 <strong>DP&gt;1 的 MoE serving 几乎必然涉及 EP 语义</strong>（哪怕你口头只说「开了 DP」）。</li>
+</ul>
+<p>跨机时：EP group 成员分布在多节点 → all-to-all 走 IB/RoCE，见已有专题笔记。</p>
+<p>下图用「同色 = 同一 DP home」说明：Attn 后同色卡持有同一份完整 hidden；expert 则可能摊在所有颜色的 GPU 上。</p>
+<p><img src="/notes/imgs/ep_tp_dp_home.png" alt="EP=TP×DP 与 token home（同色为同一 DP 数据归属）"></p>
+<p><em>图：蓝色 / 黄色各是一个 DP home；TP 是同色内切权重，EP 可跨色分 expert。</em></p>
+<h3 id="2-3-进程与-DP-Lockstep"><a href="#2-3-进程与-DP-Lockstep" class="headerlink" title="2.3 进程与 DP Lockstep"></a>2.3 进程与 DP Lockstep</h3><ul>
+<li>每个 DP rank 通常对应独立 EngineCore；内部再有 TP workers。</li>
+<li>EP 上的 collective <strong>要求所有参与 rank 同步进入同一 MoE 层</strong>。</li>
+<li>空闲 DP rank 也必须跑 <code>dummy_batch</code>，否则其他 rank 在 all-to-all 上死锁。</li>
+</ul>
+<p><strong>Lockstep（齐步行进）是什么意思？</strong></p>
+<p>不是「所有 DP 的 scheduler 队列内容必须一模一样」，而是：</p>
+<blockquote>
+<p>只要 <strong>全局还有活</strong>（某个 DP 上还有未完成请求、wave 还在跑），<strong>每一个 DP rank 每一拍都要进入同一次 model step</strong>（有真 batch 就 <code>execute_model</code>，没可跑的就 <code>dummy_batch</code>），从而一起穿过 MoE 的 all-to-all / all-reduce。</p>
+</blockquote>
+<p><img src="/notes/imgs/ep_dp_lockstep.png" alt="DP Lockstep：有活的跑真 batch，空闲的跑 dummy，一起进 MoE"></p>
+<p><em>图：DP1 本步无可调度仍必须 <code>dummy_batch</code>，否则 A2A 死锁。同步标准是全局 OR(unfinished)。</em></p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">DP0: 有真请求 → forward（含 MoE A2A）──┐</span><br><span class="line">DP1: 本步无可跑 → dummy_batch（也进 A2A）─┼─ 同一拍 collective，不挂死</span><br><span class="line">DP2: 有真请求 → forward（含 MoE A2A）──┘</span><br></pre></td></tr></table></figure>
+
+<p>若允许「我没请求就整步跳过、不进 MoE」→ 别的 DP 在 A2A 上等你 → <strong>死锁 / NCCL timeout</strong>。</p>
+<p>引擎侧还会用 DP 间 all-reduce 同步「全局是否还有 unfinished」，维护 <code>engines_running</code>；全员都空了才停 wave，避免有人提前躺平。</p>
+<h3 id="2-3-1-has-unfinished-requests-指什么？"><a href="#2-3-1-has-unfinished-requests-指什么？" class="headerlink" title="2.3.1 has_unfinished_requests 指什么？"></a>2.3.1 <code>has_unfinished_requests</code> 指什么？</h3><p><strong>指调度器里是否还有「生命周期未结束」的请求，不是「此刻 GPU 正在 forward 的请求」。</strong></p>
+<p><code>Scheduler.get_num_unfinished_requests()</code> 大致是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">len(waiting) + len(skipped_waiting) + len(running)</span><br><span class="line">  − streaming 等待输入的特殊计数</span><br></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>队列</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>waiting</code></td>
+<td>已进引擎、尚未（或暂时不能）进入 running 的请求</td>
+</tr>
+<tr>
+<td><code>running</code></td>
+<td>正在多步生成中的请求（prefill/decode 跨很多 step）</td>
+</tr>
+<tr>
+<td>从上述队列移除</td>
+<td>通常已 EOS / 达 max tokens / abort 等，生命周期结束</td>
+</tr>
+</tbody></table>
+<p>因此：</p>
+<ul>
+<li><strong>≈「未完成请求（尚未结束生成）」</strong>，包含还在排队、本步没被 schedule 到的。  </li>
+<li><strong>≠「本步正在执行 forward 的请求」</strong>。本步有没有真的跑 GPU，看的是 <code>_process_engine_step()</code> 是否 <code>executed</code>，不是这个 flag。</li>
+</ul>
+<p>和 dummy 的关系（<code>DPEngineCore.run_busy_loop</code> 思路）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">executed = 本步是否跑了真实 batch</span><br><span class="line">local_unfinished = has_unfinished_requests()</span><br><span class="line"></span><br><span class="line">if not executed:</span><br><span class="line">  if 本地也没 unfinished 且 engines_running==False:</span><br><span class="line">      # 全局都闲，可以空转等新请求</span><br><span class="line">  else:</span><br><span class="line">      # 本步没真活，但 wave 还在 / 本地或别人还有未完成</span><br><span class="line">      → execute_dummy_batch()   # 对齐 lockstep</span><br></pre></td></tr></table></figure>
+
+<p>口播：</p>
+<blockquote>
+<p><code>has_unfinished</code> = 调度账本里还有活单；<code>executed</code> = 这一拍有没有派出真车。<br>Lockstep = 只要全局账本或 wave 说「还在干活」，没真车的 rank 也要派 dummy 车去 MoE 路口会合。</p>
+</blockquote>
+<h3 id="2-3-2-为什么「本地-unfinished」能当跨-DP-同步标准？"><a href="#2-3-2-为什么「本地-unfinished」能当跨-DP-同步标准？" class="headerlink" title="2.3.2 为什么「本地 unfinished」能当跨 DP 同步标准？"></a>2.3.2 为什么「本地 unfinished」能当跨 DP 同步标准？</h3><p>关键点：同步的不是「大家队列里是同一批请求」，而是 <strong>「全集群还有没有活」</strong>。</p>
+<ul>
+<li>每个 DP rank 有<strong>自己的</strong> scheduler、<strong>自己的</strong>请求子集（数据并行）。  </li>
+<li><code>has_unfinished_requests()</code> 只回答：<strong>我这边账本空了没有</strong>。  </li>
+<li>跨 DP 时做集体运算（如 all-reduce OR/MAX）：</li>
+</ul>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">global_unfinished = OR( DP0.unfinished, DP1.unfinished, … )</span><br><span class="line">engines_running   ≈ global_unfinished   # 思想：任一 rank 还有活 → 全体继续齐步</span><br></pre></td></tr></table></figure>
+
+<p>因此：</p>
+<table>
+<thead>
+<tr>
+<th>问题</th>
+<th>答案</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>各 rank 的 unfinished 指同一批请求吗？</td>
+<td><strong>否</strong>，各管各的请求</td>
+</tr>
+<tr>
+<td>那同步的是什么？</td>
+<td><strong>「是否还有任一 DP 仍有未完成请求」</strong></td>
+</tr>
+<tr>
+<td>为何够用？</td>
+<td>决定 <strong>wave 是否继续 / 空闲 rank 是否还要 dummy</strong>：有人有活 → 全体不能停；全员空 → 一起停</td>
+</tr>
+</tbody></table>
+<p>和 lockstep 的两层关系：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">① 步内齐步（防 A2A 死锁）</span><br><span class="line">   engines_running==True 且本步没真 batch → dummy_batch</span><br><span class="line">   （别人可能还在真 forward，你必须到 MoE 路口）</span><br><span class="line"></span><br><span class="line">② 波次停表（防有人先躺平）</span><br><span class="line">   周期性同步 global_unfinished</span><br><span class="line">   全 False → engines_running=False，一起结束 wave</span><br></pre></td></tr></table></figure>
+
+<p>所以：拿 <code>has_unfinished_requests</code> 做标准，不是因为「它等于正在 forward」，而是因为它是各 rank 上 <strong>「我还有没有要继续多步生成的活」</strong> 的本地布尔，OR 起来就是全局是否该继续齐步行进。</p>
+<h3 id="2-4-dummy-batch：有没有-token？怎么「分辨」？"><a href="#2-4-dummy-batch：有没有-token？怎么「分辨」？" class="headerlink" title="2.4 dummy_batch：有没有 token？怎么「分辨」？"></a>2.4 <code>dummy_batch</code>：有没有 token？怎么「分辨」？</h3><p><strong>会有 token，而且会进 all-to-all。</strong> 空闲 rank 不是发一个「空 collective」，而是构造一小批<strong>人造 batch</strong>，跑完整（或等价）的 <code>model.forward</code>，从而和有活的 rank 一样穿过每一层 MoE 的 dispatch/combine。</p>
+<p>vLLM 路径（<code>vllm_comm</code>）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">EngineCore（本 DP 本步没跑成真实请求）</span><br><span class="line">  → execute_dummy_batch()</span><br><span class="line">  → Worker.execute_dummy_batch()</span><br><span class="line">  → model_runner._dummy_run(num_tokens≈uniform_decode_query_len, uniform_decode=True)</span><br><span class="line">  → 伪造 input_ids / positions / attn meta …</span><br><span class="line">  → self.model(...)   # 含 MoE → 真的进 A2A</span><br></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>问题</th>
+<th>答案</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>dummy 有没有 token？</td>
+<td><strong>有</strong>。idle lockstep 常见是 <strong>至少 1 个</strong>（decode 长度），不是 <code>T=0</code>。</td>
+</tr>
+<tr>
+<td>这些 token 参不参与 A2A？</td>
+<td><strong>参与</strong>。MoE 通信层一般<strong>没有</strong>「这是 dummy 就跳过 dispatch」的分支；人造 hidden 一样走 router → dispatch → experts → combine。</td>
+</tr>
+<tr>
+<td>和真实请求怎么分辨？</td>
+<td><strong>主要在引擎侧分辨，不在 NCCL/DeepEP 里贴标签。</strong></td>
+</tr>
+</tbody></table>
+<p>分辨落在哪一层：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">┌─────────────────────────────────────────────────────────┐</span><br><span class="line">│ Engine / Scheduler（能分辨）                              │</span><br><span class="line">│  - 本 DP 有无 unfinished / 本步是否 execute 成功           │</span><br><span class="line">│  - 无活 → execute_dummy_batch；有活 → 正常 execute_model   │</span><br><span class="line">└─────────────────────────────────────────────────────────┘</span><br><span class="line">                          │</span><br><span class="line">                          ▼</span><br><span class="line">┌─────────────────────────────────────────────────────────┐</span><br><span class="line">│ Model / MoE / All-to-All（基本不分辨）                     │</span><br><span class="line">│  - 只看见 [T, H] + topk；dummy 与真实在通信语义上同类      │</span><br><span class="line">│  - 结果不写回用户输出；KV slot_mapping 常填 -1 跳过写 cache │</span><br><span class="line">│  - EPLB 统计常 skip / is_dummy，避免人造负载污染均衡       │</span><br><span class="line">└─────────────────────────────────────────────────────────┘</span><br></pre></td></tr></table></figure>
+
+<p>要点：</p>
+<ol>
+<li><strong>为何不能 0 token？</strong> <code>T=0</code> 容易走不同代码路径或根本不进 MoE，其它 rank 仍在 A2A 上等待 → 死锁。人造少量 token 是为了 <strong>对齐 collective 参与</strong>，不是为了产出答案。  </li>
+<li><strong>其它 rank 会「吃到」dummy token 吗？</strong> 会。真 A2A / AG 都会把空闲 rank 造出来的 token（或其 gather 视图）算进本步通信；代价通常很小（T≈1），换来不挂死。  </li>
+<li><strong>「分辨」不等于「通信可跳过」</strong>：能跳过的是采样、写 KV、给用户返回、EPLB 计数；<strong>不能</strong>跳过的是与 EP group 绑定的 MoE collective。</li>
+</ol>
+<p>代码锚点：<code>v1/engine/core.py</code>（空闲时调 <code>execute_dummy_batch</code>）、<code>gpu_worker.py:execute_dummy_batch</code>、<code>gpu_model_runner.py:_dummy_run</code>（<code>slot_mappings.fill_(-1)</code>、EPLB <code>is_dummy</code> 注释）。</p>
+<hr>
+<h2 id="3-Dispatch-Combine：两种抽象"><a href="#3-Dispatch-Combine：两种抽象" class="headerlink" title="3. Dispatch / Combine：两种抽象"></a>3. Dispatch / Combine：两种抽象</h2><h3 id="3-1-「假-EP」：AllGather-ReduceScatter"><a href="#3-1-「假-EP」：AllGather-ReduceScatter" class="headerlink" title="3.1 「假 EP」：AllGather + ReduceScatter"></a>3.1 「假 EP」：AllGather + ReduceScatter</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">Dispatch ≈ all_gather(tokens)     # 每卡拿到全局 token</span><br><span class="line">Local experts 对「自己负责的 expert」计算（或对全量 token 算本地 expert）</span><br><span class="line">Combine ≈ reduce_scatter(outputs) # 按原 DP 切片归约回去</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>实现简单，NCCL 成熟。</li>
+<li>带宽与算力都有 <strong>O(EP)</strong> 冗余：不该来的 token 也到了本卡。</li>
+</ul>
+<h3 id="3-2-「真-EP」：Token-All-to-All"><a href="#3-2-「真-EP」：Token-All-to-All" class="headerlink" title="3.2 「真 EP」：Token All-to-All"></a>3.2 「真 EP」：Token All-to-All</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">Dispatch: 只把 token 发给持有其 top-k expert 的 ranks</span><br><span class="line">Local experts: 只算本地 expert</span><br><span class="line">Combine: 把结果送回 token 的 home，并按 topk weight 归约</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>通信量与路由稀疏度相关，跨机时更划算。</li>
+<li>需要更复杂的元数据：每 expert token 数、排序、padding、handle。</li>
+<li>DeepEP / PPLX / FlashInfer A2A 都属于这一类。</li>
+</ul>
+<blockquote>
+<p><strong>细讲（原因 / 传什么 / 流程图）</strong> → <a href="/2026/07/24/ep-learning-01a-moe-all-to-all/">01a_moe_all_to_all.md</a></p>
+</blockquote>
+<h3 id="3-3-「token-原-rank-home」指什么（易混点）"><a href="#3-3-「token-原-rank-home」指什么（易混点）" class="headerlink" title="3.3 「token 原 rank / home」指什么（易混点）"></a>3.3 「token 原 rank / home」指什么（易混点）</h3><p><strong>不要和 Attention 的 TP 搞混。</strong> Attn 里每个 TP rank 都在算——但那是「同一批 token、切权重」；MoE dispatch 是「token 按 expert 搬家」。</p>
+<table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>切什么</th>
+<th>各 rank 上的 token</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Attn / 稠密</td>
+<td><strong>TP 切权重</strong></td>
+<td>同一 <strong>DP</strong> 内，各 TP rank 处理<strong>同一批</strong> token（算不同分片，再 all-reduce）</td>
+</tr>
+<tr>
+<td>MoE EP</td>
+<td><strong>按 expert 切权重</strong></td>
+<td>token 要按 top-k <strong>寄到</strong>持有对应 expert 的 EP rank</td>
+</tr>
+</tbody></table>
+<p>口播版：</p>
+<blockquote>
+<p><strong>home（原 rank）= MoE dispatch 之前持有该 token hidden 的数据归属（主要是 DP home）；不是「Attn 只跑在某一个 TP 上」。</strong></p>
+</blockquote>
+<p>再拆开看：</p>
+<ol>
+<li><strong>DP&gt;1</strong>：调度时序列/batch 落在哪个 DP rank，MoE 前 hidden 就在那一套进程里。<br>  Dispatch 可能发到别的 DP/TP（只要那边有对应 expert）；<br>Combine 必须<strong>送回这个 DP home</strong>，下一层 Attn 才能继续。</li>
+<li><strong>同一 DP、TP&gt;1</strong>：Attn 后 all-reduce，<strong>该 DP 下每个 TP rank 上都有这份完整 hidden</strong>。<br>  此时 home 是「这一整组 TP ranks（同一数据分片）」，不是「只有 TP0 有 token」。<br>Dispatch 在 EP group（<code>TP×DP</code>）里按 expert 重排；Combine 后再恢复成进入 MoE 前、本 DP 各 TP 上应有的布局。</li>
+</ol>
+<p>和两种后端的对应关系：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">真 all-to-all:  token 离开 home → 专家 rank 计算 → 送回 home</span><br><span class="line">AG + RS:       先 gather 到大家都能算 → reduce-scatter 回各自原来的 DP token 切片</span><br></pre></td></tr></table></figure>
+
+<p>两种写法里的「回原处」，指的都是上面的 <strong>home / DP 数据归属</strong>，不是某个唯一做 Attn 的 TP rank。</p>
+<hr>
+<h2 id="4-数据布局：Standard-vs-BatchedExperts"><a href="#4-数据布局：Standard-vs-BatchedExperts" class="headerlink" title="4. 数据布局：Standard vs BatchedExperts"></a>4. 数据布局：Standard vs BatchedExperts</h2><p>Modular kernel 里两种 activation format：</p>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Shape 直觉</th>
+<th>谁喜欢</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Standard</strong></td>
+<td><code>[num_tokens, hidden]</code>，token 连续</td>
+<td>DeepEP HT、多数 Triton fused MoE</td>
+</tr>
+<tr>
+<td><strong>BatchedExperts</strong></td>
+<td><code>[num_local_experts, max_tokens, hidden]</code></td>
+<td>DeepEP LL、部分 batched DeepGEMM</td>
+</tr>
+</tbody></table>
+<p>从 Standard → Batched 通常伴随 <strong>permute / pack</strong>；反过来是 <strong>unpermute / scatter</strong>。<br><code>moe_align_block_size</code> 解决的是：按 expert 排序后，token 数要对齐到 GEMM block（如 64/128），不足则 pad。</p>
+<hr>
+<h2 id="5-Expert-Map：全局-ID-↔-本地-ID"><a href="#5-Expert-Map：全局-ID-↔-本地-ID" class="headerlink" title="5. Expert Map：全局 ID ↔ 本地 ID"></a>5. Expert Map：全局 ID ↔ 本地 ID</h2><p>开启 EP 后，模型配置里的 expert id 是 <strong>全局</strong> 的，本卡只存一部分权重：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">expert_map[global_id] = local_id   # 本卡持有</span><br><span class="line">expert_map[global_id] = -1         # 本卡不持有 → GEMM 应跳过</span><br></pre></td></tr></table></figure>
+
+<p>EPLB 打开后还有：</p>
+<ul>
+<li><strong>logical expert</strong>：训练/配置定义的 E 个</li>
+<li><strong>physical expert</strong>：可复制热点后的物理槽位（≥E）</li>
+<li><code>logical ↔ physical</code> 映射表随 rebalance 更新</li>
+</ul>
+<p>读代码时先分清「路由输出的 id 是哪一套坐标系」。</p>
+<hr>
+<h2 id="6-Prefill-vs-Decode-对-EP-的不同压力"><a href="#6-Prefill-vs-Decode-对-EP-的不同压力" class="headerlink" title="6. Prefill vs Decode 对 EP 的不同压力"></a>6. Prefill vs Decode 对 EP 的不同压力</h2><table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>特征</th>
+<th>通信偏好</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Prefill</td>
+<td>token 多、延迟可摊销</td>
+<td><strong>高吞吐</strong> all-to-all（DeepEP HT）</td>
+</tr>
+<tr>
+<td>Decode</td>
+<td>每步 token 少、延迟敏感</td>
+<td><strong>低延迟</strong> 路径（DeepEP LL、小 buffer、少同步）</td>
+</tr>
+</tbody></table>
+<p>同一模型常在不同阶段切不同 <code>VLLM_ALL2ALL_BACKEND</code>，或依赖框架自动选择。</p>
+<hr>
+<h2 id="7-和「普通-TP-MoE」的边界"><a href="#7-和「普通-TP-MoE」的边界" class="headerlink" title="7. 和「普通 TP MoE」的边界"></a>7. 和「普通 TP MoE」的边界</h2><ul>
+<li><strong>纯 TP、DP=1</strong>：expert 权重按 TP 切分，token 不跨 DP；通信主要是 TP all-reduce，不一定走 DeepEP。</li>
+<li><strong>DP&gt;1 或显式 enable_expert_parallel</strong>：必须处理跨 rank 的 token 路由 → 进入本系列后半部分。</li>
+</ul>
+<p>MegaMoE（DeepSeek V4）当前在 vLLM 路径上 <strong>要求开启 EP</strong>，并与特定 routing / dtype 绑定——见第 04 章。</p>
+<hr>
+<h2 id="自检"><a href="#自检" class="headerlink" title="自检"></a>自检</h2><ul>
+<li><input disabled="" type="checkbox"> 能画出 Router → Dispatch → Experts → Combine 四步，并说明每步输入输出 shape 量级</li>
+<li><input disabled="" type="checkbox"> 能解释为何 vLLM 里 <code>EP = TP × DP</code>，以及 dummy batch 的必要性</li>
+<li><input disabled="" type="checkbox"> 知道跨 DP 同步的是 <code>OR(各 rank 本地 unfinished)</code>，不是同一批请求</li>
+<li><input disabled="" type="checkbox"> 能对比 AG+RS 与真 all-to-all 的带宽冗余</li>
+<li><input disabled="" type="checkbox"> 知道 Standard / BatchedExperts、global/local expert id 的区别</li>
+<li><input disabled="" type="checkbox"> 能说明「token home」是 DP 数据归属，且与「Attn 每个 TP 都参与」不矛盾</li>
+</ul>
+<hr>
+<h2 id="建议精读（本章）"><a href="#建议精读（本章）" class="headerlink" title="建议精读（本章）"></a>建议精读（本章）</h2><ol>
+<li><code>vllm_comm/vllm/distributed/parallel_state.py</code> — EP group 构造</li>
+<li><code>vllm_comm/vllm/model_executor/layers/fused_moe/layer.py</code> — <code>FusedMoE.forward</code> 总控</li>
+<li><code>../vllm_cross_node_expert_parallelism.md</code> — §一、§二（拓扑与进程模型）</li>
+</ol>
+</div><div class="article-licensing box"><div class="licensing-title"><p>01 · MoE 与 Expert Parallelism 基础</p><p><a href="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/">https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-24</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-24</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/EP/">EP</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/MoE/">MoE</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/24/2026-07-24-cuda-learning/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">Cuda Learning</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/"><span class="level-item">01a · MoE All-to-All：原因、载荷与流程</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">39</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">7</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-cuda-learning/">Cuda Learning</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/">01 · MoE 与 Expert Parallelism 基础</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/">01a · MoE All-to-All：原因、载荷与流程</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/">02 · Modular Kernel 与 MoE 相关 Kernel</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/">02a · DeepGEMM（MoE Expert 计算后端）</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

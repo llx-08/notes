@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>01a · MoE All-to-All：原因、载荷与流程 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="01a · MoE All-to-All：原因、载荷与流程 上一章： 01_ep_fundamentals.md （§3 抽象） 下一章： 02_modular_kernel_and_moe_kernels.md 实现侧加深： 03_deepep.md 现有文档里有没有？ 01 只有 AG+RS vs 真 A2A 的抽象对比； 03 讲 DeepEP 库差异。 「为什么要 A2A、传什么、怎么走」"><meta property="og:type" content="blog"><meta property="og:title" content="01a · MoE All-to-All：原因、载荷与流程"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="01a · MoE All-to-All：原因、载荷与流程 上一章： 01_ep_fundamentals.md （§3 抽象） 下一章： 02_modular_kernel_and_moe_kernels.md 实现侧加深： 03_deepep.md 现有文档里有没有？ 01 只有 AG+RS vs 真 A2A 的抽象对比； 03 讲 DeepEP 库差异。 「为什么要 A2A、传什么、怎么走」"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/ep_collectives_compare.png"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/ep_dp0_vs_dp_a2a.png"><meta property="article:published_time" content="2026-07-24T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-24T09:30:09.412Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="EP"><meta property="article:tag" content="MoE"><meta property="article:tag" content="学习笔记"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/ep_collectives_compare.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/"},"headline":"01a · MoE All-to-All：原因、载荷与流程","image":["https://llx-08.github.io/notes/imgs/ep_collectives_compare.png","https://llx-08.github.io/notes/imgs/ep_dp0_vs_dp_a2a.png"],"datePublished":"2026-07-24T00:00:00.000Z","dateModified":"2026-07-24T09:30:09.412Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"01a · MoE All-to-All：原因、载荷与流程 上一章： 01_ep_fundamentals.md （§3 抽象） 下一章： 02_modular_kernel_and_moe_kernels.md 实现侧加深： 03_deepep.md 现有文档里有没有？ 01 只有 AG+RS vs 真 A2A 的抽象对比； 03 讲 DeepEP 库差异。 「为什么要 A2A、传什么、怎么走」"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.412Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">32 分钟读完 (大约4763个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">01a · MoE All-to-All：原因、载荷与流程</h1><div class="content"><h1 id="01a-·-MoE-All-to-All：原因、载荷与流程"><a href="#01a-·-MoE-All-to-All：原因、载荷与流程" class="headerlink" title="01a · MoE All-to-All：原因、载荷与流程"></a>01a · MoE All-to-All：原因、载荷与流程</h1><blockquote>
+<p>上一章：<a href="/2026/07/24/ep-learning-01-ep-fundamentals/">01_ep_fundamentals.md</a>（§3 抽象）<br>下一章：<a href="/2026/07/24/ep-learning-02-modular-kernel-and-moe-kernels/">02_modular_kernel_and_moe_kernels.md</a><br>实现侧加深：<a href="/2026/07/24/ep-learning-03-deepep/">03_deepep.md</a></p>
+</blockquote>
+<blockquote>
+<p><strong>现有文档里有没有？</strong><br><code>01</code> 只有 AG+RS vs 真 A2A 的抽象对比；<code>03</code> 讲 DeepEP 库差异。<br><strong>「为什么要 A2A、传什么、怎么走」的细图在本章。</strong></p>
+</blockquote>
+<hr>
+<h2 id="1-为什么需要-All-to-All？"><a href="#1-为什么需要-All-to-All？" class="headerlink" title="1. 为什么需要 All-to-All？"></a>1. 为什么需要 All-to-All？</h2><h3 id="1-1-矛盾：expert-在卡上，token-在另一处"><a href="#1-1-矛盾：expert-在卡上，token-在另一处" class="headerlink" title="1.1 矛盾：expert 在卡上，token 在另一处"></a>1.1 矛盾：expert 在卡上，token 在另一处</h3><p>开启 EP 后，<strong>expert 权重静态分片</strong>在各 EP rank 上；而 Router 之后，每个 token 只需要其中 <strong>top-k 个</strong> expert。</p>
+<p>若不做通信，只能：</p>
+<ul>
+<li>把<strong>所有 expert 权重</strong>复制到每张卡（失去 EP），或  </li>
+<li>每张卡只算本地 expert、对「没来的 token」交白卷（结果错误）</li>
+</ul>
+<p>因此必须让 <strong>activation（token）去找 expert</strong>，而不是每步搬整份 expert 权重。</p>
+<pre><code class="highlight mermaid">flowchart LR
+  subgraph Home["Token Home（某 DP 的 batch）"]
+    T["tokens + topk_ids"]
+  end
+  subgraph EP0["EP rank 0&lt;br/&gt;experts 0..E/EP-1"]
+    E0["本地 expert 权重"]
+  end
+  subgraph EP1["EP rank 1&lt;br/&gt;experts …"]
+    E1["本地 expert 权重"]
+  end
+  T --&gt;|"Dispatch: 按 topk 寄 token"| E0
+  T --&gt;|"Dispatch"| E1
+  E0 --&gt;|"Combine: 寄回 expert 输出"| T
+  E1 --&gt;|"Combine"| T</code></pre>
+
+<h3 id="1-2-为何是「All-to-All」而不是点对点随便发？"><a href="#1-2-为何是「All-to-All」而不是点对点随便发？" class="headerlink" title="1.2 为何是「All-to-All」而不是点对点随便发？"></a>1.2 为何是「All-to-All」而不是点对点随便发？</h3><ul>
+<li>每个 rank <strong>既是发送方也是接收方</strong>：自己的 token 要出去，别人的 token 要进来给本地 expert 算。  </li>
+<li>目的地由 <strong>路由结果</strong> 决定，且每步不同 → 典型的 <strong>多对多、不规则</strong> 交换。  </li>
+<li>实现上可以是：NCCL <code>all_to_all_single</code>、自定义 NVLink/RDMA kernel（DeepEP）、或用 AG+RS <strong>模拟</strong>（通信量更大）。</li>
+</ul>
+<h3 id="1-3-和-Attn-all-reduce-的差别"><a href="#1-3-和-Attn-all-reduce-的差别" class="headerlink" title="1.3 和 Attn all-reduce 的差别"></a>1.3 和 Attn all-reduce 的差别</h3><table>
+<thead>
+<tr>
+<th></th>
+<th>Attn TP all-reduce</th>
+<th>MoE EP all-to-all</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>目的</td>
+<td>把各 TP 分片算力结果合成完整 hidden</td>
+<td>把 token <strong>搬到</strong>持有 expert 的卡</td>
+</tr>
+<tr>
+<td>数据是否搬家换主人</td>
+<td>通常仍留在同 DP 各 TP 上（数值对齐）</td>
+<td>token <strong>临时离开 home</strong></td>
+</tr>
+<tr>
+<td>每步目的地</td>
+<td>固定（全体参与归约）</td>
+<td>随 <code>topk_ids</code> 变</td>
+</tr>
+</tbody></table>
+<p><strong>Attn TP 之后，每个 TP rank 都有完整 hidden 吗？</strong></p>
+<p>在常见的 <strong>列并行 + 行并行</strong>（无 Sequence Parallel）设定下：<strong>是的</strong>。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">QKV（常列并行）: 每卡算一部分 head / 一部分输出通道</span><br><span class="line">Attention:        每卡算自己那份 head</span><br><span class="line">o_proj（行并行）: 每卡算出「对完整 H 的一块贡献」→ 形状已是 [T, H]，但是部分和</span><br><span class="line">        │</span><br><span class="line">        ▼  all-reduce（对 [T, H] 求和）</span><br><span class="line">每张 TP 卡: 同一份完整 hidden [T, H]   ← 人人都有全量，数值相同</span><br><span class="line">        │</span><br><span class="line">        ▼</span><br><span class="line">MoE / FFN …</span><br></pre></td></tr></table></figure>
+
+<p>要点：</p>
+<ul>
+<li>all-reduce 的对象通常是 <strong>o_proj 之后、已经是 <code>[T, H]</code> 的部分和</strong>；规约后 <strong>每个 TP rank 都得到相同的完整向量</strong>，不是「只有 rank0 有全量」。  </li>
+<li>这和 MoE A2A 相反：A2A 之后每人手里仍是<strong>不同</strong>的 token 袋；Attn AR 之后每人手里是<strong>同一份</strong> hidden。  </li>
+<li><strong>例外</strong>：开了 <strong>Sequence Parallel</strong> 时，某些阶段会把 activation 按 sequence 维切开，此时不是「人人一份完整 <code>[T,H]</code>」，要用 all-gather 等再拼；读代码时看该模型是否启用 SP。  </li>
+<li>同 DP 内「人人有完整 hidden」正是 §3.3 里 home 的前提：MoE 前各 TP 已对齐，dispatch 才谈得上按 expert 再搬家。</li>
+</ul>
+<h3 id="1-4-为什么叫-All-to-All？和-All-Reduce-All-Gather-比什么？"><a href="#1-4-为什么叫-All-to-All？和-All-Reduce-All-Gather-比什么？" class="headerlink" title="1.4 为什么叫 All-to-All？和 All-Reduce / All-Gather 比什么？"></a>1.4 为什么叫 All-to-All？和 All-Reduce / All-Gather 比什么？</h3><p>这是 <strong>MPI/NCCL 集合通信原语</strong> 的名字，不特指 MoE。MoE 的 dispatch/combine 在通信模式上像（或不规则版的）<strong>all-to-all</strong>，所以常这么叫。</p>
+<h4 id="三种原语各在干什么（4-卡直觉）"><a href="#三种原语各在干什么（4-卡直觉）" class="headerlink" title="三种原语各在干什么（4 卡直觉）"></a>三种原语各在干什么（4 卡直觉）</h4><p>设 ranks = <code>R0 R1 R2 R3</code>，每人手里先有一块本地数据。</p>
+<p><img src="/notes/imgs/ep_collectives_compare.png" alt="All-Gather / All-Reduce / All-to-All 对照（MoE 真 EP 对应右侧 A2A）"></p>
+<p><em>图：AG=复印全班；AR=同一道题对答案；A2A=按地址寄信。MoE dispatch 是 A2A。</em></p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">All-Gather（大家凑齐同一份大表）</span><br><span class="line">  每人拿出自己的切片 ──► 每人最后都拥有 [R0|R1|R2|R3] 全量拼接</span><br><span class="line">  「一人一份 → 人人全有」</span><br><span class="line"></span><br><span class="line">All-Reduce（大家对同位元素做同一运算）</span><br><span class="line">  每人有同 shape 的张量 ──► 先规约（如求和）再人人得到同一结果</span><br><span class="line">  「人人一份同形状 → 人人同一份归约结果」</span><br><span class="line">  （实现上常拆成 reduce-scatter + all-gather）</span><br><span class="line"></span><br><span class="line">All-to-All（每人给每人寄一份，可能不同）</span><br><span class="line">  R_i 把数据拆成发给 R0..R3 的若干块 ──► R_j 收到来自所有人寄给自己的块并拼起来</span><br><span class="line">  「一人向全体投递（可不等长）→ 每人收到寄给自己的那一袋」</span><br></pre></td></tr></table></figure>
+
+<pre><code class="highlight mermaid">flowchart TB
+  subgraph AG["All-Gather"]
+    A0["每人: 本地切片"] --&gt; A1["每人: 全局拼接副本"]
+  end
+  subgraph AR["All-Reduce"]
+    B0["每人: 同 shape 张量"] --&gt; B1["每人: 相同的归约结果"]
+  end
+  subgraph A2A["All-to-All"]
+    C0["每人: 按目的地分好的多袋邮件"] --&gt; C1["每人: 只拿到寄给自己的邮件"]
+  end</code></pre>
+
+<h4 id="对照表"><a href="#对照表" class="headerlink" title="对照表"></a>对照表</h4><table>
+<thead>
+<tr>
+<th></th>
+<th><strong>All-Gather</strong></th>
+<th><strong>All-Reduce</strong></th>
+<th><strong>All-to-All</strong></th>
+</tr>
+</thead>
+<tbody><tr>
+<td>一句话</td>
+<td>收集并广播全量</td>
+<td>对同位做运算并广播结果</td>
+<td><strong>交换</strong>：我发给你的 ≠ 你发给我的</td>
+</tr>
+<tr>
+<td>输出是否人人相同</td>
+<td>是（同一份大表）</td>
+<td>是（同一份归约结果）</td>
+<td><strong>否</strong>（每人袋里内容不同）</td>
+</tr>
+<tr>
+<td>典型 LLM 场景</td>
+<td>某些并行下拼 activation；「假 EP」的 dispatch</td>
+<td>TP 下 Attn/MLP 的分片求和</td>
+<td>MoE EP：token ↔ expert rank</td>
+</tr>
+<tr>
+<td>数据关系</td>
+<td>拼接 / 复制</td>
+<td>逐元素 sum/max/…</td>
+<td><strong>重排 / 投递</strong>（可带不等长）</td>
+</tr>
+<tr>
+<td>目的地是否由内容决定</td>
+<td>否（全体一样）</td>
+<td>否</td>
+<td><strong>是</strong>（MoE 里由 topk 决定寄给谁）</td>
+</tr>
+</tbody></table>
+<h4 id="为何-MoE-是-All-to-All，不是另外两个？"><a href="#为何-MoE-是-All-to-All，不是另外两个？" class="headerlink" title="为何 MoE 是 All-to-All，不是另外两个？"></a>为何 MoE 是 All-to-All，不是另外两个？</h4><ul>
+<li><strong>不是 All-Gather</strong>：并不需要「每张卡都拿到全局所有 token」（那是假 EP 的 AG 路径）；真 EP 只要「持有某 expert 的卡拿到<strong>需要它的</strong>那些 token」。收齐后每人手里的集合<strong>不同</strong>。  </li>
+<li><strong>不是 All-Reduce</strong>：不是对同一位置做 sum 得到人人相同的一张量；而是把不同 token <strong>搬到不同目的地</strong>，算完再搬回来。Combine 里的「按 topk 加权求和」是 <strong>home 本地</strong>对 K 路 expert 输出归约，不是「全体 ranks 对同一缓冲做 all-reduce」。  </li>
+<li><strong>是 All-to-All</strong>：每个 EP rank <strong>既发送也接收</strong>；发送集合由路由决定；接收集合 =「全世界寄给我的本地 expert 的 token」。这正是 all-to-all 的「全员互寄、各取所需」。</li>
+</ul>
+<p>口播：</p>
+<blockquote>
+<p>All-Gather = 人人复印全班作业；All-Reduce = 全班同一道题对答案；All-to-All = 每人按收件人分发信件，信箱内容各不相同。MoE 是寄信找专家，所以叫 all-to-all。</p>
+</blockquote>
+<h4 id="和「假-EP」的关系（避免名实混淆）"><a href="#和「假-EP」的关系（避免名实混淆）" class="headerlink" title="和「假 EP」的关系（避免名实混淆）"></a>和「假 EP」的关系（避免名实混淆）</h4><p>vLLM 里有的后端名叫 all2all、实现却是 <strong>All-Gather + Reduce-Scatter</strong>：用更简单的集体通信 <strong>模拟</strong>「专家并行需要的数据交换语义」，但通信量更大。<br>DeepEP / PPLX 等才是更接近教科书的（常为 <strong>不等长 / 稀疏</strong>）all-to-all。<br>学概念时：先认清 <strong>通信模式是 A2A</strong>；再认清某条代码路径是「真 A2A」还是「AG+RS 冒充」。</p>
+<h4 id="不等长（alltoallv）"><a href="#不等长（alltoallv）" class="headerlink" title="不等长（alltoallv）"></a>不等长（alltoallv）</h4><p>教科书 <code>all_to_all</code> 常假设每人发给每人的块等长。MoE 里各 rank 收到的 token 数随路由波动 → 实际多是 <strong><code>alltoallv</code>（可变长度）</strong> 或 DeepEP 自己管 layout/padding。名字仍归在 all-to-all 一族。</p>
+<h3 id="1-5-特例：TP-EP-且-DP-1（例如-tp8-ep8）——还要不要-A2A？"><a href="#1-5-特例：TP-EP-且-DP-1（例如-tp8-ep8）——还要不要-A2A？" class="headerlink" title="1.5 特例：TP=EP 且 DP=1（例如 tp8 ep8）——还要不要 A2A？"></a>1.5 特例：<code>TP=EP</code> 且 <code>DP=1</code>（例如 tp8 ep8）——还要不要 A2A？</h3><p>先对齐配置：vLLM 里 <code>EP = TP × DP</code>，故 <strong><code>TP=8, EP=8</code> ⇒ <code>DP=1</code><strong>。<br>此时 Attn all-reduce 之后，</strong>8 张卡上已经是同一份完整 hidden</strong>（同一批 token，激活复制）。<br>Expert 权重仍按 EP 切开：每卡只持有 <code>E/8</code> 个完整 expert。</p>
+<h4 id="还需要把-token-dispatch-出去吗？"><a href="#还需要把-token-dispatch-出去吗？" class="headerlink" title="还需要把 token dispatch 出去吗？"></a>还需要把 token dispatch 出去吗？</h4><p><strong>逻辑上不必再「寄 hidden」</strong>：目标 expert 所在的卡上，这份 activation <strong>已经有了</strong>。<br>缺的是「别的卡上的 expert 算力结果」，不是「别的卡上的 token 副本」。</p>
+<p>vLLM 也按这个事实选型（<code>FusedMoEParallelConfig.use_all2all_kernels</code>）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">use_all2all_kernels = use_ep and (dp_size &gt; 1 or sequence_parallel)</span><br></pre></td></tr></table></figure>
+
+<p>因此 <strong><code>DP=1</code> 且未开 SP 时：走 no_dp_ep，不开 DeepEP/真 A2A。</strong></p>
+<p>左右对照如下：左侧是「激活已复制 → 本地 expert + AR」；右侧是「token 分片 → 真 A2A」。</p>
+<p><img src="/notes/imgs/ep_dp0_vs_dp_a2a.png" alt="DP=1 本地+All-Reduce vs DP>1 Token All-to-All"></p>
+<p><em>图：tp8ep8（左）通常无 token dispatch；有 DP（右）才需要 DeepEP/AG 类 A2A。</em></p>
+<h4 id="那-combine-怎么做？（这条路径的真实流程）"><a href="#那-combine-怎么做？（这条路径的真实流程）" class="headerlink" title="那 combine 怎么做？（这条路径的真实流程）"></a>那 combine 怎么做？（这条路径的真实流程）</h4><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">每卡已有: hidden [T, H]（全相同）</span><br><span class="line">        │</span><br><span class="line">        ▼ Router（每卡可各自算，结果应一致）</span><br><span class="line">   topk_ids / topk_weights</span><br><span class="line">        │</span><br><span class="line">        ▼ 本地 MoE（expert_map：非本卡 expert → -1，GEMM 跳过）</span><br><span class="line">   每卡只算「路由到本地 expert」的那些 (token, expert) 贡献</span><br><span class="line">   得到 partial_y[T, H]   // 别处专家的贡献在本卡为 0</span><br><span class="line">        │</span><br><span class="line">        ▼ All-Reduce（在 TP/EP 这 8 卡上对 partial_y 求和）</span><br><span class="line">   每卡得到完整 y[T, H] = Σ_k w_k * Expert_k(x)   // 再次人人一份全量</span><br></pre></td></tr></table></figure>
+
+<pre><code class="highlight mermaid">flowchart TB
+  subgraph ranks["TP=EP=8, DP=1（激活已复制）"]
+    R0["R0: 全量 hidden&lt;br/&gt;仅 expert 0..E/8-1"]
+    R1["R1: 全量 hidden&lt;br/&gt;仅 expert …"]
+    R7["R7: 全量 hidden&lt;br/&gt;仅 expert …"]
+  end
+  R0 --&gt;|"无 token Dispatch"| C0["本地 partial_y"]
+  R1 --&gt; C1["本地 partial_y"]
+  R7 --&gt; C7["本地 partial_y"]
+  C0 --&gt; AR["All-Reduce 求和"]
+  C1 --&gt; AR
+  C7 --&gt; AR
+  AR --&gt; Y["每卡完整 y（再次复制）"]</code></pre>
+
+<p>和「有 DP 时的真 A2A」对比：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><strong>TP=EP, DP=1</strong>（本特例）</th>
+<th><strong>DP&gt;1</strong>（token 分片）</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Attn 后 hidden</td>
+<td>每卡 <strong>全量相同</strong></td>
+<td>每 DP home <strong>只有自己的切片</strong></td>
+</tr>
+<tr>
+<td>要不要 Dispatch token？</td>
+<td><strong>一般不需要</strong>（已在本地）</td>
+<td><strong>需要</strong>（专家卡没有你的 token）</td>
+</tr>
+<tr>
+<td>「Combine」形态</td>
+<td><strong>All-Reduce partial expert 输出</strong></td>
+<td><strong>All-to-All 把 expert 输出寄回 home</strong>（再本地 ×weight）</td>
+</tr>
+<tr>
+<td>vLLM 后端</td>
+<td><code>no_dp_ep</code> + 层末 <code>tensor_model_parallel_all_reduce</code></td>
+<td>DeepEP / AG+RS / …</td>
+</tr>
+</tbody></table>
+<p>口播：</p>
+<blockquote>
+<p>DP=1 的 EP：token 不用搬家，<strong>算力结果</strong>用 all-reduce 拼起来。<br>DP&gt;1 的 EP：token 先搬家（A2A），算完再搬回来。</p>
+</blockquote>
+<h4 id="和「假-EP-真-A2A」会不会搞混？"><a href="#和「假-EP-真-A2A」会不会搞混？" class="headerlink" title="和「假 EP / 真 A2A」会不会搞混？"></a>和「假 EP / 真 A2A」会不会搞混？</h4><ul>
+<li>本特例的 all-reduce <strong>不是</strong> all-to-all；通信模式是 AR。  </li>
+<li>理论上也可以在 DP=1 时强行做 A2A（只把 token 收到专家卡、避免每卡对着全量 T 做 routing 相关开销），但激活已复制时收益有限；vLLM 默认选 <strong>本地 + AR</strong>。  </li>
+<li>代码锚点：<code>config.py</code> 里 <code>use_all2all_kernels</code>；<code>prepare_finalize/no_dp_ep.py</code>；<code>runner/moe_runner.py</code> 的 <code>_maybe_reduce_final_output</code>。</li>
+</ul>
+<hr>
+<h2 id="2-玩具例子（贯穿全章）"><a href="#2-玩具例子（贯穿全章）" class="headerlink" title="2. 玩具例子（贯穿全章）"></a>2. 玩具例子（贯穿全章）</h2><p>设定：</p>
+<ul>
+<li><code>EP = 4</code> ranks：<code>R0 R1 R2 R3</code>  </li>
+<li>全局 <code>E = 8</code> 个 expert，每 rank 持有 2 个：<code>R0:{0,1} R1:{2,3} R2:{4,5} R3:{6,7}</code>  </li>
+<li><code>top_k = 2</code>  </li>
+<li>为简单起见：先看 <strong>每个 home 只有 1 个 token</strong>（真实 serving 是一个 batch）</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Token</th>
+<th>Home</th>
+<th>topk_ids</th>
+<th>需要去的 ranks</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A</td>
+<td>R0</td>
+<td><code>{1, 4}</code></td>
+<td>R0（本地 expert1）、R2（expert4）</td>
+</tr>
+<tr>
+<td>B</td>
+<td>R1</td>
+<td><code>{2, 7}</code></td>
+<td>R1、R3</td>
+</tr>
+<tr>
+<td>C</td>
+<td>R2</td>
+<td><code>{0, 3}</code></td>
+<td>R0、R1</td>
+</tr>
+<tr>
+<td>D</td>
+<td>R3</td>
+<td><code>{5, 6}</code></td>
+<td>R2、R3</td>
+</tr>
+</tbody></table>
+<h3 id="2-1-Dispatch-流量示意"><a href="#2-1-Dispatch-流量示意" class="headerlink" title="2.1 Dispatch 流量示意"></a>2.1 Dispatch 流量示意</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">        发出（按 expert 归属）                各 rank 收到的 token 袋</span><br><span class="line">R0 ──A→ R0(e1), R2(e4)──┐</span><br><span class="line">R1 ──B→ R1(e2), R3(e7)──┤              R0: A(给e1), C(给e0)</span><br><span class="line">R2 ──C→ R0(e0), R1(e3)──┼── All-to-All → R1: B(给e2), C(给e3)</span><br><span class="line">R3 ──D→ R2(e5), R3(e6)──┘              R2: A(给e4), D(给e5)</span><br><span class="line">                                       R3: B(给e7), D(给e6)</span><br></pre></td></tr></table></figure>
+
+<p>注意：</p>
+<ul>
+<li><strong>同一 token 可复制发到多个 rank</strong>（因为 K&gt;1，且专家可能在不同卡）。  </li>
+<li>接收侧拿到的是「要给<strong>本卡 expert</strong> 算的 token 列表」，顺序通常已按 expert 聚好或稍后 permute。</li>
+</ul>
+<h3 id="2-2-Combine-流量示意"><a href="#2-2-Combine-流量示意" class="headerlink" title="2.2 Combine 流量示意"></a>2.2 Combine 流量示意</h3><p>各 rank 算完本地 expert 后，把 <strong>对应 token 的 expert 输出</strong>寄回 home，home 上按 <code>topk_weights</code> 做加权和：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">y_A = w_A1 * Expert1(A) + w_A4 * Expert4(A)   # 在 R0 上归约出 A</span><br><span class="line">y_B = ... 在 R1 上</span><br><span class="line">...</span><br></pre></td></tr></table></figure>
+
+<pre><code class="highlight mermaid">sequenceDiagram
+  autonumber
+  participant H as Home R0&lt;br/&gt;token A
+  participant L0 as R0 experts
+  participant L2 as R2 experts
+
+  Note over H: Router: topk={1,4}, weights={w1,w4}
+  H-&gt;&gt;L0: Dispatch A（给 expert1）
+  H-&gt;&gt;L2: Dispatch A（给 expert4）
+  L0-&gt;&gt;L0: y1 = Expert1(A)
+  L2-&gt;&gt;L2: y4 = Expert4(A)
+  L0-&gt;&gt;H: Combine y1
+  L2-&gt;&gt;H: Combine y4
+  H-&gt;&gt;H: y = w1*y1 + w4*y4</code></pre>
+
+<hr>
+<h2 id="3-传输的数据内容"><a href="#3-传输的数据内容" class="headerlink" title="3. 传输的数据内容"></a>3. 传输的数据内容</h2><p>分 <strong>Dispatch</strong> 与 <strong>Combine</strong> 两段。不同后端打包方式不同，但逻辑载荷如下。</p>
+<h3 id="3-1-Dispatch：从-Home-→-Expert-ranks"><a href="#3-1-Dispatch：从-Home-→-Expert-ranks" class="headerlink" title="3.1 Dispatch：从 Home → Expert ranks"></a>3.1 Dispatch：从 Home → Expert ranks</h3><table>
+<thead>
+<tr>
+<th>载荷</th>
+<th>典型 shape / 含义</th>
+<th>是否必须</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Token hidden（或量化后）</strong></td>
+<td><code>[T_home, H]</code> 或 fp8 + scales</td>
+<td>必须（主体流量）</td>
+</tr>
+<tr>
+<td><strong>topk_ids</strong></td>
+<td><code>[T_home, K]</code>，全局 expert id</td>
+<td>通常一起走，供接收侧知道算哪个 expert / 如何 permute</td>
+</tr>
+<tr>
+<td><strong>topk_weights</strong></td>
+<td><code>[T_home, K]</code></td>
+<td>常一起走；也可 combine 前再对齐（视实现）</td>
+</tr>
+<tr>
+<td><strong>布局元数据</strong></td>
+<td>每 rank/每 expert 的 token 数、<code>is_token_in_rank</code> 等</td>
+<td>DeepEP 等会先算 <code>get_dispatch_layout</code>，再搬数据</td>
+</tr>
+<tr>
+<td><strong>量化 scales</strong></td>
+<td>与 hidden 对齐的 scale</td>
+<td>若在 dispatch 前/中量化</td>
+</tr>
+</tbody></table>
+<p>直觉：主体是 <strong>activation 字节</strong>；路由索引和权重是小头，但决定「寄给谁、回来怎么加」。</p>
+<p>DeepEP HT 适配层里可见的顺序（概念）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">get_dispatch_layout(topk_idx)  →  各 rank/expert 计数与掩码</span><br><span class="line">buffer.dispatch(x, topk_idx, topk_weights, ...)</span><br><span class="line">  → recv_x, recv_topk_*, expert_num_tokens, handle</span><br></pre></td></tr></table></figure>
+
+<h3 id="3-2-Combine：从-Expert-ranks-→-Home"><a href="#3-2-Combine：从-Expert-ranks-→-Home" class="headerlink" title="3.2 Combine：从 Expert ranks → Home"></a>3.2 Combine：从 Expert ranks → Home</h3><table>
+<thead>
+<tr>
+<th>载荷</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Expert 输出 hidden</strong></td>
+<td>每个「(token, 被选中的本地 expert)」一条输出，形状与实现相关</td>
+</tr>
+<tr>
+<td><strong>handle / 路由逆映射</strong></td>
+<td>Dispatch 留下的元数据，告诉 combine「这条输出寄回哪个 home、对应哪个 topk 槽」</td>
+</tr>
+<tr>
+<td>（可选）权重</td>
+<td>若权重未在专家侧乘完，home 或 finalize 再乘</td>
+</tr>
+</tbody></table>
+<p>Home 侧最终得到与进入 MoE 前对齐的 <code>[T_home, H]</code>（再进下一层 Attn）。</p>
+<h3 id="3-3-和「假-EP」AG-RS-比：传的是什么？"><a href="#3-3-和「假-EP」AG-RS-比：传的是什么？" class="headerlink" title="3.3 和「假 EP」AG + RS 比：传的是什么？"></a>3.3 和「假 EP」AG + RS 比：传的是什么？</h3><pre><code class="highlight mermaid">flowchart TB
+  subgraph AG["AllGather + ReduceScatter（假 EP）"]
+    A1["Dispatch ≈ AllGather&lt;br/&gt;每卡收到&lt;strong&gt;全部&lt;/strong&gt; token"]
+    A2["每卡只用本地 expert 算&lt;br/&gt;（但对齐的是全局 token 视图）"]
+    A3["Combine ≈ ReduceScatter&lt;br/&gt;按原 DP 切片归约回去"]
+  end
+  subgraph TA["Token All-to-All（真 EP）"]
+    B1["Dispatch：只发 topk 命中的&lt;br/&gt;token 副本到目标 ranks"]
+    B2["本地 expert 只看见&lt;br/&gt;真正需要自己的 token"]
+    B3["Combine：只把 expert 输出&lt;br/&gt;寄回各 token 的 home"]
+  end</code></pre>
+
+<table>
+<thead>
+<tr>
+<th></th>
+<th>AG + RS</th>
+<th>真 All-to-All</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Dispatch 主体</td>
+<td><strong>全体</strong> token 复制到每卡</td>
+<td><strong>稀疏</strong> token 副本（与 K、专家分布有关）</td>
+</tr>
+<tr>
+<td>冗余</td>
+<td>通信量 / 无效计算随 EP 变差</td>
+<td>相对小</td>
+</tr>
+<tr>
+<td>实现复杂度</td>
+<td>低（NCCL）</td>
+<td>高（layout、padding、handle）</td>
+</tr>
+</tbody></table>
+<p>AG 路径在 vLLM 里常见接口语义：<code>dispatch(hidden, topk_weights, topk_ids)</code> → gather 三者；<code>combine(hidden)</code> → reduce-scatter。<br>真 A2A 则按 expert 做不规则交换（DeepEP/PPLX 等）。</p>
+<hr>
+<h2 id="4-端到端流程（一层-MoE）"><a href="#4-端到端流程（一层-MoE）" class="headerlink" title="4. 端到端流程（一层 MoE）"></a>4. 端到端流程（一层 MoE）</h2><h3 id="4-1-总流程"><a href="#4-1-总流程" class="headerlink" title="4.1 总流程"></a>4.1 总流程</h3><pre><code class="highlight mermaid">flowchart TD
+  A["① 进入 MoE 层&lt;br/&gt;各 home 持有本地 batch hidden"] --&gt; B["② Router&lt;br/&gt;topk_ids, topk_weights"]
+  B --&gt; C["③ 可选：量化 hidden"]
+  C --&gt; D["④ Dispatch All-to-All&lt;br/&gt;token → expert ranks"]
+  D --&gt; E["⑤ 本地：align / permute&lt;br/&gt;按 expert 聚集 + pad"]
+  E --&gt; F["⑥ Local Experts GEMM&lt;br/&gt;gate_up → act → down"]
+  F --&gt; G["⑦ Combine All-to-All&lt;br/&gt;expert 输出 → home"]
+  G --&gt; H["⑧ Finalize&lt;br/&gt;× topk_weights 并 reduce（若尚未做）"]
+  H --&gt; I["⑨ 输出 y ≈ 进入前同 shape&lt;br/&gt;交给下一层 Attn"]</code></pre>
+
+<h3 id="4-2-单-token-视角-vs-整卡视角"><a href="#4-2-单-token-视角-vs-整卡视角" class="headerlink" title="4.2 单 token 视角 vs 整卡视角"></a>4.2 单 token 视角 vs 整卡视角</h3><p><strong>单 token</strong>：复制 K 份（逻辑上）→ 最多去到 ≤K 个 ranks → 各算一段 → K 路结果回 home 加权求和。</p>
+<p><strong>整卡（某 EP rank）</strong>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">发出:  本 home 的 T 个 token，按 topk 拆成发往各 dst 的列表</span><br><span class="line">收到:  全世界寄给「我的本地 experts」的 token 袋</span><br><span class="line">计算:  只跑本地 E/EP 个 expert</span><br><span class="line">发回:  袋里每条结果按来源 home 寄回</span><br></pre></td></tr></table></figure>
+
+<h3 id="4-3-数据布局在流程中的变化"><a href="#4-3-数据布局在流程中的变化" class="headerlink" title="4.3 数据布局在流程中的变化"></a>4.3 数据布局在流程中的变化</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">Home (Standard)</span><br><span class="line">  hidden:     [T_home, H]</span><br><span class="line">  topk_ids:   [T_home, K]</span><br><span class="line">      │ Dispatch</span><br><span class="line">      ▼</span><br><span class="line">Expert rank（接收后，常见两种）</span><br><span class="line">  Standard:   [T_recv, H] + 路由元数据，再 permute</span><br><span class="line">  Batched:    [E_local, capacity, H]     ← DeepEP LL 等</span><br><span class="line">      │ Local experts</span><br><span class="line">      ▼</span><br><span class="line">  expert_out（与接收布局对应）</span><br><span class="line">      │ Combine</span><br><span class="line">      ▼</span><br><span class="line">Home</span><br><span class="line">  y:          [T_home, H]</span><br></pre></td></tr></table></figure>
+
+<p><code>moe_align_block_size</code> / permute 发生在 <strong>⑤</strong>，属于计算侧整理，不是网络语义的一部分，但和「收到的 token 袋如何喂给 GEMM」绑在一起。</p>
+<hr>
+<h2 id="5-一张「谁发给谁」矩阵（Dispatch）"><a href="#5-一张「谁发给谁」矩阵（Dispatch）" class="headerlink" title="5. 一张「谁发给谁」矩阵（Dispatch）"></a>5. 一张「谁发给谁」矩阵（Dispatch）</h2><p>对玩具例子，只画 <strong>token 激活</strong> 是否从行(home) 发到列(expert rank)：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">      dest→  R0   R1   R2   R3</span><br><span class="line">home R0      A         A         # A→e1@R0, e4@R2</span><br><span class="line">     R1           B         B    # B→e2@R1, e7@R3</span><br><span class="line">     R2      C    C              # C→e0@R0, e3@R1</span><br><span class="line">     R3                D    D    # D→e5@R2, e6@R3</span><br></pre></td></tr></table></figure>
+
+<p>Combine 近似是 <strong>转置方向</strong>：专家 rank → home，搬的是 <strong>expert 输出向量</strong>，不再搬原始 input hidden。</p>
+<hr>
+<h2 id="6-流量量级直觉（帮助选型）"><a href="#6-流量量级直觉（帮助选型）" class="headerlink" title="6. 流量量级直觉（帮助选型）"></a>6. 流量量级直觉（帮助选型）</h2><p>设：</p>
+<ul>
+<li>全局 token 数 <code>T_global</code>（各 DP home 之和）  </li>
+<li>hidden 字节 <code>B = H * sizeof(dtype)</code>（量化则更小）  </li>
+<li>top-k = <code>K</code>，expert 均匀、无副本</li>
+</ul>
+<p><strong>真 A2A（粗上界）</strong>：每个 token 大约寄出 K 份 activation → 量级 <code>O(T_global * K * B)</code>（另加小头索引；跨机时还会受「专家是否同机」影响）。</p>
+<p><strong>AG（假 EP）</strong>：每卡 gather 到约 <code>T_global</code> → 总量级更接近 <code>O(EP * T_global * B)</code> 量级的冗余复制。</p>
+<p>因此 EP 大、跨机带宽紧时，真 A2A / DeepEP 更有价值；调试或 EP 很小时 AG+RS 更省事。</p>
+<hr>
+<h2 id="7-和代码的对应（便于跳转）"><a href="#7-和代码的对应（便于跳转）" class="headerlink" title="7. 和代码的对应（便于跳转）"></a>7. 和代码的对应（便于跳转）</h2><table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>概念</th>
+<th><code>vllm_comm</code> 去哪看</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>选后端</td>
+<td>AG / DeepEP HT·LL / …</td>
+<td><code>distributed/device_communicators/all2all.py</code></td>
+</tr>
+<tr>
+<td>AG dispatch/combine</td>
+<td>gather hidden+topk / RS</td>
+<td>同文件 <code>AgRsAll2AllManager</code></td>
+</tr>
+<tr>
+<td>真 A2A + 量化编排</td>
+<td>Prepare/Finalize</td>
+<td><code>fused_moe/prepare_finalize/deepep_*.py</code></td>
+</tr>
+<tr>
+<td>接收后算 expert</td>
+<td>Experts</td>
+<td><code>fused_moe/experts/*</code>、<code>modular_kernel.py</code></td>
+</tr>
+<tr>
+<td>home / DP 切片</td>
+<td>元数据 sizes</td>
+<td>DP metadata + <code>reduce_scatterv(..., sizes=...)</code></td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="自检"><a href="#自检" class="headerlink" title="自检"></a>自检</h2><ul>
+<li><input disabled="" type="checkbox"> 能用「expert 不动、token 去找 expert」一句话说明为何要 A2A  </li>
+<li><input disabled="" type="checkbox"> 能用「寄信 vs 复印全班 vs 对答案」区分 A2A / AG / AR  </li>
+<li><input disabled="" type="checkbox"> 能说明 MoE combine 的加权和 ≠ 跨 rank 的 all-reduce  </li>
+<li><input disabled="" type="checkbox"> 能说明 <code>TP=EP, DP=1</code> 时通常 <strong>无 token A2A</strong>，靠 <strong>local expert + AR</strong> 凑齐输出  </li>
+<li><input disabled="" type="checkbox"> 能画出玩具例子里 A 的 dispatch/combine 两条边  </li>
+<li><input disabled="" type="checkbox"> 能列出 dispatch / combine 各自的主体载荷  </li>
+<li><input disabled="" type="checkbox"> 能说明 AG+RS 与真 A2A 在「传什么」上的本质差别  </li>
+<li><input disabled="" type="checkbox"> 能指出 permute/align 属于计算侧哪一步，不是网络原语本身</li>
+</ul>
+<hr>
+<h2 id="建议动手"><a href="#建议动手" class="headerlink" title="建议动手"></a>建议动手</h2><ol>
+<li>把玩具表扩成 <code>T_home=4</code>（每 rank 多 token），手算每个 rank 的 <code>T_recv</code>。  </li>
+<li>读 <code>deepep_ht.py</code> 的 <code>_do_dispatch</code>：标出哪些张量进 <code>buffer.dispatch</code>、哪些是 layout。  </li>
+<li>对照 <code>AgRsAll2AllManager.dispatch</code>：确认 gather 的是整表而非按 expert 稀疏发。</li>
+</ol>
+</div><div class="article-licensing box"><div class="licensing-title"><p>01a · MoE All-to-All：原因、载荷与流程</p><p><a href="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/">https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-24</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-24</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/EP/">EP</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/MoE/">MoE</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">01 · MoE 与 Expert Parallelism 基础</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/"><span class="level-item">02 · Modular Kernel 与 MoE 相关 Kernel</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">39</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">7</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-cuda-learning/">Cuda Learning</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/">01 · MoE 与 Expert Parallelism 基础</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/">01a · MoE All-to-All：原因、载荷与流程</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/">02 · Modular Kernel 与 MoE 相关 Kernel</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/">02a · DeepGEMM（MoE Expert 计算后端）</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

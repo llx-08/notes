@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>05 · EPLB 与 Expert 负载均衡 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="05 · EPLB 与 Expert 负载均衡 上一章： 04_megamoe.md 下一章： 06_code_reading_map.md 算法细节展开： ..&amp;#x2F;vllm_cross_node_expert_parallelism.md §五 1. 为什么 EP 需要 Load Balance MoE 路由是 数据依赖 的：真实流量下少数 expert 会成为热点。 在 EP 下： 热点 exp"><meta property="og:type" content="blog"><meta property="og:title" content="05 · EPLB 与 Expert 负载均衡"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-05-eplb-and-load-balance/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="05 · EPLB 与 Expert 负载均衡 上一章： 04_megamoe.md 下一章： 06_code_reading_map.md 算法细节展开： ..&amp;#x2F;vllm_cross_node_expert_parallelism.md §五 1. 为什么 EP 需要 Load Balance MoE 路由是 数据依赖 的：真实流量下少数 expert 会成为热点。 在 EP 下： 热点 exp"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/ep_eplb_hierarchical.png"><meta property="article:published_time" content="2026-07-24T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-24T09:30:09.415Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="EP"><meta property="article:tag" content="MoE"><meta property="article:tag" content="学习笔记"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/ep_eplb_hierarchical.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-05-eplb-and-load-balance/"},"headline":"05 · EPLB 与 Expert 负载均衡","image":["https://llx-08.github.io/notes/imgs/ep_eplb_hierarchical.png"],"datePublished":"2026-07-24T00:00:00.000Z","dateModified":"2026-07-24T09:30:09.415Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"05 · EPLB 与 Expert 负载均衡 上一章： 04_megamoe.md 下一章： 06_code_reading_map.md 算法细节展开： ..&#x2F;vllm_cross_node_expert_parallelism.md §五 1. 为什么 EP 需要 Load Balance MoE 路由是 数据依赖 的：真实流量下少数 expert 会成为热点。 在 EP 下： 热点 exp"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-05-eplb-and-load-balance/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.415Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">7 分钟读完 (大约1014个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">05 · EPLB 与 Expert 负载均衡</h1><div class="content"><h1 id="05-·-EPLB-与-Expert-负载均衡"><a href="#05-·-EPLB-与-Expert-负载均衡" class="headerlink" title="05 · EPLB 与 Expert 负载均衡"></a>05 · EPLB 与 Expert 负载均衡</h1><blockquote>
+<p>上一章：<a href="/2026/07/24/ep-learning-04-megamoe/">04_megamoe.md</a><br>下一章：<a href="/2026/07/24/ep-learning-06-code-reading-map/">06_code_reading_map.md</a><br>算法细节展开：<a href="/2026/06/17/vllm-cross-node-expert-parallelism/">../vllm_cross_node_expert_parallelism.md</a> §五</p>
+</blockquote>
+<hr>
+<h2 id="1-为什么-EP-需要-Load-Balance"><a href="#1-为什么-EP-需要-Load-Balance" class="headerlink" title="1. 为什么 EP 需要 Load Balance"></a>1. 为什么 EP 需要 Load Balance</h2><p>MoE 路由是 <strong>数据依赖</strong> 的：真实流量下少数 expert 会成为热点。</p>
+<p>在 EP 下：</p>
+<ul>
+<li>热点 expert 所在 GPU：<strong>算力打满、排队</strong>  </li>
+<li>其它 GPU：<strong>空闲</strong>  </li>
+<li>跨机时：热点若分散在多节点，<strong>跨机 token 流量</strong> 暴涨</li>
+</ul>
+<p>EPLB（Expert Parallelism Load Balancing）要做的事：</p>
+<ol>
+<li><strong>统计</strong> 各 logical expert 的负载（token 计数等）  </li>
+<li><strong>决策</strong> 逻辑→物理映射：复制热点、打包到节点/GPU  </li>
+<li><strong>执行</strong> 在 EP ranks 间搬运 expert 权重，更新 map  </li>
+<li>（可选）与推理 <strong>异步重叠</strong></li>
+</ol>
+<hr>
+<h2 id="2-Logical-vs-Physical-Expert"><a href="#2-Logical-vs-Physical-Expert" class="headerlink" title="2. Logical vs Physical Expert"></a>2. Logical vs Physical Expert</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">Logical experts  (模型定义的 E 个)</span><br><span class="line">        │  EPLB 映射</span><br><span class="line">        ▼</span><br><span class="line">Physical slots   (≥ E，可含副本)</span><br><span class="line">        │  再均分到 EP ranks</span><br><span class="line">        ▼</span><br><span class="line">Local weights on each GPU</span><br></pre></td></tr></table></figure>
+
+<p>路由仍产生 <strong>logical id</strong>；运行时查表得到 physical id / 本卡 local id。<br>DeepEP LL 适配层可接收 <code>global_to_physical</code> / <code>physical_to_global</code> 一类张量——与 EPLB 输出对齐。</p>
+<hr>
+<h2 id="3-分层-rebalance（思想）"><a href="#3-分层-rebalance（思想）" class="headerlink" title="3. 分层 rebalance（思想）"></a>3. 分层 rebalance（思想）</h2><p>跨机笔记中的三步（感知节点拓扑）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">Step 1  Expert group → 打包到 Node</span><br><span class="line">        目标：同 group 尽量同机，减少跨机 dispatch</span><br><span class="line"></span><br><span class="line">Step 2  Node 内：给热点 logical expert 分配冗余 physical 副本</span><br><span class="line"></span><br><span class="line">Step 3  Node 内：physical expert → 打包到各 GPU</span><br><span class="line">        目标：节点内 NVLink 上再均衡</span><br></pre></td></tr></table></figure>
+
+<p>若 <code>num_groups</code> 不能整除 <code>num_nodes</code>，常回退为「当成单节点」的扁平均衡。</p>
+<p>分层三步示意：</p>
+<p><img src="/notes/imgs/ep_eplb_hierarchical.png" alt="EPLB 分层：Node 打包 → 复制热点 → GPU 打包"></p>
+<p><em>图：先减跨机流量，再在节点内复制热点并均分到 GPU，最后 P2P 搬权重。</em></p>
+<p>贪心工具：</p>
+<ul>
+<li><code>balanced_packing</code>：按负载降序，每次放进当前最轻且有空位的桶  </li>
+<li><code>replicate_experts</code>：冗余槽位反复给「每副本负载最大」的 logical expert</li>
+</ul>
+<hr>
+<h2 id="4-vLLM-代码地图"><a href="#4-vLLM-代码地图" class="headerlink" title="4. vLLM 代码地图"></a>4. vLLM 代码地图</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">vllm_comm/vllm/distributed/eplb/</span><br><span class="line">├── eplb_state.py          # 每层状态、prepare_forward / step</span><br><span class="line">├── eplb_utils.py          # CpuGpuEvent、env override（含 mega_moe）</span><br><span class="line">├── eplb_communicator.py   # 均衡相关通信</span><br><span class="line">├── policy/                # rebalance 算法（含 hierarchical）</span><br><span class="line">├── rebalance_execute.py   # P2P isend/irecv 搬权重</span><br><span class="line">└── async_worker.py        # 异步搬权重线程 + CUDA stream</span><br></pre></td></tr></table></figure>
+
+<p>与 runner 的衔接：</p>
+<ul>
+<li><code>gpu_model_runner.py</code>：<code>setup_eplb</code> / <code>eplb_step</code> / dummy run 时是否 skip  </li>
+<li>MoE 层：<code>set_eplb_state</code>、<code>get_expert_weights</code>  </li>
+<li>MegaMoE：transformed weight 的 EPLB view（见第 04 章）</li>
+</ul>
+<h3 id="异步同步要点"><a href="#异步同步要点" class="headerlink" title="异步同步要点"></a>异步同步要点</h3><p><code>CpuGpuEvent</code>：CUDA Event  alone 在「尚未 record」时 wait 可能变成空操作；因此用 <strong>threading.Event + CUDA Event</strong> 保证「主线程 record 之后，异步线程再 wait」。<br>这是读 <code>async_worker</code> 时最容易踩的概念坑。</p>
+<hr>
+<h2 id="5-与通信后端的耦合"><a href="#5-与通信后端的耦合" class="headerlink" title="5. 与通信后端的耦合"></a>5. 与通信后端的耦合</h2><table>
+<thead>
+<tr>
+<th>后端</th>
+<th>EPLB 关注点</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>NCCL AG+RS</td>
+<td>算力不均仍痛；跨机流量模式不同</td>
+</tr>
+<tr>
+<td>DeepEP HT/LL</td>
+<td>map 更新后 dispatch 目标 rank 变；LL 还受 capacity 影响</td>
+</tr>
+<tr>
+<td>MegaMoE</td>
+<td>symm buffer / cooperative 路径；<code>override_envs_for_eplb</code> 可能强制通信相关 env</td>
+</tr>
+</tbody></table>
+<p>开启 EPLB 后应用 <strong>先看 balancedness 日志 / metrics</strong>，再看端到端吞吐，避免「map 在动但瓶颈在别处」。</p>
+<hr>
+<h2 id="6-学习时建议做的两张表"><a href="#6-学习时建议做的两张表" class="headerlink" title="6. 学习时建议做的两张表"></a>6. 学习时建议做的两张表</h2><p><strong>表 A：一次 rebalance 的输入输出</strong></p>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>来源</th>
+<th>去向</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>expert_load_view</code></td>
+<td>forward 统计</td>
+<td>policy</td>
+</tr>
+<tr>
+<td><code>logical_to_physical_map</code></td>
+<td>policy</td>
+<td>router 后处理 / dispatcher</td>
+</tr>
+<tr>
+<td><code>logical_replica_count</code></td>
+<td>policy</td>
+<td>调试与加权</td>
+</tr>
+<tr>
+<td><code>expert_weights</code> 列表</td>
+<td>MoE.get_expert_weights</td>
+<td>rebalance_execute</td>
+</tr>
+</tbody></table>
+<p><strong>表 B：一次权重搬运</strong></p>
+<table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>同步点</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>算新 map</td>
+<td>CPU / 控制面</td>
+</tr>
+<tr>
+<td>isend/irecv 权重</td>
+<td>EP group，可能私有 stream</td>
+</tr>
+<tr>
+<td>切换 map 对外可见</td>
+<td>与 forward 的 barrier / event</td>
+</tr>
+<tr>
+<td>旧 map 退役</td>
+<td>确保无 in-flight 层仍用旧映射</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="自检"><a href="#自检" class="headerlink" title="自检"></a>自检</h2><ul>
+<li><input disabled="" type="checkbox"> 能解释 logical/physical 与「复制热点」如何降低尾部延迟  </li>
+<li><input disabled="" type="checkbox"> 能说出分层三步各自优化的带宽层级（跨机 / 机内）  </li>
+<li><input disabled="" type="checkbox"> 知道权重搬运与推理 overlap 时为何需要 CpuGpuEvent  </li>
+<li><input disabled="" type="checkbox"> 能指出 MegaMoE 路径上 EPLB 的特殊点</li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>05 · EPLB 与 Expert 负载均衡</p><p><a href="https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-05-eplb-and-load-balance/">https://llx-08.github.io/notes/2026/07/24/2026-07-24-ep-learning-05-eplb-and-load-balance/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-24</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-24</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/EP/">EP</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/MoE/">MoE</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-04-megamoe/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">04 · MegaMoE（DeepSeek V4 + DeepGEMM）</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-06-code-reading-map/"><span class="level-item">06 · 本地代码精读地图</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">39</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">7</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-cuda-learning/">Cuda Learning</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/">01 · MoE 与 Expert Parallelism 基础</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/">01a · MoE All-to-All：原因、载荷与流程</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/">02 · Modular Kernel 与 MoE 相关 Kernel</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/">02a · DeepGEMM（MoE Expert 计算后端）</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

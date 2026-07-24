@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta name="robots" content="noindex"><meta><title>标签: 学习笔记 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="学习笔记"><meta property="og:type" content="blog"><meta property="og:title" content="Notes"><meta property="og:url" content="https://llx-08.github.io/notes"><meta property="og:site_name" content="Notes"><meta property="og:description" content="学习笔记"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes"},"headline":"Notes","image":["https://llx-08.github.io/notes/img/og_image.png"],"author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"学习笔记"}</script><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style></head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><div class="card-content"><nav class="breadcrumb" aria-label="breadcrumbs"><ul><li><a href="/notes/tags/">标签</a></li><li class="is-active"><a href="#" aria-current="page">学习笔记</a></li></ul></nav></div></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.411Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">25 分钟读完 (大约3805个字)</span></div></div><p class="title is-3 is-size-4-mobile"><a class="link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/">01 · MoE 与 Expert Parallelism 基础</a></p><div class="content"><p>01 · MoE 与 Expert Parallelism 基础 回到目录： README.md 下一章： 01a_moe_all_to_all.md （All-to-All 细讲 + 图） → 02_modular_kernel_and_moe_kernels.md 1. MoE 层在算什么 稠密 Transformer 的 FFN 对每个 token 做同一套线性变换。MoE 把它换成「多专家 + 门控」： 1 2 3 4 5 h = LayerNorm(x) gate_logits = Gate(h) # [T, E] topk_ids, topk_weights = TopK(gate) # [T, K], [T, K] y_e = Expert_e(h) # 仅对路由到 e 的 token y = Σ_k topk_weights[...,k] * y_{topk_ids[...,k]} 要点： 稀疏激活 ：每 tok…</p></div><a class="article-more button is-small is-size-7" href="/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/#more">阅读更多</a></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.412Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">32 分钟读完 (大约4763个字)</span></div></div><p class="title is-3 is-size-4-mobile"><a class="link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/">01a · MoE All-to-All：原因、载荷与流程</a></p><div class="content"><p>01a · MoE All-to-All：原因、载荷与流程 上一章： 01_ep_fundamentals.md （§3 抽象） 下一章： 02_modular_kernel_and_moe_kernels.md 实现侧加深： 03_deepep.md 现有文档里有没有？ 01 只有 AG+RS vs 真 A2A 的抽象对比； 03 讲 DeepEP 库差异。 「为什么要 A2A、传什么、怎么走」的细图在本章。 1. 为什么需要 All-to-All？ 1.1 矛盾：expert 在卡上，token 在另一处 开启 EP 后， expert 权重静态分片 在各 EP rank 上；而 Router 之后，每个 token 只需要其中 top-k 个 expert。 若不做通信，只能： 把 所有 expert 权重 复制到每张卡（失去 EP），或 每张卡只算本地 expert、对「没来的 token」交白卷（结果错误） 因此必须让…</p></div><a class="article-more button is-small is-size-7" href="/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/#more">阅读更多</a></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.412Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">10 分钟读完 (大约1544个字)</span></div></div><p class="title is-3 is-size-4-mobile"><a class="link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/">02 · Modular Kernel 与 MoE 相关 Kernel</a></p><div class="content"><p>02 · Modular Kernel 与 MoE 相关 Kernel 上一章： 01a_moe_all_to_all.md ← 01_ep_fundamentals.md 下一章： 02a_deepgemm.md （DeepGEMM 细讲）→ 03_deepep.md 1. 为什么要 Modular 历史问题：每种「通信 × 量化 × GEMM 实现」组合都会爆炸成一份 fused 代码。 vLLM 的解法（ modular_kernel.py 文件头注释）： 1 [Router] → [Quantize-Dispatch] → [Permute-Experts-Unpermute] → [Combine] 三大类接口： 类 职责 FusedMoEPrepareAndFinalizeModular 量化 + dispatch；combine +（可选）topk 加权归约 FusedMoEExpertsModular 本地 ex…</p></div><a class="article-more button is-small is-size-7" href="/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/#more">阅读更多</a></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.413Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">12 分钟读完 (大约1745个字)</span></div></div><p class="title is-3 is-size-4-mobile"><a class="link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/">02a · DeepGEMM（MoE Expert 计算后端）</a></p><div class="content"><p>02a · DeepGEMM（MoE Expert 计算后端） 上一章： 02_modular_kernel_and_moe_kernels.md 相关： 03_deepep.md （通信）· 04_megamoe.md （V4 特化） 代码主路径： ~/codes/vllm_comm 配图：矢量稿 ep_learning/imgs/*.svg ，预览用 PNG 在 notes/imgs/ 与 ep_learning/imgs/ 1. DeepGEMM 是什么 DeepGEMM （DeepSeek 开源的高性能 GEMM 库，包名常为 deep_gemm ）面向 Hopper / Blackwell ，提供 FP8（及 FP4 等）矩阵乘，以及 MoE 友好的 grouped contiguous GEMM 。 在 vLLM Modular MoE 里，它扮演 Experts 计算后端 ，不是通信库： 库 职责 DeepEP E…</p></div><a class="article-more button is-small is-size-7" href="/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/#more">阅读更多</a></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.413Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">24 分钟读完 (大约3533个字)</span></div></div><p class="title is-3 is-size-4-mobile"><a class="link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/">03 · DeepEP（High-Throughput / Low-Latency）</a></p><div class="content"><p>03 · DeepEP（High-Throughput / Low-Latency） 上一章： 02a_deepgemm.md ← 02_modular_kernel_and_moe_kernels.md 概念铺垫（A2A 原因/载荷/流程）： 01a_moe_all_to_all.md 下一章： 04_megamoe.md 跨机实战补充： ../vllm_cross_node_expert_parallelism.md RDMA 基础： ../rdma_learning_1.md 1. DeepEP 是什么 DeepEP （DeepSeek Expert Parallelism 通信库，Python 包名常为 deep_ep ）为 MoE 提供 GPU 侧高效的 dispatch / combine ： 机内：NVLink / NVSwitch 跨机：RDMA（IB/RoCE），常配合预注册 buffer、NVSHMEM 类对…</p></div><a class="article-more button is-small is-size-7" href="/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/#more">阅读更多</a></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.414Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">7 分钟读完 (大约1095个字)</span></div></div><p class="title is-3 is-size-4-mobile"><a class="link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-04-megamoe/">04 · MegaMoE（DeepSeek V4 + DeepGEMM）</a></p><div class="content"><p>04 · MegaMoE（DeepSeek V4 + DeepGEMM） 上一章： 03_deepep.md 下一章： 05_eplb_and_load_balance.md 1. MegaMoE 在栈里的位置 1 2 3 4 5 6 7 8 9 10 11 12 13 Router (dsv4 / sqrtsoftplus …) │ ▼ prepare_megamoe (Triton) - hidden → fp8 + E8M0 group scales - topk_ids / weights 打成 DeepGEMM 约定布局 │ ▼ deep_gemm.fp8_fp4_mega_moe(...) - 融合 EP 相关对称缓冲 + FP8×FP4 expert 计算 │ ▼ 输出 hidden（常已 reduce） 和 DeepEP 的关系 ： DeepEP：通用 MoE 通信 库（dispatch/combine）。 Me…</p></div><a class="article-more button is-small is-size-7" href="/notes/2026/07/24/2026-07-24-ep-learning-04-megamoe/#more">阅读更多</a></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.415Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">7 分钟读完 (大约1014个字)</span></div></div><p class="title is-3 is-size-4-mobile"><a class="link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-05-eplb-and-load-balance/">05 · EPLB 与 Expert 负载均衡</a></p><div class="content"><p>05 · EPLB 与 Expert 负载均衡 上一章： 04_megamoe.md 下一章： 06_code_reading_map.md 算法细节展开： ../vllm_cross_node_expert_parallelism.md §五 1. 为什么 EP 需要 Load Balance MoE 路由是 数据依赖 的：真实流量下少数 expert 会成为热点。 在 EP 下： 热点 expert 所在 GPU： 算力打满、排队 其它 GPU： 空闲 跨机时：热点若分散在多节点， 跨机 token 流量 暴涨 EPLB（Expert Parallelism Load Balancing）要做的事： 统计 各 logical expert 的负载（token 计数等） 决策 逻辑→物理映射：复制热点、打包到节点/GPU 执行 在 EP ranks 间搬运 expert 权重，更新 map （可选）与推理 异步重叠 2. Lo…</p></div><a class="article-more button is-small is-size-7" href="/notes/2026/07/24/2026-07-24-ep-learning-05-eplb-and-load-balance/#more">阅读更多</a></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.415Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">5 分钟读完 (大约781个字)</span></div></div><p class="title is-3 is-size-4-mobile"><a class="link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-06-code-reading-map/">06 · 本地代码精读地图</a></p><div class="content"><p>06 · 本地代码精读地图 上一章： 05_eplb_and_load_balance.md 实践： 07_practice_checklist.md 默认根目录： ~/codes/vllm_comm 。括号内为次要对照仓库。 Day A · 并行与入口（半日） 顺序 文件 看什么 1 vllm/distributed/parallel_state.py _EP group 如何从 DP×TP 构造； get_ep_group() 2 vllm/config/ 里 parallel / kernel enable_expert_parallel 、 enable_eplb 、 moe_backend 3 vllm/envs.py VLLM_ALL2ALL_BACKEND 、DeepEP 相关 env 4 vllm/v1/worker/gpu_model_runner.py MoE/EPLB 在 step 中的挂钩点（搜 eplb…</p></div><a class="article-more button is-small is-size-7" href="/notes/2026/07/24/2026-07-24-ep-learning-06-code-reading-map/#more">阅读更多</a></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.415Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">6 分钟读完 (大约938个字)</span></div></div><p class="title is-3 is-size-4-mobile"><a class="link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning-07-practice-checklist/">07 · 实践清单与常见坑</a></p><div class="content"><p>07 · 实践清单与常见坑 精读地图： 06_code_reading_map.md 目录： README.md 把实验命令、现象、结论直接记在本文「实验日志」区。 1. 环境准备清单 确认当前用的是 vllm_comm 还是 vllm ，Python 里 import vllm; print(vllm.__file__) python -c "import deep_ep; print(deep_ep.__file__)" （DeepEP 路径） DeepGEMM / MegaMoE： import deep_gemm 是否可用；GPU 是否 SM100 NCCL / RDMA：多机前先 ibstat / 集群文档确认 相关 env 列表备份一份（避免和别的实验互相污染） 2. 最小实验阶梯 L0 · 单测（正确性） 1 2 3 4 5 # 在 vllm_comm 可运行环境中，按你们 CI/README 调整路径 pytes…</p></div><a class="article-more button is-small is-size-7" href="/notes/2026/07/24/2026-07-24-ep-learning-07-practice-checklist/#more">阅读更多</a></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-24T00:00:00.000Z" title="7/24/2026, 12:00:00 AM">2026-07-24</time>发表</span><span class="level-item"><time dateTime="2026-07-24T09:30:09.416Z" title="7/24/2026, 9:30:09 AM">2026-07-24</time>更新</span><span class="level-item">11 分钟读完 (大约1667个字)</span></div></div><p class="title is-3 is-size-4-mobile"><a class="link-muted" href="/notes/2026/07/24/2026-07-24-ep-learning/">Expert Parallelism (EP) 系统学习笔记</a></p><div class="content"><p>Expert Parallelism (EP) 系统学习笔记 目标：从 MoE 原理 → EP 通信 → 相关 Kernel → DeepEP → MegaMoE → EPLB，形成可落地的代码阅读与调试能力。 本地主代码： ~/codes/vllm_comm （优先）、 ~/codes/vllm 、 ~/codes/sglang 已有专题笔记： vllm_cross_node_expert_parallelism.md 、 rdma_learning_1.md 学习路线（建议顺序） 阶段 文档 核心问题 预计 0 本文 全景图、术语、仓库地图 0.5h 1 01_ep_fundamentals.md 什么是 MoE/EP？ EP=TP×DP 怎么来的？ 2–3h 1a 01a_moe_all_to_all.md All-to-All 原因/载荷/流程；与 All-Gather、All-Reduce 对比 2–3h 2 02_m…</p></div><a class="article-more button is-small is-size-7" href="/notes/2026/07/24/2026-07-24-ep-learning/#more">阅读更多</a></article></div></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">39</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">0</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">7</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><!--!--><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-cuda-learning/">Cuda Learning</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/">01 · MoE 与 Expert Parallelism 基础</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/">01a · MoE All-to-All：原因、载荷与流程</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/">02 · Modular Kernel 与 MoE 相关 Kernel</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/">02a · DeepGEMM（MoE Expert 计算后端）</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
