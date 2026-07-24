@@ -2,6 +2,7 @@
 title: 01a · MoE All-to-All：原因、载荷与流程
 date: 2026-07-24
 tags: [EP, MoE, 学习笔记]
+categories: [EP 学习笔记]
 ---
 
 # 01a · MoE All-to-All：原因、载荷与流程

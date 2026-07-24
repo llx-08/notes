@@ -2,6 +2,7 @@
 title: 05 · EPLB 与 Expert 负载均衡
 date: 2026-07-24
 tags: [EP, MoE, 学习笔记]
+categories: [EP 学习笔记]
 ---
 
 # 05 · EPLB 与 Expert 负载均衡

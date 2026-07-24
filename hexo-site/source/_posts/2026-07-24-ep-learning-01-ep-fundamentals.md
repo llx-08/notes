@@ -2,6 +2,7 @@
 title: 01 · MoE 与 Expert Parallelism 基础
 date: 2026-07-24
 tags: [EP, MoE, 学习笔记]
+categories: [EP 学习笔记]
 ---
 
 # 01 · MoE 与 Expert Parallelism 基础

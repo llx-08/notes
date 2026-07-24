@@ -2,6 +2,7 @@
 title: 07 · 实践清单与常见坑
 date: 2026-07-24
 tags: [EP, MoE, 学习笔记]
+categories: [EP 学习笔记]
 ---
 
 # 07 · 实践清单与常见坑

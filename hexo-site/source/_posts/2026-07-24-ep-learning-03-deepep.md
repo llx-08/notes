@@ -2,6 +2,7 @@
 title: 03 · DeepEP（High-Throughput / Low-Latency）
 date: 2026-07-24
 tags: [EP, MoE, 学习笔记]
+categories: [EP 学习笔记]
 ---
 
 # 03 · DeepEP（High-Throughput / Low-Latency）

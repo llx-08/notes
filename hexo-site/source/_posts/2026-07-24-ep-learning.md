@@ -2,6 +2,7 @@
 title: Expert Parallelism (EP) 系统学习笔记
 date: 2026-07-24
 tags: [EP, MoE, 学习笔记]
+categories: [EP 学习笔记]
 ---
 
 # Expert Parallelism (EP) 系统学习笔记
@@ -131,7 +132,7 @@ vLLM Modular MoE 把这条链路拆成可插拔组件：
 - 代码路径以 `~/codes/vllm_comm` 为准；若与 upstream `vllm` 不一致，在对应小节标注差异。
 - 学完一章可在文末「自检」打勾；动手实验记录写在 `07_practice_checklist.md`。
 - **配图**：矢量稿在 `ep_learning/imgs/*.svg`，预览 PNG 同步到 `notes/imgs/` 与 `ep_learning/imgs/`；正文用 `../imgs/xxx.png` 引用，并在相关小节旁加中文图注。
-- **Hexo 博客**：本目录不会被 Hexo 直接扫描；需经 `scripts/sync_root_to_hexo_posts.py` 同步到 `hexo-site/source/_posts/`（CI / git hook 会跑）。系列入口文章 slug：`ep-learning`。
+- **Hexo 博客**：本目录不会被 Hexo 直接扫描；需经 `scripts/sync_root_to_hexo_posts.py` 同步到 `hexo-site/source/_posts/`（CI / git hook 会跑）。系列入口文章 slug：`ep-learning`；分类为 **「EP 学习笔记」**（站点导航「分类」可筛选）。
 
 ### 配图一览
 

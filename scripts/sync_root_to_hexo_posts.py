@@ -13,6 +13,7 @@ Convention:
   - Existing post ``YYYY-MM-DD-<slug>.md`` is updated (front matter kept).
   - New post: ``today-<slug>.md`` with title from first ``#`` heading.
   - Image links ``imgs/`` ``./imgs/`` ``../imgs/`` → ``/imgs/`` (Hexo root).
+  - ``ep_learning`` posts get ``categories: [EP 学习笔记]`` and shared tags.
   - In-series ``*.md`` / ``README.md`` links → Hexo permalinks.
   - Root note links ``../foo_bar.md`` → matching _posts permalink when found.
 
@@ -156,22 +157,40 @@ def title_from_body(body: str) -> str:
     return ""
 
 
+def yaml_inline_list(values: list[str]) -> str:
+    return "[" + ", ".join(values) + "]"
+
+
+def upsert_front_matter_list(fm: str, key: str, values: list[str] | None) -> str:
+    """Set ``key: [a, b]`` in YAML front matter; insert if missing."""
+    if values is None:
+        return fm
+    line = f"{key}: {yaml_inline_list(values)}"
+    pattern = re.compile(rf"^{re.escape(key)}:\s*.*$", re.MULTILINE)
+    if pattern.search(fm):
+        return pattern.sub(line, fm)
+    return fm.rstrip() + "\n" + line
+
+
 def default_front_matter(
-    title: str, slug: str, today: date, *, tags: list[str] | None = None
+    title: str,
+    slug: str,
+    today: date,
+    *,
+    tags: list[str] | None = None,
+    categories: list[str] | None = None,
 ) -> str:
     safe_title = title or slug.replace("-", " ").title()
-    tag_list = tags if tags is not None else []
-    tags_yaml = "[" + ", ".join(tag_list) + "]"
-    return "\n".join(
-        [
-            "---",
-            f"title: {safe_title}",
-            f"date: {today.isoformat()}",
-            f"tags: {tags_yaml}",
-            "---",
-            "",
-        ]
-    )
+    lines = [
+        "---",
+        f"title: {safe_title}",
+        f"date: {today.isoformat()}",
+    ]
+    if categories is not None:
+        lines.append(f"categories: {yaml_inline_list(categories)}")
+    lines.append(f"tags: {yaml_inline_list(tags or [])}")
+    lines.extend(["---", ""])
+    return "\n".join(lines)
 
 
 def rewrite_md_links(
@@ -211,6 +230,7 @@ def sync_one(
     today: date,
     slug: str,
     tags: list[str] | None,
+    categories: list[str] | None,
     link_basename_to_slug: dict[str, str],
     slug_to_permalink: dict[str, str],
     site_root: str,
@@ -242,11 +262,19 @@ def sync_one(
                 file=sys.stderr,
             )
             merged = (
-                default_front_matter(title_from_body(body), slug, today, tags=tags)
+                default_front_matter(
+                    title_from_body(body),
+                    slug,
+                    today,
+                    tags=tags,
+                    categories=categories,
+                )
                 + body
             )
         else:
-            merged = "---\n" + old_fm + "\n---\n\n" + body.strip() + "\n"
+            fm = upsert_front_matter_list(old_fm, "categories", categories)
+            fm = upsert_front_matter_list(fm, "tags", tags)
+            merged = "---\n" + fm + "\n---\n\n" + body.strip() + "\n"
         action = f"update {existing.name}"
         pl = permalink_for_post_file(existing, site_root=site_root)
         if pl:
@@ -255,7 +283,11 @@ def sync_one(
         title = title_from_body(body)
         name = f"{today.isoformat()}-{slug}.md"
         merged = (
-            default_front_matter(title, slug, today, tags=tags) + body.strip() + "\n"
+            default_front_matter(
+                title, slug, today, tags=tags, categories=categories
+            )
+            + body.strip()
+            + "\n"
         )
         existing = posts / name
         action = f"create {name}"
@@ -321,6 +353,7 @@ def main() -> int:
             today=today,
             slug=slug_from_root_name(p.stem),
             tags=None,
+            categories=None,
             link_basename_to_slug=link_map,
             slug_to_permalink=slug_to_permalink,
             site_root=site_root,
@@ -334,6 +367,7 @@ def main() -> int:
 
     ep_dir = root / "ep_learning"
     ep_tags = ["EP", "MoE", "学习笔记"]
+    ep_categories = ["EP 学习笔记"]
     if ep_dir.is_dir():
         # First pass creates all posts / refreshes permalink map
         for p in sorted(ep_dir.glob("*.md")):
@@ -344,6 +378,7 @@ def main() -> int:
                 today=today,
                 slug=slug_from_ep_learning(p.stem),
                 tags=ep_tags,
+                categories=ep_categories,
                 link_basename_to_slug=link_map,
                 slug_to_permalink=slug_to_permalink,
                 site_root=site_root,
@@ -365,6 +400,7 @@ def main() -> int:
                     today=today,
                     slug=slug_from_ep_learning(p.stem),
                     tags=ep_tags,
+                    categories=ep_categories,
                     link_basename_to_slug=link_map,
                     slug_to_permalink=slug_to_permalink,
                     site_root=site_root,

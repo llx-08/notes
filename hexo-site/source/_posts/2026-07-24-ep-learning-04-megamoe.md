@@ -2,6 +2,7 @@
 title: 04 · MegaMoE（DeepSeek V4 + DeepGEMM）
 date: 2026-07-24
 tags: [EP, MoE, 学习笔记]
+categories: [EP 学习笔记]
 ---
 
 # 04 · MegaMoE（DeepSeek V4 + DeepGEMM）

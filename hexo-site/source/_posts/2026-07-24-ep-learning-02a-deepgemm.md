@@ -2,6 +2,7 @@
 title: 02a · DeepGEMM（MoE Expert 计算后端）
 date: 2026-07-24
 tags: [EP, MoE, 学习笔记]
+categories: [EP 学习笔记]
 ---
 
 # 02a · DeepGEMM（MoE Expert 计算后端）
