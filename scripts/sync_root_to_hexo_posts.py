@@ -29,6 +29,7 @@ Run from anywhere; repo root is inferred from this script's location.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from datetime import date
@@ -183,7 +184,7 @@ def default_front_matter(
     safe_title = title or slug.replace("-", " ").title()
     lines = [
         "---",
-        f"title: {safe_title}",
+        f"title: {json.dumps(safe_title, ensure_ascii=False)}",
         f"date: {today.isoformat()}",
     ]
     if categories is not None:

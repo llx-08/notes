@@ -1,5 +1,5 @@
 ---
-title: DualPath: Dual-Path KV-Cache Loading for Disaggregated LLM Serving
+title: "DualPath: Dual-Path KV-Cache Loading for Disaggregated LLM Serving"
 date: 2026-06-17
 tags: []
 ---
