@@ -4,9 +4,12 @@ date: 2026-07-17
 tags: []
 ---
 
-# RDMA学习笔记（2）：数据中心网络拓扑与 RoCE 无损网络
+# RDMA学习笔记（2）：数据中心网络拓扑、RoCE 拥塞与重传
 
 承接 [RDMA学习笔记（1）](/notes/2026/05/25/2026-05-25-rdma-learning-1/)。这一篇聚焦**数据中心网络的层次结构**（ASW/PSW/DSW/DCC…），以及 RoCE 在以太网上跑 RDMA 时的 **PFC / 拥塞 / N 倍重传** 问题，最后落到对 **PD 分离**跨机房传输的启示。
+
+> 更系统的 PFC、ECN/DCQCN、BDP、RNR 与 Barex 参数对照见
+> [RoCE、拥塞控制与重传](nccl_pcie_barex_learning/02c_roce_congestion_and_tuning.md)。
 
 ## 数据中心网络的层次（Spine-Leaf / CLOS）
 
@@ -123,3 +126,117 @@ SERVER ─ ASW ─ PSW ─ DSW ─ DCC ─ ESR ─ EAR ═══ EAR ─ ESR ─
 - 设备跨厂商混布：H3C Q4D、锐捷 Q3D/Q4D、自研 P200 等，EAR 扮演出口路由角色
 
 跨城 PD 分离的两个硬约束叠加——**10ms 物理延迟** + **非无损骨干的重传风险**——是决定"KV Cache 该不该跨机房传"的关键。
+
+---
+
+## 补充与校正：不要把“go-back-N”当作所有 RNIC 的精确模型
+
+上文用“go-back-N/N 倍重传”建立丢包放大的直觉是有价值的，但生产分析需要更精确：
+
+- RC 的基础可靠性由 PSN、ACK/NAK、retry timer 等完成；
+- RNIC/固件对乱序包的处理能力不同；
+- 新设备可能支持 out-of-order placement 或选择性重传扩展；
+- TCP 也不保证永远只重传一个 segment，实际受 SACK/RACK、拥塞窗口等影响；
+- 应用必须依据 NIC capability 和 hardware counter 判断实际重传。
+
+因此更严谨的结论是：
+
+> 长 RTT、大 BDP 和丢包会显著放大 RC/RoCE 的恢复代价；放大倍数与重传范围由具体 RNIC、firmware、transport mode 和网络配置决定。
+
+## PFC、ECN 与 RC retry 的分层
+
+```text
+ECN/DCQCN：拥塞早期标记并让发送端降速
+     ↓
+PFC：队列临近溢出时逐跳 pause，作为最后保护
+     ↓
+RC retry：已经发生丢包/NAK/timeout 后恢复可靠性
+```
+
+三者不可互相替代：
+
+- 只有 PFC：可能 pause storm/HoL，吞吐与尾延迟仍差。
+- 只有 ECN：microburst 仍可能在反馈前打满浅 buffer。
+- 只依赖 retry：高 BDP 下恢复代价可能很大。
+
+PFC 是逐跳机制，不是一个能天然跨自治域传播的端到端控制协议。跨机房要逐跳验证 traffic class、trust mode、PFC/ECN 与 buffer 配置。
+
+## RNR 不是网络拥塞
+
+`IBV_WC_RNR_RETRY_EXC_ERR` 表示需要 Receive WQE 的操作到达时，对端 RQ 没有可用 Recv。常见于：
+
+- SEND；
+- SEND_WITH_IMM；
+- RDMA WRITE WITH IMM。
+
+它首先是 endpoint receive depth/progress 问题，不应直接归因于交换机丢包。Barex 对应检查：
+
+```text
+ACCL_RX_DEPTH
+ACCL_POST_RECV_BATCH_SIZE
+ACCL_RNR_RETRY
+ACCL_MIN_RNR_TIMER
+XContextImpl 是否及时 poll CQ 并补充 recv
+```
+
+## Barex 的网络参数对照
+
+| 参数 | 网络/transport 含义 |
+|---|---|
+| `ACCL_IBV_MTU` | QP path MTU，需与 fabric 一致 |
+| `ACCL_BAREX_TRAFFIC_CLASS` | RoCE traffic class/DSCP 映射入口 |
+| `ACCL_RETRANSMIT_TIMEOUT` | RC ACK timeout |
+| `ACCL_RETRY_CNT` | transport retry count |
+| `ACCL_RNR_RETRY` | receiver-not-ready retry |
+| `ACCL_INCAST_AVOID` | endpoint 大消息并发准入 |
+| `ACCL_INCAST_COUNT` | 允许的 incast 数 |
+| `ACCL_INCAST_THRESHOLD` | 进入限流的大消息阈值 |
+
+Barex incast avoidance 发生在 endpoint/context，DCQCN/PFC 发生在 RNIC/fabric，二者是互补关系。
+
+## NCCL 与 Barex 共网时
+
+训练/推理系统可能同时存在：
+
+```text
+NCCL collective traffic
+  +
+Barex KV cache RDMA traffic
+```
+
+需要联合检查：
+
+1. 是否选择同一 HCA/port；
+2. 是否进入同一 traffic class/PFC priority；
+3. NCCL channel 数与 Barex send parallel 是否同时过大；
+4. 是否形成 collective + P→D KV 的叠加 incast；
+5. 是否共享同一 PCIe uplink；
+6. RNIC 的 ECN/CNP/retry 与 switch 的 PFC/drop 是否同步增长。
+
+## 需要采集的指标
+
+### Switch
+
+- per-priority bytes/drop；
+- ECN marked packets；
+- PFC pause tx/rx、duration；
+- queue current/max occupancy；
+- CNP traffic。
+
+### RNIC
+
+- retry/RNR retry exceeded；
+- retransmitted packets；
+- packet sequence/OOO counters；
+- CNP sent/received；
+- ECN marked receive；
+- port xmit wait。
+
+只看“端口无丢包”不足以证明健康：PFC pause 很高也可能造成严重 HoL 和尾延迟。
+
+## 自检
+
+1. 为什么 400G×10ms 的 BDP 约为 500MB？
+2. PFC 与 ECN/DCQCN 分别在什么时机反馈？
+3. 为什么 RNR 更应先查接收端 RQ，而不是交换机？
+4. NCCL 与 Barex 共用 NIC 时，如何证明是网络竞争而非代码串行？

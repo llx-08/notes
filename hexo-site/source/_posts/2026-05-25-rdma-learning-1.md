@@ -4,7 +4,13 @@ date: 2026-05-25
 tags: []
 ---
 
-# RDMA学习笔记（1）
+# RDMA学习笔记（1）：基础概念、Verbs 对象与 Barex 对照
+
+> 本文是概念入口。更系统的源码版见
+> [RDMA Verbs 对象模型](nccl_pcie_barex_learning/02a_rdma_verbs_object_model.md)、
+> [RDMA 操作与完成语义](nccl_pcie_barex_learning/02b_rdma_operations_completion_and_reliability.md)；
+> PCIe/GPU Direct 背景见
+> [GPU、NIC、PCIe 拓扑与 DMA](nccl_pcie_barex_learning/02_pcie_gpu_topology_and_dma.md)。
 
 DMA(Direct-Memory-Access): 让硬件组件能够在不涉及CPU的情况下直接读写主存，避免占用CPU。实际上GPU也包括这种操作。
 
@@ -25,7 +31,7 @@ RDMA允许数据直接从网卡传输到应用程序的memory中（vice versa）
 
 Channel level
 - Send
-- Recv 
+- Recv
 
 Memory level
 - Read: 从远端内存读取数据到本地内存
@@ -98,7 +104,7 @@ CQ(Completion Queue)
 ### MR(Memory Region)
 
 Ref:
-https://www.bilibili.com/video/BV1LqdnYeEDT/?vd_source=abcbcdfc21d527c3519a180ed8826c9d 
+https://www.bilibili.com/video/BV1LqdnYeEDT/?vd_source=abcbcdfc21d527c3519a180ed8826c9d
 
 Memory region, pinned to physical locations that can be performed the DMA by RNIC, provide RDMA device RNIC with necessary permissions for reading and writing.
 
@@ -119,3 +125,164 @@ control access to various RDMA resources
 
 Ref:
 https://www.snia.org/blog/2025/rdma-qa
+
+---
+
+## 补完 1：RDMA 的 slow path 与 fast path
+
+“kernel bypass”不是内核完全不参与：
+
+```text
+Slow path:
+  open device / alloc PD / create CQ/QP / register MR
+  → 由 libibverbs 通过 uverbs 与内核、驱动交互
+
+Fast path:
+  写 WQE / doorbell / poll CQ
+  → provider 通常直接访问 mmap 的硬件 queue/register
+  → 不为每个数据操作陷入内核
+```
+
+Linux 内核仍负责资源隔离、内存 pinning、驱动生命周期和进程退出清理。
+
+## 补完 2：对象关系
+
+```mermaid
+flowchart TD
+    DEV[ibv_device] --> CTX[ibv_context]
+    CTX --> PD[Protection Domain]
+    CTX --> CQ[Completion Queue]
+    PD --> MR[Memory Region<br/>addr/len/lkey/rkey]
+    PD --> QP[Queue Pair]
+    QP --> SQ[Send Queue]
+    QP --> RQ[Receive Queue]
+    SQ --> CQ
+    RQ --> CQ
+```
+
+| 对象 | 关键问题 |
+|---|---|
+| Context | 打开的是哪块 RNIC？ |
+| PD | 这组 QP/MR 是否属于同一保护域？ |
+| MR | RNIC 可以访问哪段内存、拥有什么权限？ |
+| QP | peer、可靠性、队列深度、retry 参数是什么？ |
+| CQ | 哪个 WR 完成或失败？ |
+
+### Barex 对照
+
+| Verbs | Barex |
+|---|---|
+| device/context | `IbvDevice`、`XContextImpl` |
+| PD | `IbvDevice` 内的 `ibv_pd` |
+| MR | `memp_t.mr`、`XSimpleMempool` |
+| QP | `XChannelImpl::ibv_qp_` |
+| CQ progress | `XContextImpl::ProcessIoEvents` |
+| WR cookie | `x_wr_id` |
+| connection manager | `XConnector/XListener` |
+
+## 补完 3：QP 状态机
+
+RC QP 常见状态：
+
+```text
+RESET → INIT → RTR → RTS
+                   ↘ ERR
+```
+
+- INIT：配置 port、PKey、远端访问权限。
+- RTR：已知道 peer 的 QPN/GID/LID/PSN，可以接收。
+- RTS：配置 timeout/retry/read atomic，可以发起请求。
+- ERR：已有 WR 被 flush，常看到 `IBV_WC_WR_FLUSH_ERR`。
+
+Barex 先创建 QP，再用 TCP 带外连接交换 `ChannelInitMeta`，最后把双方 QP 推到可通信状态。带外 TCP 建联与 RDMA payload 是两条不同路径。
+
+## 补完 4：四种常见操作
+
+| 操作 | 发起端 SQ | 接收端 RQ | 远端地址 |
+|---|---:|---:|---|
+| SEND | 是 | 必须预贴 Recv | 不需要 |
+| RDMA WRITE | 是 | 不需要 | `raddr+rkey` |
+| WRITE WITH IMM | 是 | 通常需要一个 Recv WQE | `raddr+rkey` |
+| RDMA READ | 是 | 不需要 | `raddr+rkey` |
+
+### 为什么 Write with Immediate 特别
+
+它既把数据写入远端 MR，又让远端 CQ 得到一个带 `imm_data` 的 receive completion。适合“写完请通知我”，但接收端 RQ 不足时仍会 RNR。
+
+blade-kvt：
+
+- direct RDMA KV：`WriteBatch`，不通知每层；
+- staged RDMA：`WriteSingle(signal_peer=true)`，imm 编码 staging buffer id；
+- 控制 RPC：Barex `Send`，远端进入 `OnRecvCall`。
+
+## 补完 5：WR 提交、完成与业务完成
+
+```text
+ibv_post_send 返回 0
+  ≠ 数据已完成
+
+本地 CQE SUCCESS
+  ≠ 远端应用/CUDA kernel 已消费
+
+远端业务 ACK
+  = 应用定义的更强完成边界
+```
+
+对于 non-inline WR，必须等 completion 后才能释放或复用 local buffer。
+
+在 blade-kvt 中：
+
+```text
+WriteBatch submit
+  → Barex CQ callback
+  → RDMAChannel::flush future.get()
+  → request send-done RPC
+```
+
+staged/TCP 还会等待远端 H2D 完成响应。
+
+## 补完 6：常见 WC 错误
+
+| 错误 | 常见根因 |
+|---|---|
+| `LOC_PROT_ERR` | local addr/lkey/length/MR 不匹配 |
+| `REM_ACCESS_ERR` | raddr/rkey 失效或越界 |
+| `RNR_RETRY_EXC_ERR` | 对端没有预贴足够 Recv |
+| `RETRY_EXC_ERR` | 对端/QP/网络未响应 |
+| `WR_FLUSH_ERR` | QP 已进入 ERR，找更早的首个错误 |
+
+目标进程重启后，旧 rkey 不能复用；即使 IP 不变也必须重新建联和交换 MR handle。
+
+## 补完 7：最小 verbs 生命周期
+
+```text
+get/open device
+  → alloc PD
+  → create CQ
+  → register MR
+  → create QP
+  → INIT/RTR/RTS
+  → post recv（若使用 SEND/IMM）
+  → post send/write/read
+  → poll CQ
+  → drain inflight
+  → destroy QP
+  → dereg MR
+  → destroy CQ / PD / context
+```
+
+销毁前必须 drain 或错误完成所有 inflight WR。
+
+## 补完 8：学习后的自检
+
+1. 为什么普通 RDMA Write 不要求远端 RQ，而 Write with Immediate 要？
+2. lkey 与 rkey 分别在哪一端的 WQE 中使用？
+3. 为什么同一个 CUDA pointer 在不同 PD/NIC 上可能需要不同 MR？
+4. `ibv_post_send` 成功后为什么还不能释放 buffer？
+5. `WR_FLUSH_ERR` 为什么通常不是最初根因？
+
+## 一手资料
+
+- [Linux Userspace verbs access](https://docs.kernel.org/infiniband/user_verbs.html)
+- [rdma-core](https://github.com/linux-rdma/rdma-core)
+- [Linux InfiniBand/RDMA Interfaces](https://docs.kernel.org/driver-api/infiniband.html)
