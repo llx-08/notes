@@ -1,0 +1,21 @@
+/*
+ * Keep Icarus's responsive layout on phones and tablets. On desktop, let the
+ * article column use 80% of the available page width and the sidebar use 20%.
+ */
+@media screen and (min-width: 1088px) {
+  body.is-2-column > .section > .container {
+    width: 100%;
+    max-width: none;
+  }
+
+  body.is-2-column > .section > .container > .columns > .column-main {
+    flex: none;
+    width: 80%;
+  }
+
+  body.is-2-column > .section > .container > .columns > .column-left,
+  body.is-2-column > .section > .container > .columns > .column-right {
+    flex: none;
+    width: 20%;
+  }
+}

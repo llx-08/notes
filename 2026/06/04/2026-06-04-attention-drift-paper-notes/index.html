@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>Attention Drift: 自回归推测解码模型到底学到了什么 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="Attention Drift: 自回归推测解码模型到底学到了什么 论文： Attention Drift: What Autoregressive Speculative Decoding Models Learn 作者：Doğaç Eldenk, Payal Mohapatra, Yigitcan Comlek, Kaan Oktay, Hongyang Zhang, Stephen Xia"><meta property="og:type" content="blog"><meta property="og:title" content="Attention Drift: 自回归推测解码模型到底学到了什么"><meta property="og:url" content="https://llx-08.github.io/notes/2026/06/04/2026-06-04-attention-drift-paper-notes/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="Attention Drift: 自回归推测解码模型到底学到了什么 论文： Attention Drift: What Autoregressive Speculative Decoding Models Learn 作者：Doğaç Eldenk, Payal Mohapatra, Yigitcan Comlek, Kaan Oktay, Hongyang Zhang, Stephen Xia"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-06-04T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-26T09:42:42.805Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/06/04/2026-06-04-attention-drift-paper-notes/"},"headline":"Attention Drift: 自回归推测解码模型到底学到了什么","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-06-04T00:00:00.000Z","dateModified":"2026-07-26T09:42:42.805Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"Attention Drift: 自回归推测解码模型到底学到了什么 论文： Attention Drift: What Autoregressive Speculative Decoding Models Learn 作者：Doğaç Eldenk, Payal Mohapatra, Yigitcan Comlek, Kaan Oktay, Hongyang Zhang, Stephen Xia"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/06/04/2026-06-04-attention-drift-paper-notes/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-06-04T00:00:00.000Z" title="6/4/2026, 12:00:00 AM">2026-06-04</time>发表</span><span class="level-item"><time dateTime="2026-07-26T09:42:42.805Z" title="7/26/2026, 9:42:42 AM">2026-07-26</time>更新</span><span class="level-item">1 小时读完 (大约7484个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">Attention Drift: 自回归推测解码模型到底学到了什么</h1><div class="content"><h1 id="Attention-Drift-自回归推测解码模型到底学到了什么"><a href="#Attention-Drift-自回归推测解码模型到底学到了什么" class="headerlink" title="Attention Drift: 自回归推测解码模型到底学到了什么"></a>Attention Drift: 自回归推测解码模型到底学到了什么</h1><blockquote>
+<p>论文：<em>Attention Drift: What Autoregressive Speculative Decoding Models Learn</em><br>作者：Doğaç Eldenk, Payal Mohapatra, Yigitcan Comlek, Kaan Oktay, Hongyang Zhang, Stephen Xia<br>机构：Northwestern University / GE Aerospace / fal / University of Waterloo<br>arXiv: 2605.09992v1（2026 年 5 月 11 日）<br>代码：<a target="_blank" rel="noopener" href="https://github.com/Dogacel/Attention-Drift">https://github.com/Dogacel/Attention-Drift</a></p>
+</blockquote>
+<hr>
+<h2 id="一、TL-DR"><a href="#一、TL-DR" class="headerlink" title="一、TL;DR"></a>一、TL;DR</h2><ul>
+<li>作者首次系统地指出 <strong>EAGLE-3 / MTP 这类自回归 drafter 在投机解码链中存在「注意力漂移（attention drift）」现象</strong>：随着 drafter 不断生成后续 token，其注意力会逐步从 prompt 中的 sink token 漂走，转而集中到自己最近生成的 token 上。</li>
+<li>根因是 drafter 在 speculation step 之间走的是<strong>未归一化的残差路径</strong>——hidden state 的幅度随链深度单调增大，使 drafter “学得像” 在 verifier 之上再多堆几层 Transformer，而不是一个稳定的自回归预测器。</li>
+<li>提出两处极简的架构修改：<ol>
+<li><strong>Post-norm</strong>：把 drafter 的 RMSNorm 放到输出之前，约束 chain hidden state 的尺度；</li>
+<li><strong>Per-hidden-state RMSNorm</strong>：在 <code>hlow / hmid / hhigh</code> 进 FC 融合之前，对每条目标 hidden stream 各自归一化。</li>
+</ol>
+</li>
+<li>在 7 个常用 benchmark（MT-Bench / GSM8K / Alpaca / HumanEval / MATH-500 / GPQA / LiveCodeBench）平均接受长度提升 <strong>1.10×</strong>；在长上下文任务（LongBench）提升 <strong>1.18×</strong>；在模板扰动场景下最高提升 <strong>2×</strong>。TTT（训练时投机深度）可以从 8 降到 4，训练耗时减少 1/3。</li>
+</ul>
+<hr>
+<h2 id="二、背景：投机解码与-EAGLE-MTP"><a href="#二、背景：投机解码与-EAGLE-MTP" class="headerlink" title="二、背景：投机解码与 EAGLE / MTP"></a>二、背景：投机解码与 EAGLE / MTP</h2><p><strong>投机解码（Speculative Decoding）</strong> 分两阶段交替：</p>
+<ul>
+<li><strong>Drafting</strong>：drafter 自回归地写出 k 个候选 token（k 即 <em>speculation depth</em>）；</li>
+<li><strong>Verification</strong>：target 模型一次前向把 k 个候选并行打分，做 rejection sampling，留下最长合法前缀。</li>
+</ul>
+<p>衡量效率的核心指标是 <strong>acceptance length τ</strong>：每轮验证平均被接受多少个 draft token，与端到端加速比直接相关。</p>
+<p><strong>EAGLE-3</strong> 是当下 vLLM/SGLang 等推理引擎里最主流的自回归 drafter：把 target 的低/中/高层 hidden state 经 FC 融合后送入<strong>单层 pre-norm Transformer decoder</strong>，自带一个 LM head，loss 用 target 的预测分布做 cross-entropy。</p>
+<p><strong>MTP（Multi-Token Prediction）heads</strong> 则是与 target 一起 pretraining 的辅助预测头，复用 target 的 LM head。</p>
+<p><strong>Attention sink</strong> 指序列开头某个 token 在推理过程中持续吸走异常多的 attention（Llama 在第 0 个 token，Qwen 在第 1 个，GPT-oss 通过 per-head 学习偏置干掉了 sink），被认为是稳定长上下文注意力的锚点。</p>
+<hr>
+<h2 id="三、Attention-Drift-现象"><a href="#三、Attention-Drift-现象" class="headerlink" title="三、Attention Drift 现象"></a>三、Attention Drift 现象</h2><p>作者观察到一个普适规律：</p>
+<blockquote>
+<p><strong>target 模型在哪里有 sink，drafter 也会在那里学出一个 sink</strong>——在 EAGLE-3 和 MTP 上同时观察到。</p>
+</blockquote>
+<p>但 drafter 的注意力分布有一个 target 没有的动态：</p>
+<ul>
+<li><strong>Prefill 阶段</strong>：drafter 在消费 verifier 的 hidden state，注意力分布类似 verifier；</li>
+<li><strong>Drafting 阶段</strong>：drafter 开始消费自己产生的 hidden state，注意力<strong>逐步从 sink 漂走</strong>，向”最近生成的 token”集中。</li>
+</ul>
+<p>这就是 <strong>attention drift</strong>，可视化为一张右下角越来越深的热力图（论文 Figure 4 / Figure 1）。</p>
+<p>针对 Llama 3.1 8B / Qwen 3 30B / Qwen 3.5 35B / GPT-oss 120B / Qwen3.5 9B MTP 五个组合都验证了这一现象。即使是 GPT-oss 这类没有 sink 的模型，drafter 仍然在重复的模板 token（template marker）上形成弱 sink 行为，说明 sink-like 行为既来自架构归纳偏置，也来自重复的特殊 token。</p>
+<p>作者的核心假说：这种”两段式注意力” 让 drafter 对 <strong>OOD 输入</strong> 异常脆弱，尤其在长上下文和深推测步上。</p>
+<hr>
+<h2 id="四、根因分析：是什么造成了-Drift？"><a href="#四、根因分析：是什么造成了-Drift？" class="headerlink" title="四、根因分析：是什么造成了 Drift？"></a>四、根因分析：是什么造成了 Drift？</h2><h3 id="4-1-Hidden-State-幅度分析"><a href="#4-1-Hidden-State-幅度分析" class="headerlink" title="4.1 Hidden State 幅度分析"></a>4.1 Hidden State 幅度分析</h3><p>用 RMS = ‖x‖₂/√d 在 80 条 MT-Bench prompt × k=8 推测轮上比较 verifier 的低/中/高层、FC 融合后、drafter 在 k=1/2/3/8 的输出幅度（论文 Table 1）。三个观察：</p>
+<ol>
+<li><strong>幅度严重错配</strong>：verifier、FC、drafter 之间的 hidden state 量级差几十倍以上。但 acceptance rate 与幅度并无强相关，说明模型自己已经学会补偿这种偏差。</li>
+<li><strong>hFC 不平衡</strong>：target 都是 pre-norm 架构，残差流本身从不被归一化（pre-norm dilution），所以 <code>‖hhigh‖ ≫ ‖hmid‖ ≫ ‖hlow‖</code>。EAGLE-3 直接拿 pre-norm 之前的内部状态，使得 <code>hhigh</code> 主导融合信号。<strong>修复办法：在每条目标 hidden stream 进 FC 之前各加一个 RMSNorm。</strong></li>
+<li><strong>幅度随推测深度单调生长</strong>：drafter 的 h*ₖ 在所有模型家族上都随 k 单调增大，使得 drafter 在 k=8 时面对的是一个完全脱离训练分布的输入尺度。</li>
+</ol>
+<blockquote>
+<p><strong>drift 与 magnitude 的关系</strong>：attention 依赖 query-key 相似度。深处的 drafter hidden state 越来越像最近生成的几个 hidden state（同样幅度大），于是 attention mass 自然就被吸过去了。</p>
+</blockquote>
+<h3 id="4-2-Norm-位置：层堆叠-vs-自回归"><a href="#4-2-Norm-位置：层堆叠-vs-自回归" class="headerlink" title="4.2 Norm 位置：层堆叠 vs 自回归"></a>4.2 Norm 位置：层堆叠 vs 自回归</h3><p>这是论文最有洞察力的论断之一：</p>
+<blockquote>
+<p>标准 pre-norm 的 drafter，由于残差路径未归一化、hidden state 单调增长，drafter <strong>在结构上更像在 target 上又堆了 N+1, N+2, …, N+k 层 Transformer</strong>，而不是一个深度无关的自回归预测器。它学到的是”沿深度方向继续 refine”，而非”自回归地预测下一个 token”。</p>
+</blockquote>
+<p>实验设计：用不同 train-time-test depth（TTT）训练 pre-norm 和 post-norm drafter：</p>
+<ul>
+<li>pre-norm + TTT=2：在 k≤2 内表现不错，但 k 超过 2 后<strong>直接崩盘</strong>（hidden state RMS 飙升、条件接受概率几乎归零）；</li>
+<li>pre-norm + TTT=8：在 k≤8 表现最好，超过 8 后开始衰减；</li>
+<li><strong>post-norm + TTT=2：在 k=2 之外仍然稳定</strong>，magnitude 始终被 norm 钉住。</li>
+</ul>
+<p>说明：post-norm 阻断了”用幅度编码深度”的捷径，把 drafter 正则成一个真正的、深度不变的自回归预测函数。</p>
+<h3 id="4-3-Magnitude-与-Sink-是相互独立的失败模式"><a href="#4-3-Magnitude-与-Sink-是相互独立的失败模式" class="headerlink" title="4.3 Magnitude 与 Sink 是相互独立的失败模式"></a>4.3 Magnitude 与 Sink 是相互独立的失败模式</h3><p>对比 4 种架构（Llama 3.1 8B，MT-Bench，论文 Table 2）：</p>
+<table>
+<thead>
+<tr>
+<th>Drafter</th>
+<th>h*₁→₈</th>
+<th>熵 H₁→₈</th>
+<th>sink₁→₈</th>
+<th>recent₁→₈</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Pre-norm</td>
+<td>3.92 → 14.02</td>
+<td>2.04 → 2.73</td>
+<td>0.46 → 0.08</td>
+<td>0.14 → 0.31</td>
+</tr>
+<tr>
+<td>Gated-Attn</td>
+<td>8.41 → 39.07</td>
+<td>2.39 → 2.13</td>
+<td>0.03 → 0.02</td>
+<td>0.29 → 0.32</td>
+</tr>
+<tr>
+<td>Post-norm</td>
+<td>1.21 → 1.20</td>
+<td>2.24 → 2.29</td>
+<td>0.11 → 0.10</td>
+<td>0.50 → 0.53</td>
+</tr>
+<tr>
+<td>Gated + Post-norm</td>
+<td>0.87 → 0.88</td>
+<td>0.63 → 0.64</td>
+<td>0.00 → 0.00</td>
+<td>0.50 → 0.51</td>
+</tr>
+</tbody></table>
+<p>结论：</p>
+<ul>
+<li><strong>Gated Attention</strong> 能把 sink 杀掉，让 drift 现象消失，但 hidden state 幅度仍会 5× 放大；</li>
+<li><strong>Post-norm</strong> 能把幅度死死按住，attention 分布也稳定；</li>
+<li><strong>二者叠加</strong>反而出现<strong>熵塌缩</strong>（H ≈ 0.62 ≈ 仅 ~1.85 个有效 attended 位置），模型 attention 几乎只聚在两个 token 上，等于过度正则化；</li>
+<li><strong>熵</strong> 与 acceptance length 之间没有稳定的对应关系，不能作为质量诊断指标。</li>
+</ul>
+<h3 id="4-4-Noise-误差累积"><a href="#4-4-Noise-误差累积" class="headerlink" title="4.4 Noise / 误差累积"></a>4.4 Noise / 误差累积</h3><p>实验：对 drafter 的 hidden 路径或 embedding 路径分别加幅度 α·rms(x) 的高斯噪声，看接受长度相对无噪声的下降比例（论文 Table 3）：</p>
+<table>
+<thead>
+<tr>
+<th>架构</th>
+<th>通路</th>
+<th>α=0.1</th>
+<th>α=0.5</th>
+<th>α=1.0</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Pre-norm (3.06)</td>
+<td>Hidden</td>
+<td>82%</td>
+<td>5%</td>
+<td>0%</td>
+</tr>
+<tr>
+<td>Pre-norm</td>
+<td>Embedding</td>
+<td>99%</td>
+<td>86%</td>
+<td>64%</td>
+</tr>
+<tr>
+<td>Post-norm (3.16)</td>
+<td>Hidden</td>
+<td>99%</td>
+<td>58%</td>
+<td>22%</td>
+</tr>
+<tr>
+<td>Post-norm</td>
+<td>Embedding</td>
+<td>98%</td>
+<td>93%</td>
+<td>75%</td>
+</tr>
+</tbody></table>
+<p>post-norm 对 hidden-path 噪声的容忍度比 pre-norm 高一个数量级，可能也意味着对 verifier 量化、轻度分布漂移更鲁棒。</p>
+<p><strong>反向实验</strong>：推理时人为把 pre-norm 的 hidden RMS 缩到 FC 的尺度，attention drift 明显减弱但仍存在，且 accuracy 反而下降 56%（post-norm 下降 34%）。说明 <strong>magnitude 累积是 drift 的一个原因，但不是唯一原因</strong>，光靠推理时规约不行——必须训练时就用 post-norm 这种归一化结构。</p>
+<h3 id="4-5-训练窗口与-MTP-行为"><a href="#4-5-训练窗口与-MTP-行为" class="headerlink" title="4.5 训练窗口与 MTP 行为"></a>4.5 训练窗口与 MTP 行为</h3><ul>
+<li><strong>训练窗口效应</strong>：EAGLE 类训练用固定 context window，drafting 时旧 token 会被挤出窗口，drafter 自然学会减少对早期 prompt 位置的依赖——这可能进一步放大 sink 弱化。</li>
+<li><strong>MTP 的 drift 形态不同</strong>：MTP 是 post-norm，但 drift 仍存在，呈”前几步陡降→稳定到新基线”的模式（论文 Figure 7）。MTP 与 target 联合训练、复用 LM head，训练损失对 drift 的贡献尚不清楚，留作 future work。</li>
+</ul>
+<hr>
+<h2 id="五、性能影响（Performance-Impact）"><a href="#五、性能影响（Performance-Impact）" class="headerlink" title="五、性能影响（Performance Impact）"></a>五、性能影响（Performance Impact）</h2><h3 id="5-1-提议的新架构"><a href="#5-1-提议的新架构" class="headerlink" title="5.1 提议的新架构"></a>5.1 提议的新架构</h3><p>post-norm 架构（论文 Figure 13 右图）做了两件事：</p>
+<ol>
+<li>在 hlow / hmid / hhigh 各加一个 RMSNorm，再喂给 FC；</li>
+<li>drafter 的 RMSNorm 移到累加之后、LM Head 之前（即 post-norm）。</li>
+</ol>
+<p>使用 post-norm 后，TTT 从 8 → 4，训练耗时减少约 1/3，且性能不降反升。</p>
+<p><strong>SGLang 7 个 benchmark（GPT-OSS 20B）平均接受长度</strong>全部提升，最大 +12%；<br>4 个 target 模型（Llama 3.1 8B, Qwen 3 8B, Qwen 3.5 9B, GPT-OSS 20B）上 post-norm 普遍 ≥ pre-norm，唯一回退是 Llama 3.1 8B 在 MATH-500 上 5.87 → 5.81（在评测噪声范围内）。</p>
+<h3 id="5-2-模板敏感性（Template-Sensitivity）"><a href="#5-2-模板敏感性（Template-Sensitivity）" class="headerlink" title="5.2 模板敏感性（Template Sensitivity）"></a>5.2 模板敏感性（Template Sensitivity）</h3><p>drafter 通常在 SFT 数据上训练，会过拟合 chat template。作者制造四种扰动：<code>template+BoS / template no BoS / no template (BoS auto) / no template no BoS</code>。Llama 3.1 8B：</p>
+<table>
+<thead>
+<tr>
+<th>扰动</th>
+<th>Pre-norm</th>
+<th>Post-norm</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>template + BoS</td>
+<td>2.74</td>
+<td>2.73</td>
+</tr>
+<tr>
+<td>template, no BoS</td>
+<td>2.28</td>
+<td>2.65</td>
+</tr>
+<tr>
+<td>no template (BoS auto)</td>
+<td>1.69</td>
+<td>2.61</td>
+</tr>
+<tr>
+<td>no template, no BoS</td>
+<td>1.34</td>
+<td>2.59</td>
+</tr>
+</tbody></table>
+<p>pre-norm 最差掉 52%，post-norm 最差只掉 5%；Qwen3-8B 和 GPT-oss 20B 上 post-norm 同样在 5–35% 的范围内领先，扰动越大领先越多。</p>
+<p>作者还验证了一个关键问题：<strong>模板敏感性是不是 sink 的副作用？</strong> 不是——gated attention（杀掉 sink）仍然高度敏感、对 system prompt 长度甚至更敏感。<strong>只有修复 hidden-residual dynamics 才能彻底缓解 template fragility。</strong></p>
+<p>另一个可能因素：EAGLE 的训练 loss 只在 assistant token 上算，user 位置不直接受约束，当模板变了，监督/非监督边界一变，模型就懵了。</p>
+<h3 id="5-3-长上下文（Long-Context）"><a href="#5-3-长上下文（Long-Context）" class="headerlink" title="5.3 长上下文（Long Context）"></a>5.3 长上下文（Long Context）</h3><p>drafter 通常用 4K 上下文训练，但 target 经常面对几十 K 上下文。作者构造了多轮对话超长上下文 benchmark + LongBench：</p>
+<ul>
+<li><strong>Full attention</strong> 下 pre-norm 直接挂掉（acceptance 0.05），post-norm 0.83（仍不可用，但是 15× 好）；</li>
+<li>引入 <strong>SWA（sliding window attention）</strong> 后两者都能 rescue：<ul>
+<li>单纯 SWA：pre 2.43 / post 2.97；</li>
+<li>SWA + 携带 BoS：pre 2.53 / post 2.99（pre-norm 受益更多，因为它依赖 sink）；</li>
+<li>SWA + 携带 system prompt：pre 0.06（崩溃，无法适应更宽的 positional embedding 范围）/ post 3.01（再涨 1%）；</li>
+</ul>
+</li>
+<li>SWA 各种模式下，post-norm 比 pre-norm 一致领先约 20%；</li>
+<li><strong>LongBench</strong>（Window=1024）：post-norm 在 GovReport（summarization）/ Samsum（few-shot）/ Repobench（coding）三类任务上比 pre-norm 高 20–25%。</li>
+</ul>
+<p><strong>Window 大小</strong> 实验：哪怕只有 256 token 的窗口也能回收 80% 的 full-context baseline，1024 token 之后收益就饱和——这意味着 drafter 主要依赖近期 token，SWA 几乎可以无损削减计算。</p>
+<hr>
+<h2 id="六、Related-Work-Limitations-结论"><a href="#六、Related-Work-Limitations-结论" class="headerlink" title="六、Related Work / Limitations / 结论"></a>六、Related Work / Limitations / 结论</h2><ul>
+<li><strong>Related work</strong>：投机解码族（Medusa / Hydra / D-Flash / EAGLE 系列）、attention sink（Xiao 等）、gated attention（Qiu 等）、Transformer 中 pre-norm vs post-norm（Xiong / Wu 等）。作者首次在 drafter 上系统刻画 attention 行为，识别出 chain-residual 特有的 drift 失败模式。</li>
+<li><strong>Limitations</strong>：(1) 主要聚焦 EAGLE-3；MTP 上观察到 drift 但没深入；其他 drafter（Medusa/Hydra）未验证；(2) 受算力限制只在 ≤120B 规模上做了实验。</li>
+<li><strong>结论</strong>：attention drift 本身只是表象，<strong>真正的病根是 unnormalized residual 路径导致的 hidden state 单调增长</strong>。post-norm + per-stream RMSNorm 直接对症下药——既稳定了幅度，又阻止 drafter 学到”深度依赖的层堆叠”行为，从而带来性能与鲁棒性的双重收益。建议生产系统默认改用 post-norm drafter。</li>
+</ul>
+<hr>
+<h2 id="七、附录要点"><a href="#七、附录要点" class="headerlink" title="七、附录要点"></a>七、附录要点</h2><ul>
+<li><strong>A. Gated Attention</strong>：在 EAGLE3 attention 输出乘上一个 per-element sigmoid gate <code>g = σ(xWg)</code>，再走 output 投影。</li>
+<li><strong>B. Benchmark 详表</strong>：覆盖 GPT-oss 20B / Qwen3.5 9B / Qwen3 8B / Llama 3.1 8B 四个模型 × 多种 reasoning mode；LongBench-E 按 prompt 长度（0–4k 一直到 32–36k）分桶，post-norm 全胜。</li>
+<li><strong>C. Training</strong>：基于改造的 <em>SpecForge</em> 仓库，Llama/Qwen3 用 Open-PerfectBlend（target 重新生成的回答），Qwen3.5/GPT-oss 用 Nemotron post-training 数据。LR=1.5e-4，bsz=4，单模型训练约 36–48 H200·hour。</li>
+<li><strong>D. 模板扰动样本</strong>：<code>regular</code> / <code>no_bos</code> / <code>no_template</code> / <code>no_bos_no_template</code> 四种 Llama 模板的具体长相。</li>
+</ul>
+<hr>
+<h2 id="八、对工程的启示"><a href="#八、对工程的启示" class="headerlink" title="八、对工程的启示"></a>八、对工程的启示</h2><ol>
+<li><strong>EAGLE-3 类 drafter 的默认架构在生产中潜在脆弱</strong>：模板扰动、长上下文、深推测都会显著掉点。</li>
+<li><strong>改 post-norm 是几乎无副作用的优化</strong>：只需移动 RMSNorm 位置 + 在 FC 前各加一个 RMSNorm，外加重训。</li>
+<li><strong>TTT 可以从 8 降到 4</strong>：训练吞吐 +33%，性能反而更好。</li>
+<li><strong>SWA 是长上下文的强工具</strong>：哪怕 256 token 窗口都能 rescue 80% 性能，1024 token 即饱和。在 SWA 中携带 BoS 对 pre-norm 收益大，但若想再携带 system prompt，post-norm 才扛得住——pre-norm 会因 positional embedding 范围扩大而崩溃。</li>
+<li>**不要盲目相信”杀掉 sink 就解决问题”**：gated attention 并不能根治模板敏感性，反而可能引入新病灶（熵塌缩、对 system prompt 长度过敏）。Drift 是症状，幅度累积才是病灶。</li>
+</ol>
+<hr>
+<h2 id="九、补充-Q-A"><a href="#九、补充-Q-A" class="headerlink" title="九、补充 Q&A"></a>九、补充 Q&amp;A</h2><h3 id="Q1-“Sink-token”-指什么？"><a href="#Q1-“Sink-token”-指什么？" class="headerlink" title="Q1. “Sink token” 指什么？"></a>Q1. “Sink token” 指什么？</h3><p><strong>Attention Sink（注意力汇聚点）</strong> 这个概念最早由 Xiao et al. 2024（<em>Efficient Streaming Language Models with Attention Sinks</em>）提出，论文里直接引用了这篇工作 [12]。</p>
+<p><strong>定义</strong>：序列里某个特定位置（通常在序列开头）的 token，会<strong>吸收远超平均水平的 attention 权重</strong>——很多 head 在很多 query 位置上都会把大量 attention “倒进”这个 token，几乎不管它的语义内容是什么。</p>
+<p><strong>为什么会出现 sink？</strong> 直观解释是 softmax 强制要求 attention 权重总和为 1，但很多时候模型其实”不太需要关注任何位置”，于是就把多余的 attention “倒”到一个固定的早期 token 上当垃圾桶用。这个 token 也起到了<strong>稳定锚点</strong>的作用，尤其在长上下文 / 滑动窗口下，sink 一旦被丢出窗口，模型质量就会显著退化。</p>
+<p><strong>论文里观察到的三种 sink 行为</strong>（Section 3）：</p>
+<table>
+<thead>
+<tr>
+<th>模型族</th>
+<th>Sink 位置</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Llama</td>
+<td>第 0 个 token（即 BoS <code>&lt;|begin_of_text|&gt;</code>）</td>
+<td>经典的 sink，attention 占比可达 40%+</td>
+</tr>
+<tr>
+<td>Qwen</td>
+<td>第 1 个 token（紧跟 BoS 之后）</td>
+<td>sink 不在 BoS 而在第二个位置</td>
+</tr>
+<tr>
+<td>GPT-oss</td>
+<td>无明显 sink</td>
+<td>架构上引入 per-head 可学习偏置 logit，让 softmax 显式有”什么都不关注”的选项</td>
+</tr>
+<tr>
+<td>Qwen3-Next</td>
+<td>无明显 sink</td>
+<td>用 gated attention 在每个 head 输出乘 sigmoid 门，可乘法抑制贡献</td>
+</tr>
+</tbody></table>
+<p><strong>关键发现</strong>：<strong>target 在哪里有 sink，drafter 就在哪里学出 sink</strong>——drafter 完全继承了 target 的 sink 位置。但 drafter 有个 target 没有的额外动态——<strong>随着 speculation step 加深，注意力会从 sink 漂走，向最近生成的 token 集中</strong>，这就是论文命名的 attention drift。</p>
+<p><strong>和我们工程上的关系</strong>：</p>
+<ul>
+<li>模板扰动（去掉 BoS / 改 chat template）相当于把 sink 位置挪走或抹掉，pre-norm drafter 因为强依赖 sink 直接掉点；</li>
+<li>长上下文 + SWA 场景里，”携带 BoS 通过窗口”（论文叫 SWA+BoS）对 pre-norm 收益巨大、对 post-norm 几乎无影响，也是因为 post-norm 不再死磕 sink；</li>
+<li>即使是 GPT-oss 这种”无 sink”的模型，drafter 仍会在重复出现的特殊 template token（如 <code>&lt;|start_header_id|&gt;</code>）上形成弱 sink，说明 <strong>sink-like 行为既来自架构归纳偏置，也来自重复的模板 marker</strong>。</li>
+</ul>
+<hr>
+<h3 id="Q2-“drafter-自回归地写出-k-个候选-token（k-即-speculation-depth）”——这就是-gamma-吗？对应-speculative-config-里的字段？文章是不是希望解决”gamma-很大时仍然保持高接受率”？"><a href="#Q2-“drafter-自回归地写出-k-个候选-token（k-即-speculation-depth）”——这就是-gamma-吗？对应-speculative-config-里的字段？文章是不是希望解决”gamma-很大时仍然保持高接受率”？" class="headerlink" title="Q2. “drafter 自回归地写出 k 个候选 token（k 即 speculation depth）”——这就是 gamma 吗？对应 speculative_config 里的字段？文章是不是希望解决”gamma 很大时仍然保持高接受率”？"></a>Q2. “drafter 自回归地写出 k 个候选 token（k 即 speculation depth）”——这就是 gamma 吗？对应 <code>speculative_config</code> 里的字段？文章是不是希望解决”gamma 很大时仍然保持高接受率”？</h3><p><strong>前半部分：是的，对应关系如下。</strong></p>
+<table>
+<thead>
+<tr>
+<th>名词</th>
+<th>出处</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>γ (gamma)</strong></td>
+<td>Leviathan et al. 2023（投机解码原始论文）</td>
+<td>每轮 drafter 生成的候选 token 数</td>
+</tr>
+<tr>
+<td><strong>k / speculation depth</strong></td>
+<td>本文 Attention Drift 论文</td>
+<td>同上</td>
+</tr>
+<tr>
+<td><strong><code>num_speculative_tokens</code></strong></td>
+<td>vLLM <code>SpeculativeConfig</code></td>
+<td>同上，工程实现里的名字</td>
+</tr>
+<tr>
+<td><strong>TTT (train-time-test depth)</strong></td>
+<td>EAGLE-3 论文 / 本文</td>
+<td><strong>训练时</strong>最大推测深度（与推理时的 k 可以不同）</td>
+</tr>
+</tbody></table>
+<p>在 vLLM 仓库里可以直接看到（<code>/mnt/data/llx/vllm/vllm/config/speculative.py:68</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">num_speculative_tokens: <span class="built_in">int</span> = Field(default=<span class="literal">None</span>, gt=<span class="number">0</span>)</span><br><span class="line"><span class="string">"""The number of speculative tokens, if provided. It will default to the</span></span><br><span class="line"><span class="string">number in the draft model config if present, otherwise, it is required."""</span></span><br></pre></td></tr></table></figure>
+
+<p>也就是说，<strong>论文里的 k 就是你启动 vLLM 时设置的 <code>--num-speculative-tokens</code> 或 SGLang 里 <code>--speculative-num-draft-tokens</code> 那个值</strong>。EAGLE 训练侧（如 SpecForge）会另有一个 TTT 配置，决定训练时 drafter 一次性 unroll 多少步算 loss。</p>
+<p><strong>后半部分：基本对，但不完整。</strong> 论文要解决的问题比”调大 gamma”更宽，可以拆成三件事：</p>
+<ol>
+<li><p><strong>k 很大时不要崩</strong>（你说的这一条）</p>
+<ul>
+<li>pre-norm + TTT=2 的 drafter 在 k&gt;2 后<strong>直接塌掉</strong>（条件接受概率掉到 0、hidden state RMS 飙升）；</li>
+<li>pre-norm + TTT=8 的 drafter 在 k≤8 表现最好，但超过 8 仍会衰减；</li>
+<li>post-norm + TTT=2 的 drafter <strong>在 k=2 之外仍然稳定</strong>，可以推广到 k=16、k=20。</li>
+<li>也就是说：post-norm 让 drafter <strong>能在推理时把 k 开得比训练时更大</strong>，而不需要为了”想跑更大的 gamma”就把训练 TTT 也调大。</li>
+</ul>
+</li>
+<li><p><strong>训练时 TTT 可以变小，省训练成本</strong></p>
+<ul>
+<li>后文实际上把 TTT 从 8 降到 4，<strong>训练耗时减少约 1/3</strong>，性能不降反升。</li>
+<li>这点是单纯”调大 gamma 解决接受率”框架里没有的好处。</li>
+</ul>
+</li>
+<li><p><strong>OOD 场景下的鲁棒性</strong>（这才是论文真正的卖点）</p>
+<ul>
+<li><strong>模板扰动</strong>：去掉 BoS / 换 chat template / 改 system prompt 长度，pre-norm 最差掉 52%，post-norm 最差只掉 5%；</li>
+<li><strong>长上下文</strong>：full attention 下 pre-norm 几乎全军覆没（0.05），post-norm 也只剩 0.83；SWA 救场后，post-norm 在所有窗口大小、所有 SWA 变体上一致领先 pre-norm 约 20%；</li>
+<li><strong>噪声容忍</strong>：post-norm 对 hidden-path 噪声的容忍度比 pre-norm 高一个数量级。</li>
+</ul>
+</li>
+</ol>
+<p><strong>所以更准确的概括是</strong>：</p>
+<blockquote>
+<p>论文不是只为了”把 gamma 调大还能高接受率”——而是想让 drafter <strong>既能在更深的 speculation chain 上稳定（k 大时不崩）</strong>，<strong>又能在 OOD 部署场景（模板/长上下文/system prompt）下保持鲁棒</strong>，<strong>还能让训练 TTT 变小省钱</strong>。三件事的共同病根都是 unnormalized residual 导致的 hidden state 幅度累积，所以 post-norm 一招解决。</p>
+</blockquote>
+<p><strong>实操建议（落到 vLLM）</strong>：</p>
+<ul>
+<li>如果你只是把 <code>num_speculative_tokens</code> 从 4 调到 8，用现成的 pre-norm EAGLE-3 drafter，acceptance 很可能反而<strong>下降</strong>（因为 drafter 训练时 TTT 是固定的，推理超过 TTT 就开始漂）；</li>
+<li>如果你想要可用的大 k，要么训练时把 TTT 也调大（成本高），要么换成 post-norm drafter（论文方案，几乎免费）；</li>
+<li>如果你的 prompt 模板和训练数据不一致（比如自定义 system prompt、关掉 thinking 标签），pre-norm drafter 的接受率会被严重侵蚀，这种场景 post-norm 收益最大（最高 2×）。</li>
+</ul>
+<hr>
+<h2 id="十、补充-Q-A（第二轮）"><a href="#十、补充-Q-A（第二轮）" class="headerlink" title="十、补充 Q&A（第二轮）"></a>十、补充 Q&amp;A（第二轮）</h2><h3 id="Q3-“target-在哪里有-sink，drafter-也会在那里学出-sink”-这句话到底是什么意思？"><a href="#Q3-“target-在哪里有-sink，drafter-也会在那里学出-sink”-这句话到底是什么意思？" class="headerlink" title="Q3. “target 在哪里有 sink，drafter 也会在那里学出 sink” 这句话到底是什么意思？"></a>Q3. “target 在哪里有 sink，drafter 也会在那里学出 sink” 这句话到底是什么意思？</h3><p>先把 “sink” 这个词彻底讲清楚。</p>
+<h4 id="3-1-Sink-在-attention-热力图上到底长什么样"><a href="#3-1-Sink-在-attention-热力图上到底长什么样" class="headerlink" title="3.1 Sink 在 attention 热力图上到底长什么样"></a>3.1 Sink 在 attention 热力图上到底长什么样</h4><p>attention 热力图的画法是：</p>
+<ul>
+<li><strong>行 = query 位置</strong>（”现在我在算谁的输出”）</li>
+<li><strong>列 = key 位置</strong>（”现在我在看谁”）</li>
+<li><strong>颜色越深 = 该 query 给该 key 的 attention 权重越大</strong></li>
+</ul>
+<p>正常情况下，对角线（自己看自己附近）会比较深，其他地方比较浅。</p>
+<p><strong>Sink 的视觉特征：某一列从头到尾几乎全部很深</strong>——也就是说，几乎每一个 query（不管它在哪里）都会给这一列分配一大块 attention。这个 “永远被看着的列” 对应的 key 位置，就是 sink token。</p>
+<p>论文 Figure 4 的 Llama3 8B 热力图里，最左边 “sink” 那一列整列都是深红色（0.4~0.5 的权重），而其他列都很浅（&lt;0.1）——这就是典型的 sink。</p>
+<h4 id="3-2-“Sink”-是哪个-token？"><a href="#3-2-“Sink”-是哪个-token？" class="headerlink" title="3.2 “Sink” 是哪个 token？"></a>3.2 “Sink” 是哪个 token？</h4><table>
+<thead>
+<tr>
+<th>模型</th>
+<th>sink 位置</th>
+<th>具体是哪个 token</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Llama-3 系列</td>
+<td>第 0 个</td>
+<td><code>&lt;|begin_of_text|&gt;</code> (BoS)</td>
+</tr>
+<tr>
+<td>Qwen-3 系列</td>
+<td>第 1 个</td>
+<td>BoS 后的第一个 token（往往是 <code>&lt;|im_start|&gt;</code>）</td>
+</tr>
+<tr>
+<td>GPT-oss</td>
+<td>无明显 sink</td>
+<td>架构里有显式 “attend-to-nothing” 偏置</td>
+</tr>
+</tbody></table>
+<p>注意：<strong>sink 不一定是 BoS</strong>。Qwen 的 sink 就在第二个位置而不是第一个。研究者也不完全清楚为什么，但实证上每个 LLM 家族都有一个相对固定的 sink 位置。</p>
+<h4 id="3-3-为什么-sink-会自发出现？"><a href="#3-3-为什么-sink-会自发出现？" class="headerlink" title="3.3 为什么 sink 会自发出现？"></a>3.3 为什么 sink 会自发出现？</h4><p>直观解释：softmax 强制 <code>Σ attention = 1</code>，但很多 query 其实<strong>没什么特别想看的</strong>（比如生成一个空格、标点）。这时它必须把 attention 倒到某个地方——干脆挑一个固定的早期位置当<strong>垃圾桶 / 备用栈</strong>，把”用不上的 attention 配额”都倒进去。</p>
+<p>这个 sink 位置一旦被模型选定，就成了<strong>稳定锚点</strong>：所有 head、所有 query 都默认它在那里，相当于一个全局共享的”零参考点”。</p>
+<h4 id="3-4-“target-在哪里有-sink，drafter-也在那里有-sink”-的真正含义"><a href="#3-4-“target-在哪里有-sink，drafter-也在那里有-sink”-的真正含义" class="headerlink" title="3.4 “target 在哪里有 sink，drafter 也在那里有 sink” 的真正含义"></a>3.4 “target 在哪里有 sink，drafter 也在那里有 sink” 的真正含义</h4><p>这句话不是说”所有模型都有 sink”——而是说<strong>drafter 的 sink 位置完全继承自它的 target</strong>：</p>
+<ul>
+<li>你用 <strong>Llama-3 8B</strong> 当 target 训出来的 EAGLE-3 drafter → drafter 的 sink 也在<strong>第 0 个 token</strong></li>
+<li>你用 <strong>Qwen3 30B</strong> 当 target 训出来的 EAGLE-3 drafter → drafter 的 sink 也在<strong>第 1 个 token</strong></li>
+<li>你用 <strong>GPT-oss 120B</strong>（没有 sink）当 target 训出来的 drafter → drafter 也<strong>没有明显 sink</strong>（只有弱的模板 token 上的聚集）</li>
+</ul>
+<p>这种”一一对应”在 5 个模型组合上都得到验证。</p>
+<p>为什么会这样？因为 EAGLE-3 drafter 的输入是 target 的 <code>hlow / hmid / hhigh</code> 融合后的 hidden state，而这些 hidden state 本身就在 target 的 sink 位置上累积了大量信号；drafter 想要复现 target 的预测分布，自然就学会了在同一个位置上也分配大量 attention。</p>
+<blockquote>
+<p><strong>一句话总结</strong>：sink 是 attention 热力图上”永远被看着的那一列对应的 token”，drafter 会<strong>完美继承 target 的 sink 位置</strong>，这是 drafter 学到的第一个 attention 模式。</p>
+</blockquote>
+<hr>
+<h3 id="Q4-Figure-7-那张图到底在画什么？"><a href="#Q4-Figure-7-那张图到底在画什么？" class="headerlink" title="Q4. Figure 7 那张图到底在画什么？"></a>Q4. Figure 7 那张图到底在画什么？</h3><p>Figure 7 是两张并排的折线图，对象是 Qwen3.5 9B 的 MTP head，数据来自 MT-Bench 的 80 条 prompt。我们一项一项拆。</p>
+<h4 id="4-1-横轴：相对于-“drafting-开始”的位置"><a href="#4-1-横轴：相对于-“drafting-开始”的位置" class="headerlink" title="4.1 横轴：相对于 “drafting 开始”的位置"></a>4.1 横轴：相对于 “drafting 开始”的位置</h4><p>x 轴范围是 <strong>-6 到 +10</strong>，中间有一条<strong>虚线 x=0</strong>，标注 <code>prefill → drafted</code>。这条虚线代表 **drafter 从 “消费 verifier 的 hidden state（prefill）” 切换到 “消费自己生成的 hidden state（drafting）”**的那一瞬间。</p>
+<ul>
+<li><strong>x = -6 到 -1</strong>：drafter 当前正在处理的 query 位置还在 prompt 区域（prefill 阶段的最后 6 个位置）；</li>
+<li><strong>x = 0</strong>：drafter 正好处理 prompt 的最后一个位置，下一步就要开始自己 draft 了；</li>
+<li><strong>x = 1 到 10</strong>：drafter 正在 draft，处理的是它自己刚刚生成的第 1、2、3 … 10 个 token。</li>
+</ul>
+<blockquote>
+<p>你也可以把 x 轴理解成 “speculation step k 的连续版本”——负数是 prefill 还没开始 draft，正数是已经 draft 到第几个 token。</p>
+</blockquote>
+<h4 id="4-2-左图：Sink-Attention"><a href="#4-2-左图：Sink-Attention" class="headerlink" title="4.2 左图：Sink Attention"></a>4.2 左图：Sink Attention</h4><ul>
+<li>y 轴范围：4% ~ 12%</li>
+<li>含义：<strong>当 query 位置在 x 时，它分配给 sink token 的 attention 权重百分比</strong></li>
+<li>走势：<ul>
+<li>prefill 阶段（x&lt;0）：稳定在 <strong>10~12%</strong> 左右</li>
+<li>一过 x=0（drafting 开始），<strong>陡降到 4~5%</strong> 并保持</li>
+</ul>
+</li>
+</ul>
+<p><strong>这意味着</strong>：drafter 一旦切换到”消费自己生成的 hidden state”，它就立刻开始”忘记” sink token——sink 的 attention 权重瞬间被砍到原来的 1/3。</p>
+<h4 id="4-3-右图：Token-Self-Attention"><a href="#4-3-右图：Token-Self-Attention" class="headerlink" title="4.3 右图：Token Self Attention"></a>4.3 右图：Token Self Attention</h4><ul>
+<li>y 轴范围：30% ~ 45%</li>
+<li>含义：<strong>当 query 位置在 x 时，它分配给”自己（或紧挨着的最近几个 token）”的 attention 权重百分比</strong></li>
+<li>走势：<ul>
+<li>prefill 阶段（x&lt;0）：稳定在 <strong>30~35%</strong></li>
+<li>一过 x=0（drafting 开始），<strong>跳升到 40~45%</strong> 并保持</li>
+</ul>
+</li>
+</ul>
+<p><strong>这意味着</strong>：被从 sink 那里”省下”的 attention 权重，<strong>全部跑到了 drafter 最近自己生成的 token 上</strong>——attention 的”质量重心”从 prompt 头部漂到了链尾。</p>
+<h4 id="4-4-整张-Figure-7-的核心信息"><a href="#4-4-整张-Figure-7-的核心信息" class="headerlink" title="4.4 整张 Figure 7 的核心信息"></a>4.4 整张 Figure 7 的核心信息</h4><p>把两张图放在一起，左图掉多少（<del>7%），右图就涨多少（</del>10%），这就是<strong>attention 漂移的定量证据</strong>：</p>
+<blockquote>
+<p>drafter 从 prefill 切换到 drafting 的那一瞬间，attention mass 从 “看 prompt 开头的 sink” <strong>整体迁移</strong>到 “看自己刚生成的几个 token”，而且这种迁移<strong>在 drafting 一开始就发生、之后稳定保持</strong>，不是慢慢累积的。</p>
+</blockquote>
+<p>这一点和 EAGLE-3 的 drift 形态略有不同（EAGLE-3 是<strong>逐步</strong>漂移）：MTP 是<strong>陡降然后稳定</strong>。论文用这一点说明：post-norm（MTP 本身就是 post-norm 结构）能压住”渐进漂移”，但因为还有其他机制（联合预训练、共享 LM head 等），仍然存在一次性的”模式切换”。</p>
+<hr>
+<h3 id="Q5-“超过-TTT-推理-acceptance-反而下降”-这个说法对吗？我之前的解释有错吗？"><a href="#Q5-“超过-TTT-推理-acceptance-反而下降”-这个说法对吗？我之前的解释有错吗？" class="headerlink" title="Q5. “超过 TTT 推理 acceptance 反而下降” 这个说法对吗？我之前的解释有错吗？"></a>Q5. “超过 TTT 推理 acceptance 反而下降” 这个说法对吗？我之前的解释有错吗？</h3><p>你的质疑是对的，<strong>我那句话表述不准确，需要修正。</strong> 让我重新说明清楚。</p>
+<h4 id="5-1-你的直觉是对的：早期-token-不会被晚期-token-“污染”"><a href="#5-1-你的直觉是对的：早期-token-不会被晚期-token-“污染”" class="headerlink" title="5.1 你的直觉是对的：早期 token 不会被晚期 token “污染”"></a>5.1 你的直觉是对的：早期 token 不会被晚期 token “污染”</h4><p>drafter 确实是自回归生成的。在第 k 步生成 token 时，drafter 看到的输入是：</p>
+<ul>
+<li>prompt 的 hidden state（来自 target）</li>
+<li>第 1 步到第 k-1 步自己生成的 hidden state</li>
+</ul>
+<p><strong>对于 k=1 来说，输入完全和”训练时 k=1”是一样的</strong>——根本看不到任何超出 TTT 的东西。所以<strong>第 1 个 draft token 的质量不会因为你把 num_speculative_tokens 调大就变差</strong>。</p>
+<p>这一点论文 Figure 10 的数据也直接证实了：</p>
+<table>
+<thead>
+<tr>
+<th>Drafter / TTT</th>
+<th>k=1 acceptance</th>
+<th>k=16 acceptance</th>
+<th>平均 acceptance length</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Pre-norm / TTT=8</td>
+<td>0.91</td>
+<td>0.50</td>
+<td><strong>7.12</strong></td>
+</tr>
+<tr>
+<td>Pre-norm / TTT=2</td>
+<td>0.93</td>
+<td>0.00</td>
+<td><strong>2.64</strong></td>
+</tr>
+<tr>
+<td>Post-norm / TTT=2</td>
+<td>0.93</td>
+<td>0.53</td>
+<td>5.05</td>
+</tr>
+</tbody></table>
+<p>无论 TTT 设几，<strong>k=1 的接受概率都是 0.91~0.93</strong>——证明早期 token 的质量与 TTT 无关。</p>
+<h4 id="5-2-那为什么平均-acceptance-length-差别这么大？"><a href="#5-2-那为什么平均-acceptance-length-差别这么大？" class="headerlink" title="5.2 那为什么平均 acceptance length 差别这么大？"></a>5.2 那为什么平均 acceptance length 差别这么大？</h4><p>因为**投机解码的接受规则是”一刀切”**：</p>
+<blockquote>
+<p>一旦某一步的 token 被 reject，<strong>它之后的所有 token 全部被丢弃</strong>，不管那些 token 本身质量如何。</p>
+</blockquote>
+<p>所以平均 acceptance length 的实际含义是：**”chain 在第几步被首次 reject”** 的期望值。</p>
+<ul>
+<li>Pre-norm/2 在 k=3 之后就 reject 率飙高 → chain 经常在 k=2、k=3 就被截断 → 平均 acceptance length 只有 2.64</li>
+<li>Pre-norm/8 在 k=8 之后才开始崩 → chain 平均能延续到 k=7 → 平均 acceptance length 7.12</li>
+</ul>
+<p><strong>这并不是”前面的 token 被污染了”，而是”后面的 token 容易把整条 chain 提前砍掉”。</strong></p>
+<h4 id="5-3-那么”把-num-speculative-tokens-从-4-调到-8”-到底会怎样？"><a href="#5-3-那么”把-num-speculative-tokens-从-4-调到-8”-到底会怎样？" class="headerlink" title="5.3 那么”把 num_speculative_tokens 从 4 调到 8” 到底会怎样？"></a>5.3 那么”把 num_speculative_tokens 从 4 调到 8” 到底会怎样？</h4><p>假设你用的是<strong>现成 production 的 EAGLE-3 drafter（TTT=8）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th><code>num_speculative_tokens</code></th>
+<th>实际发生的事</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>4</td>
+<td>4 步都在 TTT 内，每一步质量都不错；平均 accept ≈ 3.5（举例）</td>
+</tr>
+<tr>
+<td>8</td>
+<td>8 步都在 TTT 内，每一步质量都不错；平均 accept ≈ 6.5</td>
+</tr>
+<tr>
+<td>16</td>
+<td>前 8 步质量好，后 8 步漂移严重；但因为前面被接受的概率已经接近上限，chain 多半还是在 k=7~8 附近被截断；平均 accept ≈ 6.8（<strong>几乎不再增长，进入 plateau</strong>）</td>
+</tr>
+</tbody></table>
+<p><strong>所以更准确的说法应该是</strong>：</p>
+<ul>
+<li>✗ <del>“调大 num_speculative_tokens 会让 acceptance length 下降”</del> —— 这是错的</li>
+<li>✓ “调大 num_speculative_tokens 超过 TTT 后，<strong>acceptance length 会饱和</strong>（plateau），多算的那些步基本是浪费”</li>
+<li>✓ “更严重的是，<strong>端到端吞吐反而可能下降</strong>“——因为 drafter 每多 forward 一步都要花时间，但这些步基本都会被 reject，性价比为负</li>
+</ul>
+<h4 id="5-4-那论文真正想解决的问题是什么？"><a href="#5-4-那论文真正想解决的问题是什么？" class="headerlink" title="5.4 那论文真正想解决的问题是什么？"></a>5.4 那论文真正想解决的问题是什么？</h4><blockquote>
+<p><strong>想让”训练时 TTT 小、推理时 k 大”也能 work</strong>——这样既能省训练成本（TTT 8→4 训练时间省 1/3），又能在推理时自由调大 k 拿到更深的 chain 收益。</p>
+</blockquote>
+<p>pre-norm 的 drafter 死死被 TTT 锁住：训练 TTT=2 就只能在 k=2 范围内用，调大没意义。<br>post-norm 的 drafter 能”超规格使用”：训练 TTT=2 也能在 k=16 上保持 0.53 的接受率，相当于把 chain 长度从 ~2 提到 ~5。</p>
+<h4 id="5-5-对前一轮回答的修正"><a href="#5-5-对前一轮回答的修正" class="headerlink" title="5.5 对前一轮回答的修正"></a>5.5 对前一轮回答的修正</h4><p>我之前写的”如果你只是把 num_speculative_tokens 从 4 调到 8 … acceptance 很可能反而下降”这句话<strong>表述不严谨</strong>。</p>
+<p><strong>修正版</strong>：</p>
+<blockquote>
+<p>如果你的 EAGLE-3 drafter 是 TTT=8 训练的，你把 num_speculative_tokens 从 4 调到 8，acceptance length <strong>会涨</strong>（毕竟还在 TTT 内）。但如果你把它从 8 调到 16，acceptance length <strong>不会继续涨</strong>，只会饱和在 8 附近，多花的 drafter forward 算力基本是浪费、端到端吞吐反而可能掉。如果你用的是 TTT=4 的 drafter，那么 num_speculative_tokens 一旦超过 4，就立刻进入 plateau，多调毫无意义。</p>
+<p>论文真正的卖点是：用 post-norm 训出来的 drafter，<strong>即使训练 TTT 很小，推理时也能把 k 调大并真正吃到收益</strong>——这才是”调大 gamma 仍然有效”的正确语境。</p>
+</blockquote>
+</div><div class="article-licensing box"><div class="licensing-title"><p>Attention Drift: 自回归推测解码模型到底学到了什么</p><p><a href="https://llx-08.github.io/notes/2026/06/04/2026-06-04-attention-drift-paper-notes/">https://llx-08.github.io/notes/2026/06/04/2026-06-04-attention-drift-paper-notes/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-06-04</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-26</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/06/06/2026-06-06-vllm-pd-disaggregation-community-vs-develop/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">vLLM PD 分离：社区方案 vs Develop 分支对比</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/06/04/2026-06-04-dpsk-v32-sparse-mla-flashinfer-plan/"><span class="level-item">Blackwell + FlashInfer + SparseMLA 在 KVT 上的支持计划</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">41</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">1</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">7</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-cuda-learning/">Cuda Learning</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/">01a · MoE All-to-All：原因、载荷与流程</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/">01 · MoE 与 Expert Parallelism 基础</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/">02 · Modular Kernel 与 MoE 相关 Kernel</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-24T00:00:00.000Z">2026-07-24</time></p><p class="title"><a href="/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/">02a · DeepGEMM（MoE Expert 计算后端）</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
