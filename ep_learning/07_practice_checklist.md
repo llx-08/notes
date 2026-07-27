@@ -19,6 +19,19 @@
 
 ## 2. 最小实验阶梯
 
+### L-1 · 无 GPU 的 CPU 路由练习
+
+先运行 [00_beginner_primer.md](00_beginner_primer.md) 的 Python 路由模拟器，再扩展：
+
+1. 给每个 token 增加 `topk_weights`；
+2. 用 `hidden_size=4` 的 Python list 代替 token 名字；
+3. 为每个 `(src_rank, dst_rank)` 统计 assignment 数；
+4. 假设 BF16，计算每条边的 hidden payload 字节数；
+5. 模拟 expert 输出后按 home rank 和 top-k weight combine。
+
+这个练习不测 GPU 性能，只验证你能否区分 token、assignment、expert rank 与 home
+rank。若 CPU 版本的账本还画不清，直接看 DeepEP handle 会更难。
+
 ### L0 · 单测（正确性）
 
 ```bash
@@ -84,6 +97,12 @@ pytest tests/kernels/moe/test_deepep_deepgemm_moe.py -q
 2. 给定 `EP=4, E=64, K=6, T=128`，估算真 all-to-all 相对 AG 的流量上界（量级即可）。  
 3. 画 HT dispatch→expert→combine 的 stream 时间线（含可选 overlap）。  
 4. 说明为何 `EP=TP×DP` 时「只加节点不加 DP」不一定减小 LL buffer。  
+5. `hidden=7168`、BF16、TopK=8 时，一个 token 的 8 份 assignment 主体共多少
+   Byte？若 75% 需要跨机，跨机主体约多少？
+6. 三个 experts 分别收到 `[65, 3, 127]` 个 token，`BLOCK_M=64`，分别 pad 到
+   多少？总 padding 占对齐后行数的比例是多少？
+7. 给定 expert load `[1000, 600, 300, 100]`，手工执行
+   `balanced_packing(..., num_packs=2)`。
 
 ---
 

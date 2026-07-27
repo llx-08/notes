@@ -12,6 +12,33 @@ Barex 是异步 point-to-point 传输库，向应用提供：
 
 它不实现 collective graph，不管理 communicator/rank，也不是 NCCL plugin。
 
+### 1.1 把 Barex 看成“带多种运输方式的异步快递 API”
+
+应用先创建 context 和 channel，再把一次传输描述为：
+
+```text
+从哪个 buffer
+搬多少字节
+到哪个 peer / 远端地址
+完成后调用哪个 callback
+```
+
+Barex 负责把它落到 RDMA/Solar/TCP backend，并推进队列与 completion。
+
+“异步”的含义是调用线程提交后可以继续做别的事：
+
+```cpp
+auto rc = channel->WriteBatch(items, done_callback);
+// rc 成功：任务被接受或排队
+// 不能在这里立刻释放 items 指向的 payload
+
+// ...
+// done_callback 被调用后，再根据 completion 语义释放/复用资源。
+```
+
+这也是 blade-kvt 为什么把 callback 包装成 `promise/future`：业务希望在
+`flush()` 处把异步完成重新变成一个明确等待点。
+
 ## 2. 对象关系
 
 ![Barex 对象、线程与数据面](imgs/barex_architecture.svg)
@@ -190,6 +217,28 @@ remote addr + rkey
 
 blade-kvt direct RDMA 使用 `WriteBatch` 且不通知对端，因为 KV cache 已直接写入最终 GPU 地址，上层通过独立 send-done RPC 表达 request 完成。
 
+### 8.1 具体例子：一层 KV cache 有三个不连续 block
+
+假设源 GPU 上三个 block 的地址不连续，目标 GPU 已给出三个最终位置：
+
+```text
+local block A (64 KiB) → remote slot 9
+local block B (64 KiB) → remote slot 2
+local block C (64 KiB) → remote slot 7
+```
+
+blade-kvt 可以构造三个 `rw_memp_t` 后一次 `WriteBatch`：
+
+```text
+item 0: local_addr=A, len=64KiB, raddr=slot9, rkey=...
+item 1: local_addr=B, len=64KiB, raddr=slot2, rkey=...
+item 2: local_addr=C, len=64KiB, raddr=slot7, rkey=...
+```
+
+“Batch”表示减少 API/doorbell/callback 等固定成本，不表示三个远端范围必须连续，
+也不表示一次调用返回时三个写已经完成。`datasp` 和其中引用的 MR 必须至少活到
+callback。
+
 ## 9. TX depth 与软件队列
 
 Barex 用 `send_semaphore_` 限制 inflight WR：
@@ -276,4 +325,3 @@ XChannel Write/Send
 2. Barex API 返回成功与 CQ completion 有什么区别？
 3. 为什么 `tx_depth` completion 后才能归还？
 4. callback 为什么既可能在 IO thread，也可能在线程池？
-

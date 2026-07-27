@@ -7,6 +7,46 @@ tags: [NCCL, PCIe, RDMA, Barex, blade-kvt, 学习笔记]
 
 # 02. GPU、NIC、PCIe 拓扑与 DMA
 
+## 0. 先回答：数据到底存在哪里、谁能访问
+
+CPU、GPU、NIC 都是能发起内存访问的设备，但它们看到的地址空间和访问方式不同：
+
+```text
+CPU core  ─load/store→ CPU virtual memory
+GPU SM    ─load/store→ GPU virtual memory / HBM
+GPU copy engine ─DMA→ host memory 或另一 GPU
+NIC DMA engine ─DMA→ 注册过的 host/GPU memory
+```
+
+一个 CUDA pointer 只保证当前 CUDA 上下文可以使用，不自动代表 NIC 有权限。
+要让 NIC 访问，需要驱动把相应页 pin 住、建立 DMA mapping，并把权限编码进
+`lkey/rkey` 等 handle。
+
+### 0.1 DMA 并不是一种“数据格式”
+
+DMA 是“由设备搬数据”的工作方式。它不限定数据是 tensor、图片还是网络包。
+例如 D2H copy：
+
+```text
+CPU 写 copy descriptor：src=GPU 地址，dst=host 地址，len=64 MiB
+GPU copy engine 执行 DMA
+CPU/GPU event 告知 copy 完成
+```
+
+payload 仍是那 64 MiB 原始字节；DMA 描述符只是告诉硬件去哪里搬、搬多少。
+
+### 0.2 一个 64 MiB tensor 的时间下限
+
+假设 tensor 需要经过 PCIe 4.0 x16，单向编码后理论约 31.5 GB/s：
+
+```text
+64 MiB / 31.5 GiB/s ≈ 1.98 ms
+```
+
+这是极理想的链路传输下限。CPU bounce 路径至少有 D2H 和后续网络/对端 H2D，
+不能只算一次 1.98 ms。Direct GDR 省掉 host 中转，但仍要经历 GPU↔NIC 的 PCIe
+访问和网络传输。
+
 ## 1. 三种搬运路径
 
 ### 1.1 CPU bounce buffer
@@ -48,6 +88,21 @@ Linux P2PDMA 文档强调：PCIe 对同一 hierarchy 内的 TLP 路由定义明�
 3. 跨 socket，经 UPI/QPI/Infinity Fabric：可能严重降速，甚至不可靠。
 
 因此 `NIC 带宽够`、`GPU 支持 GDR` 仍不能推出端到端性能好。
+
+### 2.1 共享上行的数值例子
+
+```text
+GPU0 x16 ┐
+GPU1 x16 ├─ PCIe Switch ─ x16 upstream ─ CPU
+NIC0 x16 ┘
+```
+
+这里每个下行端口都标 x16，但三个设备同时访问 CPU 时共享一个 x16 upstream。
+如果是 Gen4，上行总单向编码后理论值约 31.5 GB/s，不是
+`3 × 31.5 = 94.5 GB/s`。
+
+若 GPU0 与 NIC0 能在 switch 内直接 P2P，数据可能不占用 upstream；但是否允许
+取决于 switch 路由、ACS、IOMMU 与平台支持，不能只根据拓扑图猜测。
 
 ## 3. `nvidia-smi topo -m` 的距离
 

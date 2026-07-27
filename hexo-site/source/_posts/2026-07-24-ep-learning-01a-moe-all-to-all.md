@@ -438,6 +438,54 @@ Combine 近似是 **转置方向**：专家 rank → home，搬的是 **expert �
 
 因此 EP 大、跨机带宽紧时，真 A2A / DeepEP 更有价值；调试或 EP 很小时 AG+RS 更省事。
 
+### 6.1 带数字的流量估算
+
+假设：
+
+```text
+EP = 8
+每 rank 原始 token = 512
+hidden_size = 7168
+BF16 = 2 Byte
+TopK = 2
+每个 assignment 有 1/8 概率命中本 rank expert，7/8 需要远端发送
+```
+
+每个 hidden vector：
+
+```text
+7168 × 2 = 14,336 Byte = 14 KiB
+```
+
+每 rank dispatch 的远端 hidden payload 期望值：
+
+```text
+512 × 2 × 7/8 × 14 KiB
+= 12,544 KiB
+≈ 12.25 MiB
+```
+
+8 ranks 合计约 98 MiB dispatch hidden payload。combine 结果量级相近，所以一层
+MoE 的来回主体流量约 196 MiB，还没算 metadata、scale、padding 和协议开销。
+
+如果 dispatch 前把 hidden 从 BF16 量化成 FP8，主体 payload 理论上约减半，但会
+增加 scale、量化 kernel、精度约束和布局要求。不能只看“字节减半”就断言端到端
+一定快两倍。
+
+### 6.2 send counts 为什么必须先算
+
+MoE 路由不均匀，rank 0 可能给 rank 1 发 100 条、给 rank 2 发 3 条。很多 A2A
+实现先生成：
+
+```python
+send_counts = [本地条数, 发给rank1条数, 发给rank2条数, ...]
+```
+
+接收方也需要知道各来源将发多少，才能分配/定位接收区。DeepEP 的
+`get_dispatch_layout(topk_idx, num_experts, ...)` 正是在并行计算这类布局信息，
+随后 `buffer.dispatch(...)` 才搬 payload。layout 不是“额外可有可无的统计”，而是
+不规则 All-to-All 正确寻址的前提。
+
 ---
 
 ## 7. 和代码的对应（便于跳转）

@@ -46,6 +46,62 @@ remote addr + rkey
 
 对远端 8-byte 等受支持位置做 Compare-and-Swap 或 Fetch-and-Add。限制依硬件和 QP type。
 
+### 1.1 四种操作放在同一个例子里
+
+假设机器 A 要把 4 KiB 数据交给机器 B：
+
+#### SEND/RECV：B 先准备“收件箱”
+
+```text
+B: post_recv(buffer_B, 4 KiB)
+A: post_send(buffer_A, 4 KiB)
+B: 收到 CQE，知道 buffer_B 有一条消息
+```
+
+优点是 B 自然获得消息 completion；缺点是 B 必须及时补充 RQ，且 A 不直接指定
+B 的最终业务地址。
+
+#### WRITE：A 直接写 B 的目标地址
+
+```text
+B: 注册 target_B，发送 (raddr, rkey) 给 A
+A: post_write(buffer_A → target_B, 4 KiB)
+A: 收到本地 CQE
+```
+
+B 不需要 post_recv，但也不会仅凭普通 WRITE 自动得到一条“新消息到达”的 CQE。
+应用要另加 flag、doorbell、WRITE_WITH_IMM 或控制消息。
+
+#### READ：A 主动从 B 拉
+
+```text
+B: 注册 source_B，发送 (raddr, rkey) 给 A
+A: post_read(source_B → buffer_A, 4 KiB)
+A: 收到本地 CQE
+```
+
+READ 需要请求和响应，往返延迟更明显。它适合“消费者知道何时、从哪里拉取”。
+
+#### Atomic：A 修改 B 的一个小状态
+
+```text
+A: fetch_add(remote_counter_B, +1)
+```
+
+Atomic 适合计数器/锁等小控制状态，不适合搬 4 KiB payload。
+
+### 1.2 初学者选型表
+
+| 问题 | 更可能的选择 |
+|---|---|
+| 接收方希望自然收到消息通知 | SEND/RECV |
+| 发送方已知远端最终地址，追求直接落位 | RDMA WRITE |
+| 接收方决定何时取数据 | RDMA READ |
+| 写数据同时要轻量通知远端 | WRITE_WITH_IMM |
+| 修改远端计数/状态 | Atomic |
+
+这不是绝对规则。真实系统还会考虑硬件限制、安全、队列模型与业务完成语义。
+
 ## 2. WRITE WITH IMMEDIATE
 
 WRITE_WITH_IMM 同时：

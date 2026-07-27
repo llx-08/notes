@@ -4,6 +4,7 @@
 > 概念铺垫（A2A 原因/载荷/流程）：[01a_moe_all_to_all.md](01a_moe_all_to_all.md)  
 > 下一章：[04_megamoe.md](04_megamoe.md)  
 > 跨机实战补充：[../vllm_cross_node_expert_parallelism.md](../vllm_cross_node_expert_parallelism.md)  
+> 硬件/RDMA 零基础：[../nccl_pcie_barex_learning/00_hardware_network_primer.md](../nccl_pcie_barex_learning/00_hardware_network_primer.md)
 > RDMA 基础：[../rdma_learning_1.md](../rdma_learning_1.md)
 
 ---
@@ -28,6 +29,33 @@ fused_moe/prepare_finalize/deepep_ll.py   # Low Latency
 fused_moe/prepare_finalize/deepep_v2.py   # 较新 API 适配
 distributed/device_communicators/all2all.py  # Buffer 创建、backend 选择
 ```
+
+### 1.1 三个硬件词先分清
+
+| 词 | 是什么 | 在 DeepEP 中的角色 |
+|---|---|---|
+| NVLink/NVSwitch | 节点内或 NVLink domain 的 GPU 高速互连 | 机内 token 搬运 |
+| RDMA | RNIC 直接读写已注册内存的网络机制 | 跨节点 token 搬运 |
+| SM | GPU 上执行 thread blocks/warps 的计算单元 | 运行通信/布局 kernel，也要留给 expert 计算 |
+
+DeepEP 的目标不只是“网络能通”，还要减少通信 kernel 占用的 SM，避免通信把
+expert GEMM 的计算资源全部抢走。官方性能表除了 GB/s，也会报告 `#SMs`，因为
+“同样带宽用了多少 GPU 计算资源”影响通信与计算能否重叠。
+
+### 1.2 为什么通用 `memcpy` 不够
+
+MoE dispatch 不是一段连续 buffer 从 A 复制到 B：
+
+```text
+token 0 → rank 3 / expert 19
+token 1 → rank 0 / expert 2
+token 2 → rank 3 / expert 18
+...
+```
+
+实现需要同时做路由计数、按目的 rank/expert 排列、跨 NVLink/RDMA 搬运并留下
+combine 的逆映射。DeepEP 把这些 MoE 特有步骤放进专用接口和 kernel，而不是让
+用户先在 Python 中逐 token 循环。
 
 ---
 
@@ -56,6 +84,18 @@ vLLM 适配类：
 `deepep_ht.py` 中：`xfer_atom_size = 512`（32×int4）。  
 若 `hidden=2880`、`bf16` → 字节数需向上对齐 → hidden 可能被 round 到 `3072`。  
 **含义**：通信库按固定原子大小搬数据；模型层要配合 pad/round。
+
+手算：
+
+```text
+原始每 token = 2880 × 2 B = 5760 B
+按 512 B 向上取整 = 6144 B
+对应 padded hidden = 6144 / 2 = 3072
+多搬 = 384 B/token ≈ 6.67%
+```
+
+若 dispatch 100 万个 assignment，仅这部分 padding 就约多搬 366 MiB。因此
+hidden 对齐既是 kernel 正确性约束，也是通信量因素。
 
 ### 2.2 LL：支持的 hidden —— 为什么要「固定列表」？
 
@@ -190,6 +230,25 @@ deep_ep.Buffer(
 - **handle** 必须从同一次 dispatch 传到 combine；DBO 下按 ubatch 存多份。  
 - RDMA 内存通常 **提前注册**；大小由 hint API 估算（LL 尤其敏感）。  
 - 纯机内 HT 可将 `num_rdma_bytes=0`，只走 NVLink 路径。
+
+### 3.0.1 为什么提前分配能降延迟
+
+若每个 decode step 都做：
+
+```text
+cudaMalloc → 注册 GPU MR → 交换地址/key → 通信 → 注销 → cudaFree
+```
+
+slow path 会远比几个 token 的数据传输本身昂贵。预注册 buffer 把这些成本移到
+初始化：
+
+```text
+初始化一次：分配 + 注册 + 建联
+每 step：只计算 slot/offset → dispatch/combine
+```
+
+代价是显存提前被占住，并且容量必须按 worst case 规划。它是典型的
+“用空间换稳定低延迟”。
 
 ### OOM 直觉（来自跨机笔记）
 

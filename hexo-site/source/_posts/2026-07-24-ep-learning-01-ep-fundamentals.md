@@ -8,6 +8,7 @@ categories: [EP 学习笔记]
 # 01 · MoE 与 Expert Parallelism 基础
 
 > 回到目录：[README.md](/notes/2026/07/24/2026-07-24-ep-learning/)  
+> 零基础前置：[00_beginner_primer.md](/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/)（token、tensor、rank、DP/TP/EP）
 > 下一章：[01a_moe_all_to_all.md](/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/)（All-to-All 细讲 + 图） → [02_modular_kernel_and_moe_kernels.md](/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/)
 
 ---
@@ -23,6 +24,49 @@ topk_ids, topk_weights = TopK(gate)      # [T, K], [T, K]
 y_e = Expert_e(h)                        # 仅对路由到 e 的 token
 y = Σ_k topk_weights[...,k] * y_{topk_ids[...,k]}
 ```
+
+逐行解释：
+
+1. `T` 是本批 token 数，`E` 是逻辑 expert 总数，`K` 是每 token 选择数。
+2. `Gate(h)` 对每个 token 产生 E 个分数，所以 shape 是 `[T, E]`。
+3. Top-K 只保留 K 个 expert id 和 K 个权重，所以两个输出都是 `[T, K]`。
+4. 每个被选中的 expert 对 token 向量做自己的 FFN。
+5. 同一 token 的 K 个 expert 输出按权重相加，恢复成一个 hidden vector。
+
+### 1.1 两个 token、三个 experts 的可手算例子
+
+为了只观察路由，假设每个 expert 把输入标量乘一个常数：
+
+```text
+expert 0: f0(x) = 2x
+expert 1: f1(x) = 10x
+expert 2: f2(x) = -x
+```
+
+两个 token 的输入是 `A=3`、`B=5`，TopK=2：
+
+```text
+A → expert 0 (weight 0.75), expert 2 (weight 0.25)
+B → expert 1 (weight 0.60), expert 0 (weight 0.40)
+```
+
+输出：
+
+```text
+y_A = 0.75×f0(3) + 0.25×f2(3)
+    = 0.75×6 + 0.25×(-3)
+    = 3.75
+
+y_B = 0.60×f1(5) + 0.40×f0(5)
+    = 0.60×50 + 0.40×10
+    = 34
+```
+
+真实 expert 输入是向量，expert 本身是多次 GEMM+activation，但 router/加权的逻辑
+完全相同。
+
+这里共有 2 个 token，却有 `2×TopK=4` 条 expert assignment。后文统计
+dispatch token 数时，必须先问统计的是原 token 还是 assignment。
 
 要点：
 

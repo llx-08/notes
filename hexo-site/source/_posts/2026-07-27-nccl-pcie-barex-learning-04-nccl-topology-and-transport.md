@@ -37,6 +37,31 @@ LOC < NVL < PIX < PXB < PHB < SYS < NET
 
 它不是简单的“跳数”：路径还包含链路宽度、带宽、CPU 架构和可用能力。
 
+### 2.1 用一台 4 GPU 服务器走一遍判断
+
+假设拓扑：
+
+```text
+CPU0
+ ├─ PCIe Switch A ─ GPU0, GPU1, NIC0
+ └─ PCIe Switch B ─ GPU2, GPU3, NIC1
+
+GPU0↔GPU1 有 NVLink
+GPU2↔GPU3 有 NVLink
+Switch A 与 B 之间只能经 CPU/Root Complex
+```
+
+NCCL 需要分别回答：
+
+1. GPU0→GPU1：NVLink P2P 可用吗？若可用，代价很低。
+2. GPU0→GPU2：是否能 PCIe P2P？若不能，是否用 SHM 中转？
+3. GPU0 跨机出网：NIC0 近，是否直接 GDR？
+4. GPU2 跨机出网：NIC1 近，是否分到另一条 rail？
+5. 4 个 rank 做 AllReduce：ring 顺序如何避免所有流量挤同一上行？
+
+因此“选 transport”是对每条 peer edge 作决定；“选 algorithm”是把这些 edge
+组织成整个 collective。二者不是同一个 if/else。
+
 ## 3. Transport 选择
 
 简化优先级：

@@ -68,7 +68,87 @@ GB/s = GT/s × (128 / 130) ÷ 8
 
 这仍不是应用可见带宽，因为还没扣除 TLP header、DLLP、LCRC、间隔、flow control 和软件调度开销。Gen6 改用 PAM4、FLIT 和 FEC，不能简单套用 128b/130b 公式。
 
-### 3.1 negotiated speed/width
+### 3.1 `x16` 到底是什么意思
+
+`x` 读作“by”，`x16` 表示这条 link 由 16 条 lane 并行组成。它不是：
+
+- 16 倍时钟频率；
+- 有 16 个设备；
+- 一次只能发 16 Byte；
+- GPU 有 16 个计算核心。
+
+把 lane 想成独立车道：
+
+```text
+x1 :  [lane 0]
+x4 :  [lane 0][lane 1][lane 2][lane 3]
+x8 :  [lane 0]...[lane 7]
+x16:  [lane 0]................[lane 15]
+```
+
+每条 lane 本身有发送与接收两个方向，因此“16 lanes”不是把 8 条用于发送、
+另 8 条用于接收；16 条都可以同时在各自的发送方向工作，反方向还有对应的
+16 条接收信号路径。
+
+#### 同代际下，不同宽度差多少
+
+以 Gen4 为例：
+
+| 宽度 | 单向编码后理论值 | 相对 x16 |
+|---|---:|---:|
+| x1 | 1.969 GB/s | 1/16 |
+| x2 | 3.938 GB/s | 1/8 |
+| x4 | 7.877 GB/s | 1/4 |
+| x8 | 15.754 GB/s | 1/2 |
+| x16 | 31.508 GB/s | 1 |
+
+例如把一块 GPU 从 Gen4 x16 插到电气 x8 插槽，理论单向上限就从约
+31.5 GB/s 降为 15.75 GB/s。计算 kernel 若只访问 GPU 自己的 HBM，未必受影响；
+但 CPU↔GPU、GPU↔NIC、GPU↔GPU 的 PCIe 流量可能受影响。
+
+#### 宽度和代际可以互相“换算”，但延迟不等价
+
+从理论带宽看：
+
+```text
+Gen3 x16 ≈ Gen4 x8 ≈ Gen5 x4 ≈ 15.75 GB/s（单向）
+```
+
+这只说明大块连续传输的编码后带宽接近，不代表：
+
+- TLP 往返延迟相同；
+- switch/Root Complex 路径相同；
+- MPS、outstanding request 能力相同；
+- P2P、ACS、IOMMU 支持相同。
+
+性能分析不能只看一个 GB/s 数字。
+
+#### 物理插槽宽度与电气宽度
+
+“插槽是 x16 长度”和“接了 16 条 lane”是两件事。主板可能为了让长卡能插入，
+提供 x16 外形，但只连接 x8 或 x4。还可能因为 CPU lane 数有限而在多槽同时使用
+时自动拆分：
+
+```text
+只插 GPU0：GPU0 = x16
+同时插 GPU0/GPU1：GPU0 = x8，GPU1 = x8
+```
+
+这种 `x16 → x8+x8` 叫 bifurcation（拆分）。总 lane 预算没有增加。
+
+#### 双向带宽为什么容易被宣传数字误导
+
+Gen4 x16 单向约 31.5 GB/s。因为全双工：
+
+```text
+A → B 最多约 31.5 GB/s
+B → A 最多约 31.5 GB/s
+```
+
+厂商可能写“总双向约 63 GB/s”。如果你的 workload 只有 GPU→NIC 一个方向，
+仍只能拿单向值做上限，不能用 63 GB/s。
+
+### 3.2 negotiated speed/width
 
 设备和端口各自有 capability 与当前协商值。常见性能事故是“设备支持 Gen4 x16，但链路只协商成 Gen3 x8”。
 
@@ -81,6 +161,32 @@ lspci -vv -s "$BDF" | rg 'LnkCap|LnkSta'
 - `LnkCap`: 最大支持值。
 - `LnkSta`: 当前实际值。
 - `Width x8 (downgraded)`: 宽度发生降级。
+
+还要检查路径上的每一跳，而不只是 Endpoint。假设：
+
+```text
+GPU -- Gen5 x16 --> Switch -- Gen4 x8 --> Root Port
+```
+
+GPU 这一端能力再强，去 CPU/主存方向仍会被 Switch 上行的 Gen4 x8 限制。
+Linux 内核的 `pcie_bandwidth_available()` 也是沿设备向上寻找整条路径中最小带宽。
+
+### 3.3 手算例题：PCIe 4.0 x8 能否喂满 200 Gb/s 网卡
+
+先统一单位：
+
+```text
+200 Gb/s ÷ 8 = 25 GB/s
+PCIe 4.0 x8 编码后理论值 ≈ 15.75 GB/s
+```
+
+因此即使不考虑任何协议开销，PCIe 4.0 x8 也无法承载单方向 200 Gb/s 线速。
+如果网卡是双口 200 Gb/s，更不能把两个端口线速简单相加后期待通过同一条 x8
+上行。
+
+反过来，PCIe 5.0 x8 编码后理论值约 31.5 GB/s，看起来足够 25 GB/s，但真实系统
+还要扣除 TLP、网络协议和软件开销，所以只能说“具备可能性”，不能仅凭理论值
+断言一定跑满。
 
 ## 4. TLP：真正在线路上传输的事务
 
@@ -175,5 +281,6 @@ T = 固定软件开销
 ## 参考
 
 - [PCI-SIG PCI Express Technology Overview](https://pcisig.com/pci-express-technology-overview)
+- [PCI-SIG：PCIe 4.0/5.0 lane 与 x16 带宽表](https://pcisig.com/blog/pci-express-delivering-needed-bandwidth-open-compute-project)
+- [PCI-SIG：PCIe Link 支持 x1/x2/x4/x8/x16](https://pcisig.com/sites/default/files/files/PCI-SIG%20Cabling%20Webinar_FINAL.pdf)
 - [Linux PCI driver API](https://docs.kernel.org/driver-api/pci/index.html)
-

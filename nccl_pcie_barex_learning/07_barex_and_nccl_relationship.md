@@ -161,6 +161,34 @@ blade-kvt 的负载不是固定 collective：
 - request 生命周期与完成通知；
 - communicator/rank 管理。
 
+### 8.1 三个需求怎样选
+
+#### 需求 A：8 张 GPU 对梯度求和，每张都要完整结果
+
+这是规则的 AllReduce，所有 rank 同步参与，优先使用 NCCL：
+
+```text
+NCCL communicator + ncclAllReduce
+```
+
+#### 需求 B：prefill worker 把 request 42 的 block 3、9 写到动态选择的 decode worker
+
+目标、block offset 和生命周期都由业务决定，更符合 blade-kvt + Barex：
+
+```text
+控制面交换 raddr/rkey
+数据面 WriteBatch 直接落到目标 slot
+业务面 send-done
+```
+
+#### 需求 C：MoE token 根据 router 结果在固定 EP ranks 间交换
+
+这是 collective-like 的稀疏多对多，可以使用 NCCL AllToAll/P2P 组合，也可以使用
+DeepEP 这类 EP 专用库。是否选 Barex 取决于是否另外实现 token layout、rank
+matching、combine handle 等上层协议；Barex 自身不会自动理解 expert。
+
+这个例子说明：选库首先看**通信语义**，然后才看底层是否都支持 RDMA。
+
 ## 9. 可以怎样真正“结合”
 
 虽然当前代码没有直接集成，系统层可以同时使用：
@@ -206,4 +234,3 @@ P→D KV cache transfer    → blade-kvt + Barex
 1. 为什么出现 `NCCL_SOCKET_IFNAME` 不能证明库依赖 NCCL？
 2. 如何从符号、构建依赖、运行时调用三层验证 plugin 关系？
 3. blade-kvt 的动态 block write 为什么不是典型 collective？
-

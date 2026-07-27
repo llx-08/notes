@@ -36,6 +36,42 @@ vllm/model_executor/layers/fused_moe/
 
 上游：https://github.com/deepseek-ai/DeepGEMM
 
+### 1.1 GEMM 是什么：先手算一个 `2×3` 乘 `3×2`
+
+GEMM 可以先理解为矩阵乘法：
+
+```text
+A.shape = [M, K] = [2, 3]
+B.shape = [K, N] = [3, 2]
+C = A × B，C.shape = [M, N] = [2, 2]
+```
+
+```text
+A = [[1, 2, 3],      B = [[1, 2],
+     [4, 5, 6]]           [0, 1],
+                           [2, 0]]
+```
+
+结果：
+
+```text
+C[0,0] = 1×1 + 2×0 + 3×2 = 7
+C[0,1] = 1×2 + 2×1 + 3×0 = 4
+C[1,0] = 4×1 + 5×0 + 6×2 = 16
+C[1,1] = 4×2 + 5×1 + 6×0 = 13
+```
+
+在 MoE expert GEMM 中：
+
+- `M`：这个 expert 收到的 token/assignment 行数；
+- `K`：输入 hidden/intermediate 维度；
+- `N`：输出维度；
+- `A`：token activation；
+- `B`：某个 expert 自己的权重。
+
+不同 expert 的 `K/N` 通常相同，但 `M` 因路由而不同，这正是 grouped GEMM
+要解决的问题。
+
 ---
 
 ## 2. 为什么 MoE 需要「Grouped Contiguous」GEMM
@@ -74,6 +110,40 @@ m_grouped_fp8_gemm_nt_contiguous(
 - `N`、`K` 也常要求是 alignment 的倍数，否则 `_valid_deep_gemm` 会 fallback Triton  
 
 相关：`deep_gemm_utils.compute_aligned_M_and_alignment`、`deepgemm_moe_permute`。
+
+### 2.1 三个 experts 的布局手算
+
+假设三个 experts 分别收到 3、1、2 个 token，`BLOCK_M=4`：
+
+```text
+原始：
+expert 0: [A, D, F]
+expert 1: [B]
+expert 2: [C, E]
+
+对齐后：
+expert 0: [A, D, F, PAD]
+expert 1: [B, PAD, PAD, PAD]
+expert 2: [C, E, PAD, PAD]
+```
+
+```text
+M_sum = round_up(3,4) + round_up(1,4) + round_up(2,4)
+      = 4 + 4 + 4
+      = 12
+```
+
+有效 assignment 只有 6，padding 也是 6，效率为 50%。如果 batch 更大、每
+expert token 更多，padding 占比通常下降；decode 小 batch 下则可能很高。
+
+`expert_ids` 可以按每个 block 记录：
+
+```text
+[0, 1, 2]
+```
+
+意思是第 0 个 4-row tile 用 expert 0 权重，第 1 个用 expert 1，第 2 个用
+expert 2。真实格式以 API 为准，但心智模型就是“每个 M tile 选择哪套 B”。
 
 ---
 
@@ -144,6 +214,35 @@ DeepGEMM 吃的不是裸 bf16，而是 **FP8 数值 + 分组 scale**。激活侧
 | Scale 张量格式 | `DeepGemmQuantScaleFMT`：`FLOAT32` / `FLOAT32_CEIL_UE8M0` / 打包 `UE8M0` |
 
 Blackwell 上常倾向 **UE8M0** 打包 scale；个别模型（如部分 Qwen3.5）可能被 `should_auto_disable_deep_gemm` 关掉以免精度问题。
+
+### 4.1 scale 的最小数值例子
+
+假设某一组原值：
+
+```text
+[0.2, -1.0, 3.5, 7.0]
+```
+
+为了映射到更窄的 FP8 动态范围，量化器选择一个 scale。用极简整数类比：
+
+```text
+q = round(x / scale)
+x_approx = q × scale
+```
+
+若 `scale=0.5`：
+
+```text
+q = [0, -2, 7, 14]
+反量化 ≈ [0.0, -1.0, 3.5, 7.0]
+```
+
+第一个 `0.2` 被舍入为 0，产生误差。scale 太大，小数值分辨率差；scale 太小，
+大数值可能溢出。block scale 让不同数据块各用自己的 scale，在 metadata 开销和
+数值精度之间折中。
+
+DeepGEMM kernel 不一定真的先完整反量化成 BF16 再 GEMM；硬件/内核会按相应
+格式高效使用量化值和 scale。上面的整数例子只解释数学含义。
 
 ---
 

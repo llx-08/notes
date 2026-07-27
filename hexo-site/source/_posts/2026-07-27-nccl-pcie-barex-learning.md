@@ -42,6 +42,7 @@ KVT_ROOT=~/codes/blade-kvt
 
 | 顺序 | 文档 | 核心问题 |
 |---:|---|---|
+| 0 | [00 硬件与网络零基础导读](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/) | bit/Byte、带宽/延迟、PCIe x16、DMA、网卡和 RDMA 分别是什么？ |
 | 1 | [01 PCIe 基础](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/) | PCIe 如何寻址、组包、流控和计算带宽？ |
 | 2 | [02 GPU 拓扑与 DMA](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/) | GPU/NIC 如何绕过 CPU copy？拓扑为什么决定性能？ |
 | 2a | [02a RDMA Verbs 对象模型](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/) | Device/PD/MR/QP/CQ 如何组成一条 RDMA 连接？ |
@@ -85,6 +86,14 @@ Python submit_req_send2 / start_send
 | staged/TCP 远端响应 | 接收端已完成 H2D/scatter | 可以，且能拿到端到端时间 |
 
 ## 推荐学习方法
+
+如果是第一次接触服务器硬件，请不要直接从 Barex 类名开始背。建议先完成
+[00 零基础导读](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/) 中的十个自检题，再进入 PCIe 与
+RDMA。每遇到一个新缩写，都把它放回以下五层之一：
+
+```text
+应用语义 → 通信库 → RDMA/NCCL → NIC/GPU 驱动 → PCIe/网络硬件
+```
 
 每章按四步学习：
 

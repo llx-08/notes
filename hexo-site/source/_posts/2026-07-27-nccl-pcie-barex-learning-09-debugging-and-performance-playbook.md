@@ -24,6 +24,36 @@ tags: [NCCL, PCIe, RDMA, Barex, blade-kvt, 学习笔记]
 
 否则容易把 `send-done 超时` 错判成 RDMA 未发送，或把 `RNR` 错判成 PCIe 带宽问题。
 
+### 1.1 初学者故障决策树
+
+```text
+请求失败/超时
+  │
+  ├─ channel 是否建立成功？
+  │    ├─ 否 → 查地址、端口、GID、QP state、控制面
+  │    └─ 是
+  │
+  ├─ WR 是否 post 成功？
+  │    ├─ 否 → 查参数、queue full、MR/lkey、channel state
+  │    └─ 是
+  │
+  ├─ 是否收到 CQE？
+  │    ├─ 否 → 查 progress thread、CQ polling、网络/QP 卡住
+  │    └─ 是
+  │
+  ├─ CQE status 是否 SUCCESS？
+  │    ├─ 否 → 从第一个 WC error 查 rkey/RNR/retry/protection
+  │    └─ 是
+  │
+  └─ 业务是否仍未完成？
+       ├─ staged/TCP → 查远端 H2D/scatter/response
+       ├─ direct → 查 send-done 与消费者同步
+       └─ 查是否等待错了 step/request
+```
+
+每次只证明一条边，不要同时修改 PCIe、PFC、QP timeout、thread affinity 和
+batch size。否则即使现象消失，也无法知道是哪项真正生效。
+
 ## 2. 建立一次诊断快照
 
 ### 2.1 PCIe/GPU

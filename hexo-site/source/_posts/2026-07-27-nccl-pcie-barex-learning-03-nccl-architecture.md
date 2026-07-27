@@ -17,6 +17,36 @@ NCCL 提供 GPU collective 与 point-to-point primitive：
 
 它不是通用 RPC 框架，也不负责应用层 request/response、远端 KV block 地址协议或对象存储。NCCL 的核心价值是：**根据通信参与者和硬件拓扑，为 GPU 通信选择算法、传输与协议，并把操作排入 CUDA stream。**
 
+### 1.1 collective 是“所有成员共同参加”的操作
+
+假设 4 个 rank 各有一个数：
+
+```text
+rank 0: 1
+rank 1: 2
+rank 2: 3
+rank 3: 4
+```
+
+`AllReduce(sum)` 后每个 rank 都得到 10：
+
+```text
+rank 0/1/2/3: 1 + 2 + 3 + 4 = 10
+```
+
+`AllGather` 不求和，而是每个 rank 都得到 `[1, 2, 3, 4]`。
+
+`AllToAll` 则要求每个 rank 为每个目标 rank 准备不同 chunk。例如 rank 0 的
+输入逻辑上分为：
+
+```text
+[给 rank0][给 rank1][给 rank2][给 rank3]
+```
+
+所有 rank 必须以匹配的 communicator、count、dtype 和调用顺序参加同一次
+collective。一个 rank 漏调用或顺序不同，常见结果不是“少一份数据”，而是 hang、
+crash 或 data corruption。
+
 ## 2. 五个关键对象
 
 | 对象 | 作用 |
@@ -29,6 +59,18 @@ NCCL 提供 GPU collective 与 point-to-point primitive：
 
 ![NCCL 从 API 到数据面的架构](/imgs/nccl_architecture.svg)
 
+### 2.1 rank 是逻辑身份，不是 PCIe 编号
+
+NCCL rank 常与一张 CUDA device 一一对应，但它只是 communicator 内的 `[0,
+nranks)` 编号。下面两种映射都合法：
+
+```text
+rank 0 → cuda:0             rank 0 → host B cuda:3
+rank 1 → cuda:1             rank 1 → host A cuda:0
+```
+
+算法顺序和 AllGather 输出布局按 rank 决定，不按 GPU 的 PCI BDF 自动排序。
+
 ## 3. 初始化路径
 
 典型 API：
@@ -37,6 +79,33 @@ NCCL 提供 GPU collective 与 point-to-point primitive：
 ncclGetUniqueId(&id);
 ncclCommInitRank(&comm, nranks, id, rank);
 ```
+
+一个“每进程一 GPU”的最小结构：
+
+```cpp
+cudaSetDevice(local_gpu);
+
+// rank 0 创建 id，再通过 MPI/socket/store 广播给其他 rank。
+ncclUniqueId id;
+if (rank == 0) ncclGetUniqueId(&id);
+broadcast_id_to_all_processes(&id);
+
+ncclComm_t comm;
+ncclCommInitRank(&comm, world_size, id, rank);
+
+float* sendbuf = ...;  // device pointer
+float* recvbuf = ...;  // device pointer
+cudaStream_t stream;
+cudaStreamCreate(&stream);
+
+ncclAllReduce(sendbuf, recvbuf, count, ncclFloat, ncclSum, comm, stream);
+
+// ncclAllReduce 返回时通常只是入队；stream 同步后结果才可由 host 确认完成。
+cudaStreamSynchronize(stream);
+```
+
+实际程序必须检查每个 API 的返回值，并在异常时处理 communicator abort/destroy；
+上面只展示对象关系。
 
 当前参考源码主线：
 
@@ -201,4 +270,5 @@ src/init.cc
 ## 参考
 
 - [NCCL User Guide](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/index.html)
+- [NCCL Collective Operations](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html)
 - [NCCL 官方源码](https://github.com/NVIDIA/nccl)

@@ -44,6 +44,32 @@ ibv_device
 | SRQ | 多 QP 共享 RQ | Barex 当前 RC channel 路径未使用 |
 | CM/AH | 建联或无连接寻址 | Barex `XConnector/XListener` 自行交换 QP meta |
 
+### 2.1 用“快递仓库”记住这些对象
+
+这个类比不完全等价，但适合第一次记忆：
+
+| RDMA 对象 | 快递类比 | 为什么需要 |
+|---|---|---|
+| Device/Context | 一家快递公司及营业账号 | 先打开哪块 RNIC |
+| PD | 独立仓库园区的门禁域 | 隔离不同 QP/MR |
+| MR | 已登记的货架区域 | RNIC 只能碰被授权的内存 |
+| lkey/rkey | 本地/远端提货凭证 | WQE 中的硬件权限检查 |
+| QP 的 SQ | 发件任务队列 | 应用提交 SEND/WRITE/READ |
+| QP 的 RQ | 预先准备的收件空位 | SEND/WRITE_WITH_IMM 需要 |
+| CQ | 完成回执箱 | 告诉应用哪个任务成功/失败 |
+| `wr_id` | 快递单号 | 把 CQE 对回业务 callback |
+
+类比的边界：RDMA WRITE 可以直接写入远端已授权 MR，不要求远端 CPU 临时“签收”，
+这比普通快递更接近远程仓库机器人。
+
+### 2.2 一个对象为什么不能替代另一个
+
+- 有 MR 没 QP：内存已授权，但没有通信连接/队列。
+- 有 QP 没 MR：可以发 inline 小数据，但不能让 RNIC 随意 DMA 普通 buffer。
+- post WR 没 CQ：设备可能做完了，应用却无法安全判断何时复用 buffer。
+- 有 rkey 没 raddr：知道通行证，不知道写入位置。
+- 有 raddr 没 rkey：知道门牌号，没有硬件授权。
+
 ## 3. Device、Port、GID
 
 一块 RNIC 可以有多个 physical port，每个 port 有：
@@ -227,22 +253,38 @@ XConnector/XListener (TCP OOB)
 ## 11. 最小生命周期伪代码
 
 ```cpp
+// 1. 找到并打开 RNIC。以下多数操作属于 slow path。
 dev_list = ibv_get_device_list();
 ctx = ibv_open_device(dev);
+
+// 2. 创建保护域。后面的 MR 与 QP 要放在同一个 PD。
 pd = ibv_alloc_pd(ctx);
+
+// 3. 创建完成队列；QP 完成后 CQE 会进入这里。
 cq = ibv_create_cq(ctx, ...);
+
+// 4. 注册 buffer。此时才得到该 PD/RNIC 可用的 lkey/rkey。
 mr = ibv_reg_mr(pd, buf, len, access);
+
+// 5. QP 同时拥有 SQ/RQ，并把完成投递到 cq。
 qp = ibv_create_qp(pd, {send_cq=cq, recv_cq=cq, ...});
 
+// 6. RC QP 不能创建后直接发；要完成 RESET→INIT→RTR→RTS。
 modify_qp_to_init(qp);
 exchange_qp_meta_over_oob();
 modify_qp_to_rtr(qp, peer);
 modify_qp_to_rts(qp, retry_and_timeout);
 
+// 7. 若使用 SEND/WRITE_WITH_IMM，接收方先准备 recv WQE。
 ibv_post_recv(qp, ...);  // 如果要收 SEND/WRITE_WITH_IMM
+
+// 8. post 返回只代表“任务被接受”，不是数据已完成。
 ibv_post_send(qp, ...);
+
+// 9. poll 到对应 wr_id 的成功 CQE 后，才能按该操作的完成语义继续。
 ibv_poll_cq(cq, ...);
 
+// 10. 先确保没有 inflight WR，再按依赖关系反向销毁。
 destroy_qp();
 dereg_mr();
 destroy_cq();

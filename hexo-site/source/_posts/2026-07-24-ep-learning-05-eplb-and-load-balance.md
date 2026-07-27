@@ -76,6 +76,76 @@ Step 3  Node 内：physical expert → 打包到各 GPU
 - `balanced_packing`：按负载降序，每次放进当前最轻且有空位的桶  
 - `replicate_experts`：冗余槽位反复给「每副本负载最大」的 logical expert  
 
+### 3.1 四个 experts、两个 GPU 的手算
+
+某一观察窗口内：
+
+```text
+expert 0: 1000 tokens
+expert 1:  600 tokens
+expert 2:  300 tokens
+expert 3:  100 tokens
+```
+
+每个 GPU 必须放两个 experts。
+
+若线性放置：
+
+```text
+GPU0: expert 0 + 1 → 1600
+GPU1: expert 2 + 3 →  400
+```
+
+整层速度受最慢 GPU0 限制，GPU1 大量空闲。
+
+`balanced_packing` 先按负载从大到小放入当前最轻且未满的 GPU：
+
+```text
+GPU0: expert 0 (1000) + expert 3 (100) = 1100
+GPU1: expert 1 ( 600) + expert 2 (300) =  900
+```
+
+从 1600:400 改善到 1100:900。它是贪心近似，不保证所有约束下全局最优，但
+计算快，适合周期性重平衡。
+
+### 3.2 冗余 expert 为什么能分流
+
+若有 5 个 physical slots，可复制一次热点 expert 0：
+
+```text
+physical 0 → logical expert 0
+physical 1 → logical expert 1
+physical 2 → logical expert 2
+physical 3 → logical expert 3
+physical 4 → logical expert 0（副本）
+```
+
+理论上 expert 0 的 1000 token 可分到两个副本，每副本约 500。vLLM
+`replicate_experts` 的思想是反复选择“当前每副本负载最大”的 logical expert：
+
+```text
+effective_load = logical_load / replica_count
+```
+
+但副本不是免费的：
+
+- 多占一份 expert 权重显存；
+- 初次/重平衡时要搬权重；
+- router/dispatcher 必须知道同一 logical id 有哪些 physical copies；
+- 旧映射仍有 inflight token 时不能立即覆盖权重。
+
+### 3.3 为什么要先按 node、再按 GPU
+
+假设两节点，每节点 4 GPU。若只追求每 GPU token 完全平均，可能把同一 expert
+group 拆到两节点，让大量 token 跨 400G 网络；而节点内 NVLink 通常更快。
+
+分层算法先限制跨机代价，再在节点内部追求精细均衡，优化目标不是单一的
+“token 数方差最小”，而是同时考虑：
+
+```text
+计算均衡 + 跨机通信量 + 显存副本 + 权重迁移成本
+```
+
 ---
 
 ## 4. vLLM 代码地图

@@ -5,6 +5,41 @@
 
 ---
 
+## 0. 先认识 GPU kernel、SM、thread block 与 warp
+
+- **kernel**：在 GPU 上并行执行的函数，不是操作系统内核。
+- **thread**：一次 kernel 的最小逻辑执行实例。
+- **warp**：NVIDIA GPU 以 32 个 threads 为一组调度。
+- **thread block**：一组能共享 shared memory、做块内同步的 threads。
+- **SM**（Streaming Multiprocessor）：真正调度和执行 blocks/warps 的硬件单元。
+
+类比：
+
+```text
+GPU        = 工厂
+SM         = 多个车间
+block      = 分配给一个车间的一批工单
+warp       = 车间每次一起推进的 32 个工人
+thread     = 一个工人
+kernel     = 所有工单共同执行的作业程序
+```
+
+MoE kernel 的难点在于每个 expert 收到的 token 数不同。若 expert 0 有 65 个 token、
+expert 1 只有 3 个，而 GEMM kernel 每个 block 希望处理 64 行，就需要：
+
+```text
+expert 0: 65 → pad 到 128
+expert 1:  3 → pad 到 64
+```
+
+padding 会做无效工作，但能让地址与 block 调度规则简单、连续，并使用高度优化的
+固定 tile。优化目标是在“少 padding”与“kernel 规则、并行度、Tensor Core 利用率”
+之间平衡。
+
+CUDA 官方编程模型中，block 必须能独立调度；warp 固定由 32 个连续 thread id
+组成。读 Triton/CUDA 代码时，先找每个 program/block 负责哪块数据，而不是先逐条
+研究指令。
+
 ## 1. 为什么要 Modular
 
 历史问题：每种「通信 × 量化 × GEMM 实现」组合都会爆炸成一份 fused 代码。
@@ -205,3 +240,7 @@ Router 与 EP 解耦，但 **topk_ids 的 dtype/坐标系** 会被 DeepEP / Mega
 
 SGLang 把通信叫 **token_dispatcher**（`sglang/.../token_dispatcher/deepep.py`），计算在 `ep_moe` / `moe_runner`。  
 概念一一对应：dispatcher ≈ PrepareAndFinalize，runner ≈ Experts。对比阅读有助于分清「框架粘合」与「DeepEP 本体」。
+
+## 参考
+
+- [CUDA Programming Guide：Thread Blocks、Grids 与 SM](https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html)

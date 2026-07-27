@@ -50,6 +50,43 @@ Ring AllReduce 通常分两段：
 - 小消息延迟随 rank 数增长明显；
 - 任一弱链路进入 ring 都会限制整体。
 
+### 2.1 四个 rank 的手算例子
+
+每个 rank 有 4 个元素：
+
+```text
+rank 0: [ 1,  2,  3,  4]
+rank 1: [10, 20, 30, 40]
+rank 2: [ 5,  6,  7,  8]
+rank 3: [ 2,  4,  6,  8]
+```
+
+最终 AllReduce(sum)：
+
+```text
+[18, 32, 46, 60]
+```
+
+为了理解 ring，把向量切成 4 个 chunk，每个 chunk 先沿 ring 走
+`N-1=3` 步完成 reduce-scatter。结束时每个 rank 只拥有一个“已经求和”的 chunk：
+
+```text
+rank 0 拥有 [18]
+rank 1 拥有 [32]
+rank 2 拥有 [46]
+rank 3 拥有 [60]
+```
+
+再走 3 步 all-gather，大家交换这四个结果，最终都得到完整向量。
+
+如果完整消息是 1 GiB、`N=4`，每 rank 近似通信量：
+
+```text
+2 × (4-1)/4 × 1 GiB = 1.5 GiB
+```
+
+不是 3 GiB，因为每步只发送约 `1/N` 的 chunk。
+
 ## 3. Tree AllReduce
 
 Tree 沿树向上 reduce，再向下 broadcast。深度约 `O(log N)`。
@@ -118,6 +155,22 @@ T ≈ steps × α + traffic_bytes × β
 
 - `α`：每步固定延迟，包括 kernel、proxy、doorbell、网络 RTT。
 - `β`：每字节成本，即有效带宽倒数。
+
+例：假设一次 step 固定开销 `α=5 μs`，有效带宽 `B=25 GB/s`，传
+1 MiB 的数据成本约：
+
+```text
+1 MiB / 25 GB/s ≈ 41.9 μs
+```
+
+若算法需要 6 步，极简估算：
+
+```text
+T ≈ 6×5 μs + 41.9 μs = 71.9 μs
+```
+
+真实算法会 pipeline，多步数据传输可以重叠，因此这个加法不是性能预测器；
+它用于判断固定延迟和字节传输谁更可能占主导。
 
 Ring 与 Tree 的取舍：
 

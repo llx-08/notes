@@ -17,7 +17,8 @@ categories: [EP 学习笔记]
 
 | 阶段 | 文档 | 核心问题 | 预计 |
 |------|------|----------|------|
-| 0 | 本文 | 全景图、术语、仓库地图 | 0.5h |
+| 0 | [00_beginner_primer.md](/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/) | token/tensor/rank 是什么？从 Dense FFN 怎样一步步走到 MoE 与 EP？ | 2–3h |
+| 0a | 本文 | 全景图、术语、仓库地图 | 0.5h |
 | 1 | [01_ep_fundamentals.md](/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/) | 什么是 MoE/EP？`EP=TP×DP` 怎么来的？ | 2–3h |
 | 1a | [01a_moe_all_to_all.md](/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/) | All-to-All 原因/载荷/流程；与 All-Gather、All-Reduce 对比 | 2–3h |
 | 2 | [02_modular_kernel_and_moe_kernels.md](/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/) | Router → Dispatch → Experts → Combine；align/permute/GEMM | 4–6h |
@@ -112,7 +113,14 @@ vLLM Modular MoE 把这条链路拆成可插拔组件：
 
 ## 前置知识
 
-1. **CUDA / 通信基础**：stream、event、P2P、NCCL collective；跨机部分建议先过一遍 [rdma_learning_1.md](/notes/2026/05/25/2026-05-25-rdma-learning-1/)。
+如果 tensor、hidden size、rank、Top-K、bit/Byte 还不熟，先读
+[00 · 零基础导读](/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/)，不需要提前学完深度学习课程。
+
+进阶章节会逐步使用以下知识：
+
+1. **CUDA / 通信基础**：stream、event、P2P、NCCL collective；跨机部分建议先读
+   [硬件与网络零基础导读](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/)，
+   再过一遍 [rdma_learning_1.md](/notes/2026/05/25/2026-05-25-rdma-learning-1/)。
 2. **PyTorch Distributed**：process group、all_gather / reduce_scatter / all_to_all。
 3. **GEMM 直觉**：token×hidden 与 expert 权重的分块矩阵乘；block size / padding 为什么存在。
 
@@ -139,6 +147,7 @@ vLLM Modular MoE 把这条链路拆成可插拔组件：
 | 图 | 文档 |
 |----|------|
 | `ep_overview.png` | README |
+| 纯文本小例子 | 00 |
 | `ep_tp_dp_home.png` / `ep_dp_lockstep.png` | 01 |
 | `ep_collectives_compare.png` / `ep_dp0_vs_dp_a2a.png` | 01a |
 | `ep_modular_kernel.png` | 02 |

@@ -12,6 +12,28 @@ categories: [EP 学习笔记]
 
 ---
 
+## 0. 初学者先知道：为什么会有“特化高速路径”
+
+通用实现像一套可组装工具：
+
+```text
+Router → 通信库 → permute → GEMM 库 → unpermute → 通信库
+```
+
+优点是模型/硬件适配广；缺点是中间要多次读写 tensor、launch kernel，并维护
+通用分支。若模型结构、dtype、shape 和 GPU 架构都固定，就可以把多个阶段融合：
+
+```text
+更少中间 tensor + 更少 kernel launch + 更静态的布局
+```
+
+MegaMoE 就属于这种“为 DeepSeek V4 + FP8/FP4 + SM100 定制”的路径。它不是
+“名字更大所以所有 MoE 都应该开启”。不满足 checkpoint、scoring、shape 或硬件
+约束时，应走通用 Modular 路径。
+
+这里的 SM100 是 NVIDIA Blackwell compute capability 家族标识，不表示 GPU 只有
+100 个 SM；`device_capability[0] == 10` 是架构能力判断。
+
 ## 1. MegaMoE 在栈里的位置
 
 ```text

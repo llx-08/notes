@@ -23,6 +23,50 @@ Python
   WR → NIC → CQ → callback/future
 ```
 
+### 1.1 用一个 request 贯穿后文
+
+假设 prefill worker 已为 request 42 计算出 KV cache：
+
+```text
+模型层数：3（为了示例；真实模型更多）
+需要发送的 source blocks：[5, 8]
+decode worker 分配的 target blocks：[12, 2]
+每层每 block：64 KiB
+```
+
+逻辑映射：
+
+```text
+layer 0: src block 5 → dst block 12
+         src block 8 → dst block 2
+layer 1: src block 5 → dst block 12
+         src block 8 → dst block 2
+layer 2: src block 5 → dst block 12
+         src block 8 → dst block 2
+```
+
+总 payload：
+
+```text
+3 layers × 2 blocks × 64 KiB = 384 KiB
+```
+
+但 blade-kvt 不一定等所有层算完再一次发 384 KiB。forward 完成 layer 0 后，
+对应 CUDA event/barrier 就绪，发送线程可以先调用 `send_data(0)`；计算 layer 1
+时，layer 0 的网络传输可能同时进行，这就是 compute/communication overlap。
+
+在 direct RDMA 路径中，每个 block 最终会变成类似：
+
+```text
+local_addr = layer_base + 5 × block_stride
+remote_addr = remote_layer_base + 12 × block_stride
+length = 64 KiB
+lkey/rkey = 该 GPU MR 的本地/远端权限
+```
+
+因此 `parse_block` 不只是“解析一个整数”，而是在把模型的 block id 转成传输层
+可执行的地址、长度和权限。
+
 ## 2. Python 与 pybind
 
 Python `blade_kvt/kv_transfer_impl.py` 导入：
@@ -343,4 +387,3 @@ blade_kvt/kv_transfer_impl.py
 3. direct RDMA 与 staged RDMA 的完成边界分别是什么？
 4. `flush_send` 与 `RDMAChannel::flush` 为什么不能混为一谈？
 5. send-done 为什么不等于网络 CQ completion？
-

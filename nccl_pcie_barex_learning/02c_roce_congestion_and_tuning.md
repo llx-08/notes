@@ -1,5 +1,33 @@
 # 02c. RoCE、拥塞控制、PFC/ECN 与重传
 
+## 0. 先用“排队”理解拥塞
+
+交换机的输出端口像一个收费站。若 8 个输入端口同时各以 100 Gb/s 向一个
+100 Gb/s 输出端口发送，短时间到达速率可达 800 Gb/s，而离开速率只有
+100 Gb/s：
+
+```text
+进入 800 Gb/s → [交换机队列不断增长] → 离开 100 Gb/s
+```
+
+队列满后只能：
+
+- 丢包；
+- 暂停上游；
+- 提前标记拥塞，让发送端降速；
+- 或组合这些机制。
+
+因此“每张网卡都是 100G”不代表多对一时不会拥塞。EP 的 All-to-All 和
+KV cache 聚合都可能产生瞬时 incast。
+
+三个经常混淆的指标：
+
+- **带宽**：端口每秒最多发送多少 bit；
+- **队列深度**：暂时能缓存多少拥塞数据；
+- **RTT**：拥塞信号传回发送端并生效要多久。
+
+队列至少要容纳反馈生效前仍在路上的数据，这与 BDP（带宽时延积）直接相关。
+
 ## 1. InfiniBand、RoCE 与 iWARP
 
 | 技术 | 链路/网络 | 常见 transport |
@@ -242,4 +270,3 @@ NCCL NET flows + Barex KV Write flows
 
 - [NVIDIA Cumulus Linux RoCE](https://docs.nvidia.com/networking-ethernet-software/cumulus-linux/Layer-1-and-Switch-Ports/Quality-of-Service/RDMA-over-Converged-Ethernet-RoCE/)
 - [NVIDIA RoCE documentation](https://docs.nvidia.com/networking/display/mlnxofedv24070610/rdma%2Bover%2Bconverged%2Bethernet%2B%28roce%29)
-

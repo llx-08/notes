@@ -116,15 +116,20 @@ src/barex/impl/xstatic_instance.cc
 
 | 术语 | 含义 |
 |---|---|
+| bit / Byte | 1 Byte = 8 bit；`Gb/s` 与 `GB/s` 相差 8 倍 |
 | ACS | PCIe Access Control Services，影响 P2P 路由/隔离 |
 | BAR | Base Address Register，设备暴露的 MMIO 地址窗口 |
 | BDF | PCI Domain:Bus:Device.Function |
 | BDP | Bandwidth-delay product，填满链路所需 inflight bytes |
 | CQ/CQE | Completion Queue / Entry |
 | DMA | 设备无需 CPU copy 直接读写内存 |
+| doorbell | 软件写 MMIO/映射寄存器，通知设备有新 WQE |
+| full-duplex | 两个方向可同时传输；PCIe lane 天然全双工 |
 | GDR | GPUDirect RDMA，NIC 直接 DMA GPU memory |
+| GT/s | 每秒十亿次 transfer；还需考虑编码，不能直接等于有效 Gb/s |
 | HCA | Host Channel Adapter，RDMA NIC |
 | IOMMU | I/O 地址转换与隔离单元 |
+| lane / x16 | PCIe 最小双向通道 / 由 16 条 lane 聚合的 link |
 | lkey | 本地 MR key，校验 local SGE |
 | MR | Memory Region，注册给 RNIC 的内存 |
 | MPS | PCIe Max Payload Size |
@@ -135,7 +140,9 @@ src/barex/impl/xstatic_instance.cc
 | RC | Reliable Connected QP；也可指 PCIe Root Complex，需看上下文 |
 | rkey | 远端 MR key |
 | RNR | Receiver Not Ready |
+| RTT | Round-Trip Time，请求到对端再返回的往返时间 |
 | SGE | Scatter/Gather Element |
+| SQ/RQ | QP 的 Send Queue / Receive Queue |
 | TLP | PCIe Transaction Layer Packet |
 | WR/WQE | Work Request / Work Queue Element |
 | WC | Work Completion |
@@ -192,4 +199,3 @@ Tuning: NCCL_ALGO, NCCL_PROTO, NCCL_MIN_NCHANNELS, NCCL_MAX_NCHANNELS
 5. `send_data` 返回、CQ completion、远端 H2D 完成、业务 send-done 四个边界。
 6. 为什么 Barex 当前不是 NCCL plugin。
 7. 遇到 `REM_ACCESS_ERR` 与 `RNR` 分别从哪里开始查。
-

@@ -7,6 +7,34 @@
 
 ---
 
+## Day 0 · 不进 CUDA，先学会读 Python 调用链
+
+先读 [00_beginner_primer.md](00_beginner_primer.md)，然后对每个函数只记录四列：
+
+| 问题 | 示例 |
+|---|---|
+| 输入 shape/dtype | `hidden [T,H] BF16`、`topk_ids [T,K] int64` |
+| 输出 shape/dtype | `recv_x [T_recv,H]`、handle |
+| 是否跨 rank | `all_gatherv` / `buffer.dispatch` |
+| 完成边界 | 同步返回、CUDA event、stream wait、future |
+
+第一条具体 trace 可选 `AgRsAll2AllManager`：
+
+```text
+dispatch:
+  [本 rank hidden/topk]
+  → dist_group.all_gatherv
+  → [所有 DP rank hidden/topk]
+
+combine:
+  [按全局 token 顺序的局部 expert 输出]
+  → dist_group.reduce_scatterv
+  → [本 home token 输出]
+```
+
+该文件只有 Python/torch distributed 语义，适合确认“假 EP”基线，再对比 DeepEP
+为何多出 layout、buffer 和 handle。
+
 ## Day A · 并行与入口（半日）
 
 | 顺序 | 文件 | 看什么 |
