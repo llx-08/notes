@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism 如果你刚学完 C&amp;#x2F;Python，还没有系统学过深度学习、CUDA 或分布式系统，请先读本章。 本章不追求“背 API”，而是先建立一条完整因果链： 文字 → token → 向量 → FFN&amp;#x2F;MoE → expert 分布到多张 GPU → token 必须跨卡搬运 → EP。 1. 先认识最小单位 1"><meta property="og:type" content="blog"><meta property="og:title" content="00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism 如果你刚学完 C&amp;#x2F;Python，还没有系统学过深度学习、CUDA 或分布式系统，请先读本章。 本章不追求“背 API”，而是先建立一条完整因果链： 文字 → token → 向量 → FFN&amp;#x2F;MoE → expert 分布到多张 GPU → token 必须跨卡搬运 → EP。 1. 先认识最小单位 1"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-27T05:46:40.431Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="EP"><meta property="article:tag" content="MoE"><meta property="article:tag" content="学习笔记"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/"},"headline":"00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-27T05:46:40.431Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism 如果你刚学完 C&#x2F;Python，还没有系统学过深度学习、CUDA 或分布式系统，请先读本章。 本章不追求“背 API”，而是先建立一条完整因果链： 文字 → token → 向量 → FFN&#x2F;MoE → expert 分布到多张 GPU → token 必须跨卡搬运 → EP。 1. 先认识最小单位 1"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-27T05:46:40.431Z" title="7/27/2026, 5:46:40 AM">2026-07-27</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></span><span class="level-item">21 分钟读完 (大约3092个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</h1><div class="content"><h1 id="00-·-零基础导读：从-token、矩阵到-MoE-与-Expert-Parallelism"><a href="#00-·-零基础导读：从-token、矩阵到-MoE-与-Expert-Parallelism" class="headerlink" title="00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism"></a>00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</h1><blockquote>
+<p>如果你刚学完 C/Python，还没有系统学过深度学习、CUDA 或分布式系统，请先读本章。<br>本章不追求“背 API”，而是先建立一条完整因果链：</p>
+<p><strong>文字 → token → 向量 → FFN/MoE → expert 分布到多张 GPU → token 必须跨卡搬运 → EP。</strong></p>
+</blockquote>
+<hr>
+<h2 id="1-先认识最小单位"><a href="#1-先认识最小单位" class="headerlink" title="1. 先认识最小单位"></a>1. 先认识最小单位</h2><h3 id="1-1-bit、Byte-与常见容量单位"><a href="#1-1-bit、Byte-与常见容量单位" class="headerlink" title="1.1 bit、Byte 与常见容量单位"></a>1.1 bit、Byte 与常见容量单位</h3><ul>
+<li><code>bit</code> 是一个二进制位，只能是 0 或 1。</li>
+<li><code>Byte</code>（字节，缩写 <code>B</code>）通常由 8 bit 组成。</li>
+<li><code>KB/MB/GB</code> 表示容量；<code>GB/s</code> 表示每秒能搬多少 GB。</li>
+<li><code>Gb/s</code> 中的小写 <code>b</code> 表示 bit，因此 <code>400 Gb/s</code> 理论上等于 <code>50 GB/s</code>，还没有扣除协议开销。</li>
+</ul>
+<p>最容易犯的错：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">400 Gb/s ÷ 8 = 50 GB/s</span><br></pre></td></tr></table></figure>
+
+<p>不能把 <code>400 Gb/s</code> 直接当作 <code>400 GB/s</code>。</p>
+<h3 id="1-2-标量、向量、矩阵与-tensor"><a href="#1-2-标量、向量、矩阵与-tensor" class="headerlink" title="1.2 标量、向量、矩阵与 tensor"></a>1.2 标量、向量、矩阵与 tensor</h3><ul>
+<li>标量：一个数，例如温度 <code>25</code>。</li>
+<li>向量：一排数，例如 <code>[0.2, -1.1, 0.7, 2.0]</code>。</li>
+<li>矩阵：很多行、很多列的数。</li>
+<li>tensor（张量）：对标量、向量、矩阵以及更高维数组的统称。</li>
+</ul>
+<p>在大模型里，一个 token 常用一个长度为 <code>H</code> 的向量表示。<code>H</code> 叫<br><code>hidden_size</code>。假设 <code>H=4</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">token "cat" → [0.2, -1.1, 0.7, 2.0]</span><br></pre></td></tr></table></figure>
+
+<p>真实模型中的 <code>H</code> 往往是几千，而不是 4。我们使用小数字只是为了能手算。</p>
+<p>如果一批里有 <code>T=3</code> 个 token，hidden states 的形状通常写成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">[T, H] = [3, 4]</span><br><span class="line"></span><br><span class="line">[</span><br><span class="line">  [ 0.2, -1.1,  0.7, 2.0],  # token 0</span><br><span class="line">  [ 1.0,  0.5, -0.3, 0.8],  # token 1</span><br><span class="line">  [-0.4,  1.2,  0.9, 0.1],  # token 2</span><br><span class="line">]</span><br></pre></td></tr></table></figure>
+
+<p>“shape 是 <code>[T, H]</code>”只描述有多少行和列，不描述数值内容。</p>
+<h3 id="1-3-dtype-决定一个元素占多少字节"><a href="#1-3-dtype-决定一个元素占多少字节" class="headerlink" title="1.3 dtype 决定一个元素占多少字节"></a>1.3 dtype 决定一个元素占多少字节</h3><p>常见 dtype：</p>
+<table>
+<thead>
+<tr>
+<th>dtype</th>
+<th align="right">每元素字节数</th>
+<th>粗略理解</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>FP32</td>
+<td align="right">4 B</td>
+<td>精度高、占用大</td>
+</tr>
+<tr>
+<td>BF16 / FP16</td>
+<td align="right">2 B</td>
+<td>大模型常见计算格式</td>
+</tr>
+<tr>
+<td>FP8</td>
+<td align="right">1 B</td>
+<td>更省带宽和显存，但需要 scale</td>
+</tr>
+<tr>
+<td>INT8</td>
+<td align="right">1 B</td>
+<td>8 位整数</td>
+</tr>
+<tr>
+<td>FP4 / INT4</td>
+<td align="right">0.5 B</td>
+<td>两个 4-bit 元素装进 1 Byte</td>
+</tr>
+</tbody></table>
+<p>一个 <code>[2048, 7168]</code> 的 BF16 tensor 大小约为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">2048 × 7168 × 2 Byte</span><br><span class="line">= 29,360,128 Byte</span><br><span class="line">≈ 28 MiB</span><br></pre></td></tr></table></figure>
+
+<p>这条公式非常重要：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">tensor 字节数 = 所有维度相乘 × 每元素字节数</span><br></pre></td></tr></table></figure>
+
+<p>EP 的通信量最终都可以还原成这条公式。</p>
+<hr>
+<h2 id="2-大模型的一层在做什么"><a href="#2-大模型的一层在做什么" class="headerlink" title="2. 大模型的一层在做什么"></a>2. 大模型的一层在做什么</h2><p>一个简化的 Transformer 层可以看成两大部分：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">hidden states</span><br><span class="line">  ├─ Attention：token 之间交换信息</span><br><span class="line">  └─ FFN：每个 token 独立做两到三个矩阵乘法</span><br></pre></td></tr></table></figure>
+
+<p>本系列聚焦 FFN 被 MoE 替换后的情况。</p>
+<h3 id="2-1-Dense-FFN：所有-token-使用同一套参数"><a href="#2-1-Dense-FFN：所有-token-使用同一套参数" class="headerlink" title="2.1 Dense FFN：所有 token 使用同一套参数"></a>2.1 Dense FFN：所有 token 使用同一套参数</h3><p>先忽略 bias 和激活函数，一个 FFN 可以粗略写成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">y = x · W</span><br></pre></td></tr></table></figure>
+
+<p>如果：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">x.shape = [T, H]</span><br><span class="line">W.shape = [H, N]</span><br></pre></td></tr></table></figure>
+
+<p>那么：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">y.shape = [T, N]</span><br></pre></td></tr></table></figure>
+
+<p>矩阵乘法可以理解为：输入的每一行与权重的每一列做“对应元素相乘再求和”。</p>
+<p>例如：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">x = [2, 3]</span><br><span class="line">W = [[1, 4],</span><br><span class="line">     [5, 2]]</span><br><span class="line"></span><br><span class="line">y[0] = 2×1 + 3×5 = 17</span><br><span class="line">y[1] = 2×4 + 3×2 = 14</span><br><span class="line">所以 y = [17, 14]</span><br></pre></td></tr></table></figure>
+
+<p>Dense FFN 的关键是：所有 token 都使用同一个 <code>W</code>。</p>
+<h3 id="2-2-MoE：准备很多套-FFN，但每个-token-只选少数几套"><a href="#2-2-MoE：准备很多套-FFN，但每个-token-只选少数几套" class="headerlink" title="2.2 MoE：准备很多套 FFN，但每个 token 只选少数几套"></a>2.2 MoE：准备很多套 FFN，但每个 token 只选少数几套</h3><p>Mixture of Experts（MoE）把一套 FFN 变成多套：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">expert 0: W0</span><br><span class="line">expert 1: W1</span><br><span class="line">expert 2: W2</span><br><span class="line">expert 3: W3</span><br></pre></td></tr></table></figure>
+
+<p>每个 expert 本质上仍是 FFN，不是一个独立完整的大模型。</p>
+<p>router（路由器）为每个 token 计算每个 expert 的分数，再选 Top-K。假设<br><code>TopK=2</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">token A 的 router 分数：</span><br><span class="line">expert 0: 0.10</span><br><span class="line">expert 1: 0.60</span><br><span class="line">expert 2: 0.25</span><br><span class="line">expert 3: 0.05</span><br><span class="line"></span><br><span class="line">Top-2 = expert 1 和 expert 2</span><br></pre></td></tr></table></figure>
+
+<p>token A 会分别经过 expert 1、expert 2，最后按 router weight 加权：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">output_A = 0.70 × expert1(A) + 0.30 × expert2(A)</span><br></pre></td></tr></table></figure>
+
+<p>这里的 <code>0.70/0.30</code> 通常由选中后的分数归一化得到。不同模型的 router<br>实现可能用 softmax、sigmoid、分组 Top-K 或额外 bias，但“选 expert”<br>这一核心思想不变。</p>
+<h3 id="2-3-为什么-MoE-能扩大参数量，却不等比例扩大计算量"><a href="#2-3-为什么-MoE-能扩大参数量，却不等比例扩大计算量" class="headerlink" title="2.3 为什么 MoE 能扩大参数量，却不等比例扩大计算量"></a>2.3 为什么 MoE 能扩大参数量，却不等比例扩大计算量</h3><p>假设有 64 个 experts、TopK=2：</p>
+<ul>
+<li>模型保存了 64 套 expert 权重；</li>
+<li>每个 token 只激活其中 2 套；</li>
+<li>单 token 的 expert 计算量更接近 2 套 FFN，而不是 64 套。</li>
+</ul>
+<p>这叫“稀疏激活”。但权重仍然要放进显存。单卡放不下时，就需要把 experts<br>分散到多张 GPU，这正是 EP 的起点。</p>
+<hr>
+<h2 id="3-GPU、进程、rank-到底是什么"><a href="#3-GPU、进程、rank-到底是什么" class="headerlink" title="3. GPU、进程、rank 到底是什么"></a>3. GPU、进程、rank 到底是什么</h2><h3 id="3-1-一张-GPU-不等于一个程序"><a href="#3-1-一张-GPU-不等于一个程序" class="headerlink" title="3.1 一张 GPU 不等于一个程序"></a>3.1 一张 GPU 不等于一个程序</h3><p>操作系统运行的是进程。分布式推理通常启动多个 worker 进程，每个进程控制<br>一张 GPU。为了在通信组中标识成员，每个进程获得一个整数编号：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">rank 0 → GPU 0</span><br><span class="line">rank 1 → GPU 1</span><br><span class="line">rank 2 → GPU 2</span><br><span class="line">rank 3 → GPU 3</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>world_size=4</code>：组里共有 4 个 rank。</li>
+<li><code>rank=2</code>：当前进程是第 2 号成员。</li>
+<li>rank 是逻辑编号，不必永远等于物理 GPU 编号。</li>
+</ul>
+<h3 id="3-2-local-rank、global-rank-与-group-rank"><a href="#3-2-local-rank、global-rank-与-group-rank" class="headerlink" title="3.2 local rank、global rank 与 group rank"></a>3.2 local rank、global rank 与 group rank</h3><p>跨两台机器、每台 4 卡时：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">机器 A: global rank 0,1,2,3；local rank 0,1,2,3</span><br><span class="line">机器 B: global rank 4,5,6,7；local rank 0,1,2,3</span><br></pre></td></tr></table></figure>
+
+<p>同一个进程还可能同时属于 DP group、TP group、EP group。它在不同 group<br>里的 <code>rank_in_group</code> 可能不同。读代码时一定先问：</p>
+<blockquote>
+<p>这个 rank 是哪个通信组里的编号？</p>
+</blockquote>
+<hr>
+<h2 id="4-DP、TP、PP、EP：用“做小组作业”理解"><a href="#4-DP、TP、PP、EP：用“做小组作业”理解" class="headerlink" title="4. DP、TP、PP、EP：用“做小组作业”理解"></a>4. DP、TP、PP、EP：用“做小组作业”理解</h2><table>
+<thead>
+<tr>
+<th>并行方式</th>
+<th>小组作业类比</th>
+<th>模型中的含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DP</td>
+<td>每组拿同一本书，处理不同题目</td>
+<td>复制模型，处理不同请求/token</td>
+</tr>
+<tr>
+<td>TP</td>
+<td>几个人共同切分同一道大题</td>
+<td>切分一次矩阵乘法的权重与计算</td>
+</tr>
+<tr>
+<td>PP</td>
+<td>每个人负责流水线的一道工序</td>
+<td>不同层放到不同设备</td>
+</tr>
+<tr>
+<td>EP</td>
+<td>每个人保管不同专业的参考书</td>
+<td>不同 experts 放到不同设备</td>
+</tr>
+</tbody></table>
+<h3 id="4-1-TP-与-EP-最容易混淆"><a href="#4-1-TP-与-EP-最容易混淆" class="headerlink" title="4.1 TP 与 EP 最容易混淆"></a>4.1 TP 与 EP 最容易混淆</h3><p>假设有 4 张 GPU。</p>
+<p>TP=4 时，一个 expert 的权重可能被切成 4 份：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">expert 0 的 1/4 → GPU 0</span><br><span class="line">expert 0 的 1/4 → GPU 1</span><br><span class="line">expert 0 的 1/4 → GPU 2</span><br><span class="line">expert 0 的 1/4 → GPU 3</span><br></pre></td></tr></table></figure>
+
+<p>EP=4 时，不同 expert 整体分给不同 GPU：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">expert 0 → GPU 0</span><br><span class="line">expert 1 → GPU 1</span><br><span class="line">expert 2 → GPU 2</span><br><span class="line">expert 3 → GPU 3</span><br></pre></td></tr></table></figure>
+
+<p>现实系统可以组合 TP、DP、EP，所以不要只凭“用了 4 卡”判断并行方式。</p>
+<hr>
+<h2 id="5-为什么-EP-必然引出跨卡通信"><a href="#5-为什么-EP-必然引出跨卡通信" class="headerlink" title="5. 为什么 EP 必然引出跨卡通信"></a>5. 为什么 EP 必然引出跨卡通信</h2><p>现在用一个最小例子。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">2 个 rank，4 个 experts，TopK=1</span><br><span class="line"></span><br><span class="line">rank 0 保存 expert 0、1</span><br><span class="line">rank 1 保存 expert 2、3</span><br></pre></td></tr></table></figure>
+
+<p>输入 token 最初按请求/批次分布：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">rank 0 拥有 token A、B</span><br><span class="line">rank 1 拥有 token C、D</span><br></pre></td></tr></table></figure>
+
+<p>router 的选择：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">A → expert 3（在 rank 1）</span><br><span class="line">B → expert 0（在 rank 0）</span><br><span class="line">C → expert 1（在 rank 0）</span><br><span class="line">D → expert 2（在 rank 1）</span><br></pre></td></tr></table></figure>
+
+<p>于是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">rank 0 必须把 A 发给 rank 1</span><br><span class="line">rank 1 必须把 C 发给 rank 0</span><br></pre></td></tr></table></figure>
+
+<p>expert 算完后，结果通常还要回到 token 原来的 rank，以便继续后续层：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">expert 3(A) 从 rank 1 返回 rank 0</span><br><span class="line">expert 1(C) 从 rank 0 返回 rank 1</span><br></pre></td></tr></table></figure>
+
+<p>第一次搬运叫 dispatch，返回叫 combine。</p>
+<h3 id="5-1-“home-rank”不是-expert-所在-rank"><a href="#5-1-“home-rank”不是-expert-所在-rank" class="headerlink" title="5.1 “home rank”不是 expert 所在 rank"></a>5.1 “home rank”不是 expert 所在 rank</h3><ul>
+<li>home rank：token 原本属于哪个 rank。</li>
+<li>expert rank：被选中的 expert 存在哪个 rank。</li>
+</ul>
+<p>两者相同就可以本地处理；不同才产生远端流量。combine 必须记住 home rank，<br>否则不知道结果该送回哪里。</p>
+<h3 id="5-2-TopK-2-时，一个-token-会产生两份-expert-工作"><a href="#5-2-TopK-2-时，一个-token-会产生两份-expert-工作" class="headerlink" title="5.2 TopK=2 时，一个 token 会产生两份 expert 工作"></a>5.2 TopK=2 时，一个 token 会产生两份 expert 工作</h3><p>如果 A 同时选择 expert 1 和 expert 3：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">A → rank 0 上的 expert 1</span><br><span class="line">A → rank 1 上的 expert 3</span><br></pre></td></tr></table></figure>
+
+<p>A 的 hidden vector 在逻辑上有两条 expert 路径。combine 时不仅要送回，还要<br>按 router weight 求和：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">output_A = w1 × expert1(A) + w3 × expert3(A)</span><br></pre></td></tr></table></figure>
+
+<p>所以“token 数量”与“expert assignment 数量”不是一回事：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">assignment 数量 ≈ token 数 × TopK</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="6-一次-MoE-层的完整数据流"><a href="#6-一次-MoE-层的完整数据流" class="headerlink" title="6. 一次 MoE 层的完整数据流"></a>6. 一次 MoE 层的完整数据流</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">① 输入 hidden states [T, H]</span><br><span class="line">       │</span><br><span class="line">② Router 计算 topk_ids、topk_weights [T, K]</span><br><span class="line">       │</span><br><span class="line">③ 根据 expert 所在 rank 统计 send counts</span><br><span class="line">       │</span><br><span class="line">④ Dispatch：把 token hidden 和路由元数据发到 expert rank</span><br><span class="line">       │</span><br><span class="line">⑤ Permute/Sort：同一 expert 的 token 排到一起</span><br><span class="line">       │</span><br><span class="line">⑥ Grouped GEMM：各 expert 执行 FFN</span><br><span class="line">       │</span><br><span class="line">⑦ Combine：结果送回 home rank，并按 topk weight 归并</span><br><span class="line">       │</span><br><span class="line">⑧ 输出 hidden states [T, H]</span><br></pre></td></tr></table></figure>
+
+<p>注意输入和最终输出通常仍是 <code>[T, H]</code>，但中间为了 Top-K 会临时扩张为约<br><code>T×K</code> 个 assignments，还会因为 kernel 对齐而 padding。</p>
+<hr>
+<h2 id="7-通信量怎样手算"><a href="#7-通信量怎样手算" class="headerlink" title="7. 通信量怎样手算"></a>7. 通信量怎样手算</h2><p>假设：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">本 rank 有 T = 1024 个 token</span><br><span class="line">hidden_size H = 4096</span><br><span class="line">dtype = BF16 = 2 Byte</span><br><span class="line">TopK = 2</span><br><span class="line">其中 75% assignment 需要发到远端</span><br></pre></td></tr></table></figure>
+
+<p>仅 hidden payload 的 dispatch 量近似为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">1024 × 2 × 75% × 4096 × 2 Byte</span><br><span class="line">= 12,582,912 Byte</span><br><span class="line">≈ 12 MiB</span><br></pre></td></tr></table></figure>
+
+<p>combine 的 expert output 通常也是 hidden vector，因此量级相近。实际还要加：</p>
+<ul>
+<li>expert id；</li>
+<li>top-k weight；</li>
+<li>source/home rank；</li>
+<li>token offset；</li>
+<li>对齐 padding；</li>
+<li>通信协议头和控制消息。</li>
+</ul>
+<p>这个估算能回答一个重要问题：优化 4 Byte 的 metadata，通常没有优化<br>几千维 hidden vector 的收益大；但在 decode 小 batch 下，固定 metadata 和<br>同步延迟又可能成为主导。</p>
+<hr>
+<h2 id="8-一个可以在-CPU-上运行的路由模拟器"><a href="#8-一个可以在-CPU-上运行的路由模拟器" class="headerlink" title="8. 一个可以在 CPU 上运行的路由模拟器"></a>8. 一个可以在 CPU 上运行的路由模拟器</h2><p>下面代码不需要 GPU，也不实现真实通信；它只展示“谁应该发给谁”。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">from</span> collections <span class="keyword">import</span> defaultdict</span><br><span class="line"></span><br><span class="line"><span class="comment"># 4 个 expert 均匀放到 2 个 rank。</span></span><br><span class="line">expert_to_rank = {</span><br><span class="line">    <span class="number">0</span>: <span class="number">0</span>,</span><br><span class="line">    <span class="number">1</span>: <span class="number">0</span>,</span><br><span class="line">    <span class="number">2</span>: <span class="number">1</span>,</span><br><span class="line">    <span class="number">3</span>: <span class="number">1</span>,</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line"><span class="comment"># (home_rank, token_name, topk_experts)</span></span><br><span class="line">tokens = [</span><br><span class="line">    (<span class="number">0</span>, <span class="string">"A"</span>, [<span class="number">3</span>, <span class="number">1</span>]),</span><br><span class="line">    (<span class="number">0</span>, <span class="string">"B"</span>, [<span class="number">0</span>, <span class="number">2</span>]),</span><br><span class="line">    (<span class="number">1</span>, <span class="string">"C"</span>, [<span class="number">1</span>, <span class="number">3</span>]),</span><br><span class="line">    (<span class="number">1</span>, <span class="string">"D"</span>, [<span class="number">2</span>, <span class="number">0</span>]),</span><br><span class="line">]</span><br><span class="line"></span><br><span class="line">send_buckets = defaultdict(<span class="built_in">list</span>)</span><br><span class="line"><span class="keyword">for</span> home_rank, token, experts <span class="keyword">in</span> tokens:</span><br><span class="line">    <span class="keyword">for</span> expert_id <span class="keyword">in</span> experts:</span><br><span class="line">        dst_rank = expert_to_rank[expert_id]</span><br><span class="line">        send_buckets[(home_rank, dst_rank)].append((token, expert_id))</span><br><span class="line"></span><br><span class="line"><span class="keyword">for</span> (src, dst), assignments <span class="keyword">in</span> <span class="built_in">sorted</span>(send_buckets.items()):</span><br><span class="line">    <span class="built_in">print</span>(<span class="string">f"rank <span class="subst">{src}</span> -&gt; rank <span class="subst">{dst}</span>: <span class="subst">{assignments}</span>"</span>)</span><br></pre></td></tr></table></figure>
+
+<p>预期输出：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">rank 0 -&gt; rank 0: [('A', 1), ('B', 0)]</span><br><span class="line">rank 0 -&gt; rank 1: [('A', 3), ('B', 2)]</span><br><span class="line">rank 1 -&gt; rank 0: [('C', 1), ('D', 0)]</span><br><span class="line">rank 1 -&gt; rank 1: [('C', 3), ('D', 2)]</span><br></pre></td></tr></table></figure>
+
+<p>真实 DeepEP/vLLM 做的事情更复杂、更并行，但路由表的核心含义就是这四个桶。</p>
+<hr>
+<h2 id="9-对照本地-vLLM-代码"><a href="#9-对照本地-vLLM-代码" class="headerlink" title="9. 对照本地 vLLM 代码"></a>9. 对照本地 vLLM 代码</h2><p>以当前 <code>~/codes/vllm_comm</code> 为例：</p>
+<table>
+<thead>
+<tr>
+<th>概念</th>
+<th>代码入口</th>
+<th>初读时看什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>AG+RS dispatch/combine</td>
+<td><code>vllm/distributed/device_communicators/all2all.py</code></td>
+<td><code>all_gatherv</code> 与 <code>reduce_scatterv</code></td>
+</tr>
+<tr>
+<td>DeepEP HT</td>
+<td><code>.../prepare_finalize/deepep_ht.py</code></td>
+<td><code>get_dispatch_layout</code>、<code>buffer.dispatch</code>、handle</td>
+</tr>
+<tr>
+<td>expert 映射</td>
+<td><code>.../expert_map_manager.py</code></td>
+<td><code>determine_expert_map</code> 里 <code>-1</code> 的含义</td>
+</tr>
+<tr>
+<td>expert 计算</td>
+<td><code>.../experts/deep_gemm_moe.py</code></td>
+<td>workspace、对齐、两次 GEMM</td>
+</tr>
+<tr>
+<td>EPLB</td>
+<td><code>vllm/distributed/eplb/policy/default.py</code></td>
+<td>复制热点 expert、分组装箱</td>
+</tr>
+</tbody></table>
+<p>不要一开始逐行读 Triton/CUDA kernel。先在 Python 层回答：</p>
+<ol>
+<li>输入 tensor 的 shape/dtype 是什么？</li>
+<li>哪个函数改变了布局？</li>
+<li>哪个函数发生跨 rank 通信？</li>
+<li>哪个 handle/offset 用于恢复原顺序？</li>
+<li>输出何时才能安全被下一条 CUDA stream 使用？</li>
+</ol>
+<hr>
+<h2 id="10-初学者常见误区"><a href="#10-初学者常见误区" class="headerlink" title="10. 初学者常见误区"></a>10. 初学者常见误区</h2><h3 id="误区-1：expert-是一张-GPU"><a href="#误区-1：expert-是一张-GPU" class="headerlink" title="误区 1：expert 是一张 GPU"></a>误区 1：expert 是一张 GPU</h3><p>不是。一张 GPU 可以保存多个 experts，一个 expert 也可能因 TP 被切分。</p>
+<h3 id="误区-2：All-to-All-表示每个-rank-每次都给所有-rank-发一样多"><a href="#误区-2：All-to-All-表示每个-rank-每次都给所有-rank-发一样多" class="headerlink" title="误区 2：All-to-All 表示每个 rank 每次都给所有 rank 发一样多"></a>误区 2：All-to-All 表示每个 rank 每次都给所有 rank 发一样多</h3><p>不是。MoE 路由是数据相关的，真实 send count 往往不均匀。All-to-All 描述的是<br>“每个 rank 都可能向不同 rank 发送不同数据”的通信模式。</p>
+<h3 id="误区-3：TopK-2-就一定产生两倍网络流量"><a href="#误区-3：TopK-2-就一定产生两倍网络流量" class="headerlink" title="误区 3：TopK=2 就一定产生两倍网络流量"></a>误区 3：TopK=2 就一定产生两倍网络流量</h3><p>assignment 数约变成两倍，但其中一部分可能是本地 expert；量化、去重、布局和<br>实现也会影响真实字节数。它是很好的量级估算，不是无条件精确公式。</p>
+<h3 id="误区-4：通信-API-返回就代表-GPU-可以读结果"><a href="#误区-4：通信-API-返回就代表-GPU-可以读结果" class="headerlink" title="误区 4：通信 API 返回就代表 GPU 可以读结果"></a>误区 4：通信 API 返回就代表 GPU 可以读结果</h3><p>异步系统里“提交成功”和“完成”不同。通常要用 CUDA event、stream wait、<br>future 或 CQ completion 建立完成边界。</p>
+<h3 id="误区-5：带宽高就一定延迟低"><a href="#误区-5：带宽高就一定延迟低" class="headerlink" title="误区 5：带宽高就一定延迟低"></a>误区 5：带宽高就一定延迟低</h3><p>带宽像高速公路每秒能通过多少车，延迟像一辆车从入口到出口要多久。<br>prefill 大消息更看带宽，decode 小消息更容易受固定延迟影响。</p>
+<hr>
+<h2 id="11-读完本章应该能回答"><a href="#11-读完本章应该能回答" class="headerlink" title="11. 读完本章应该能回答"></a>11. 读完本章应该能回答</h2><ol>
+<li><code>[T, H]</code> 中的 <code>T</code>、<code>H</code> 各是什么？</li>
+<li>BF16 的 <code>[1024, 4096]</code> tensor 约占多少字节？</li>
+<li>Dense FFN 与 MoE 的根本差异是什么？</li>
+<li>为什么 64 experts、TopK=2 不等于每个 token 计算 64 个 experts？</li>
+<li>rank、GPU、expert 三者为什么不能画等号？</li>
+<li>dispatch 与 combine 分别搬什么、为什么要搬回来？</li>
+<li>TopK=2 时 token 数和 assignment 数有什么区别？</li>
+<li>DP、TP、EP 分别切分什么？</li>
+</ol>
+<p>下一章：<a href="/notes/2026/07/24/2026-07-24-ep-learning-01-ep-fundamentals/">01_ep_fundamentals.md</a><br>All-to-All 细讲：<a href="/notes/2026/07/24/2026-07-24-ep-learning-01a-moe-all-to-all/">01a_moe_all_to_all.md</a></p>
+<h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/vllm-project/vllm/blob/main/docs/serving/parallelism_scaling.md">vLLM Parallelism and Scaling</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html">NCCL Collective Operations</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/deepseek-ai/DeepEP">DeepEP README</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html">CUDA Programming Guide：Programming Model</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/EP/">EP</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/MoE/">MoE</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/"><span class="level-item">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">57</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/">02b. RDMA 操作、WR/CQ 完成与可靠性</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">29</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">26</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
