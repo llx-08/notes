@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>01. PCIe 基础：从 Lane 到 TLP - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="01. PCIe 基础：从 Lane 到 TLP 1. PCIe 是什么 PCI Express 是点对点、分组交换、全双工的串行互连。它不是所有设备共享一根 并行总线，而是由 Link 和 Switch 组成一棵层次结构。 1.1 PCIe 是物理链路吗 回答“是”不够完整。PCIe 同时规定： 物理链路 ：差分线、lane、连接器、电气信号、速率、链路训练与均衡； 链路协议 ：单跳可靠传输、序"><meta property="og:type" content="blog"><meta property="og:title" content="01. PCIe 基础：从 Lane 到 TLP"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="01. PCIe 基础：从 Lane 到 TLP 1. PCIe 是什么 PCI Express 是点对点、分组交换、全双工的串行互连。它不是所有设备共享一根 并行总线，而是由 Link 和 Switch 组成一棵层次结构。 1.1 PCIe 是物理链路吗 回答“是”不够完整。PCIe 同时规定： 物理链路 ：差分线、lane、连接器、电气信号、速率、链路训练与均衡； 链路协议 ：单跳可靠传输、序"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/pcie_topology.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/pcie_tlp_lifecycle.svg"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-27T09:03:43.088Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/pcie_topology.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/"},"headline":"01. PCIe 基础：从 Lane 到 TLP","image":[],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-27T09:03:43.088Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"01. PCIe 基础：从 Lane 到 TLP 1. PCIe 是什么 PCI Express 是点对点、分组交换、全双工的串行互连。它不是所有设备共享一根 并行总线，而是由 Link 和 Switch 组成一棵层次结构。 1.1 PCIe 是物理链路吗 回答“是”不够完整。PCIe 同时规定： 物理链路 ：差分线、lane、连接器、电气信号、速率、链路训练与均衡； 链路协议 ：单跳可靠传输、序"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>01. PCIe 基础：从 Lane 到 TLP - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="01. PCIe 基础：从 Lane 到 TLP 1. PCIe 是什么 PCI Express 是点对点、分组交换、全双工的串行互连。它不是所有设备共享一根 并行总线，而是由 Link 和 Switch 组成一棵层次结构。 1.1 PCIe 是物理链路吗 回答“是”不够完整。PCIe 同时规定： 物理链路 ：差分线、lane、连接器、电气信号、速率、链路训练与均衡； 链路协议 ：单跳可靠传输、序"><meta property="og:type" content="blog"><meta property="og:title" content="01. PCIe 基础：从 Lane 到 TLP"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="01. PCIe 基础：从 Lane 到 TLP 1. PCIe 是什么 PCI Express 是点对点、分组交换、全双工的串行互连。它不是所有设备共享一根 并行总线，而是由 Link 和 Switch 组成一棵层次结构。 1.1 PCIe 是物理链路吗 回答“是”不够完整。PCIe 同时规定： 物理链路 ：差分线、lane、连接器、电气信号、速率、链路训练与均衡； 链路协议 ：单跳可靠传输、序"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/memory_controller_paths.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/pcie_topology.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/pcie_tlp_lifecycle.svg"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-27T09:56:20.100Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/memory_controller_paths.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/"},"headline":"01. PCIe 基础：从 Lane 到 TLP","image":[],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-27T09:56:20.100Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"01. PCIe 基础：从 Lane 到 TLP 1. PCIe 是什么 PCI Express 是点对点、分组交换、全双工的串行互连。它不是所有设备共享一根 并行总线，而是由 Link 和 Switch 组成一棵层次结构。 1.1 PCIe 是物理链路吗 回答“是”不够完整。PCIe 同时规定： 物理链路 ：差分线、lane、连接器、电气信号、速率、链路训练与均衡； 链路协议 ：单跳可靠传输、序"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
   (function () {
       function switchTab() {
           if (!location.hash) {
@@ -142,7 +142,7 @@ mjx-container[display="true"] + br {
   display: none;
 }
 </style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
-</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-27T09:03:43.088Z" title="7/27/2026, 9:03:43 AM">2026-07-27</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">1 小时读完 (大约7187个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">01. PCIe 基础：从 Lane 到 TLP</h1><div class="content"><h1 id="01-PCIe-基础：从-Lane-到-TLP"><a href="#01-PCIe-基础：从-Lane-到-TLP" class="headerlink" title="01. PCIe 基础：从 Lane 到 TLP"></a>01. PCIe 基础：从 Lane 到 TLP</h1><h2 id="1-PCIe-是什么"><a href="#1-PCIe-是什么" class="headerlink" title="1. PCIe 是什么"></a>1. PCIe 是什么</h2><p>PCI Express 是点对点、分组交换、全双工的串行互连。它不是所有设备共享一根<br>并行总线，而是由 Link 和 Switch 组成一棵层次结构。</p>
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-27T09:56:20.100Z" title="7/27/2026, 9:56:20 AM">2026-07-27</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">1 小时读完 (大约11773个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">01. PCIe 基础：从 Lane 到 TLP</h1><div class="content"><h1 id="01-PCIe-基础：从-Lane-到-TLP"><a href="#01-PCIe-基础：从-Lane-到-TLP" class="headerlink" title="01. PCIe 基础：从 Lane 到 TLP"></a>01. PCIe 基础：从 Lane 到 TLP</h1><h2 id="1-PCIe-是什么"><a href="#1-PCIe-是什么" class="headerlink" title="1. PCIe 是什么"></a>1. PCIe 是什么</h2><p>PCI Express 是点对点、分组交换、全双工的串行互连。它不是所有设备共享一根<br>并行总线，而是由 Link 和 Switch 组成一棵层次结构。</p>
 <h3 id="1-1-PCIe-是物理链路吗"><a href="#1-1-PCIe-是物理链路吗" class="headerlink" title="1.1 PCIe 是物理链路吗"></a>1.1 PCIe 是物理链路吗</h3><p>回答“是”不够完整。PCIe 同时规定：</p>
 <ol>
 <li><strong>物理链路</strong>：差分线、lane、连接器、电气信号、速率、链路训练与均衡；</li>
@@ -229,7 +229,194 @@ mjx-container[display="true"] + br {
 </tr>
 </tbody></table>
 <p>也就是说，DRAM 本身通常不是 PCIe device。CPU 的 DDR/LPDDR 由 CPU memory<br>controller 直接管理；GPU 的 HBM 由 GPU HBM controller 直接管理。PCIe 在设备<br>需要访问 host memory 或另一个 PCIe Endpoint 时承载对应 transaction。</p>
-<h3 id="1-3-PCIe-除了“搬数据”还有什么用途"><a href="#1-3-PCIe-除了“搬数据”还有什么用途" class="headerlink" title="1.3 PCIe 除了“搬数据”还有什么用途"></a>1.3 PCIe 除了“搬数据”还有什么用途</h3><p>常见 PCIe Endpoint 包括：</p>
+<h3 id="1-3-CPU-Memory-Controller-与-GPU-HBM-Controller-到底是什么结构"><a href="#1-3-CPU-Memory-Controller-与-GPU-HBM-Controller-到底是什么结构" class="headerlink" title="1.3 CPU Memory Controller 与 GPU HBM Controller 到底是什么结构"></a>1.3 CPU Memory Controller 与 GPU HBM Controller 到底是什么结构</h3><p>Memory Controller（内存控制器）不是“一块负责复制数据的芯片”，而是<br><strong>DRAM/HBM 前面的请求调度器、协议控制器和物理接口管理者</strong>。它接收较抽象的<br>“读某地址”“写某地址”请求，最后产生 DRAM 芯片所需的命令、地址、数据和严格<br>时序。</p>
+<p><img src="/notes/imgs/memory_controller_paths.svg" alt="CPU DRAM 控制器、PCIe I/O 与 GPU HBM 控制器的分层结构"></p>
+<p>先把几个部件分开：</p>
+<table>
+<thead>
+<tr>
+<th>部件</th>
+<th>输入</th>
+<th>输出</th>
+<th align="right">是否理解“拷贝 8 MiB”</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>CPU/GPU core</td>
+<td>指令</td>
+<td>load/store、cache request</td>
+<td align="right">core 执行循环时理解软件操作</td>
+</tr>
+<tr>
+<td>Copy/DMA engine</td>
+<td>descriptor：地址、长度、方向</td>
+<td>一串 memory transaction</td>
+<td align="right">是</td>
+</tr>
+<tr>
+<td>PCIe Transaction Layer</td>
+<td>单次读写事务</td>
+<td>Memory Read/Write/Completion TLP</td>
+<td align="right">否</td>
+</tr>
+<tr>
+<td>Root Complex/IIO</td>
+<td>PCIe TLP 与 CPU 内部请求</td>
+<td>路由、协议转换后的内部事务</td>
+<td align="right">否</td>
+</tr>
+<tr>
+<td>Memory Controller</td>
+<td>memory read/write request</td>
+<td>DRAM ACT/RD/WR/PRE/REF 等命令</td>
+<td align="right">否</td>
+</tr>
+<tr>
+<td>DDR/HBM DRAM</td>
+<td>DRAM 命令</td>
+<td>存储或返回 bit</td>
+<td align="right">否</td>
+</tr>
+</tbody></table>
+<h4 id="1-3-1-CPU-Integrated-Memory-Controller（IMC）"><a href="#1-3-1-CPU-Integrated-Memory-Controller（IMC）" class="headerlink" title="1.3.1 CPU Integrated Memory Controller（IMC）"></a>1.3.1 CPU Integrated Memory Controller（IMC）</h4><p>现代服务器 CPU 的内存控制器通常集成在 CPU/SoC 内，因此常叫 IMC。一个简化的<br>CPU socket 可以画成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">CPU cores</span><br><span class="line">  → L1/L2 cache</span><br><span class="line">  → LLC + coherence/home agent</span><br><span class="line">  → on-chip mesh/ring/fabric</span><br><span class="line">  → memory-side agent / IMC</span><br><span class="line">      ├─ request queues</span><br><span class="line">      ├─ address decoder</span><br><span class="line">      ├─ read/write scheduler</span><br><span class="line">      ├─ ECC / scrub / refresh</span><br><span class="line">      └─ DDR PHY</span><br><span class="line">          → channel 0 → DIMM → rank/bank/row/column</span><br><span class="line">          → channel 1 → DIMM → rank/bank/row/column</span><br><span class="line">          → ...</span><br></pre></td></tr></table></figure>
+
+<p>PCIe 设备访问 host memory 时，还多一条入口：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">NIC/GPU/NVMe 发 PCIe Memory Request</span><br><span class="line">  → Root Port / Integrated I/O（IIO）</span><br><span class="line">  → 可选 IOMMU 地址转换</span><br><span class="line">  → CPU coherent interconnect / home agent / LLC</span><br><span class="line">  → IMC</span><br><span class="line">  → DDR/LPDDR</span><br></pre></td></tr></table></figure>
+
+<p>不同 CPU 架构的方框名字会不同。例如 Intel 文档常见 IIO、IRP、CHA/Home Agent、<br>M2M、IMC；AMD、Arm、Grace 会使用不同名字。但职责可以归纳成以下几层：</p>
+<ol>
+<li><strong>I/O 接口层</strong>：接收 PCIe/CXL 请求，遵守 PCIe ordering，转换成片上事务；</li>
+<li><strong>一致性与 home 层</strong>：判断 cache line 由谁拥有，是否需要 snoop/失效/回写；</li>
+<li><strong>内存控制层</strong>：把最终 DRAM 请求排队、映射并调度；</li>
+<li><strong>PHY 层</strong>：把数字命令变成 DDR/LPDDR 总线上的电气信号。</li>
+</ol>
+<p>CPU IMC 主要负责：</p>
+<ol>
+<li><strong>地址映射</strong>：把物理地址拆成 channel、DIMM、rank、bank group、bank、row、<br>column。平台可能通过 address interleaving 把连续 cache line 分散到多个 channel。</li>
+<li><strong>请求队列</strong>：读、写以及不同请求者的流量先进入队列。读通常更影响前台延迟，<br>写可以先进入 write buffer 后批量排空。</li>
+<li><strong>调度</strong>：尽量利用 bank-level parallelism 和 row-buffer hit，同时避免请求<br>长期饿死。</li>
+<li><strong>DRAM 时序</strong>：满足 <code>tRCD</code>、<code>tRP</code>、<code>tRAS</code> 等约束；这些不是 CPU 指令能随意<br>跳过的等待时间。</li>
+<li><strong>刷新与维护</strong>：DRAM 会漏电，需要 refresh；平台还可能执行 patrol scrub。</li>
+<li><strong>ECC/RAS</strong>：生成、检查和纠正 ECC，统计 correctable/uncorrectable error。</li>
+<li><strong>QoS/仲裁</strong>：CPU core、GPU、NIC、加速器同时访问时分配有限带宽。</li>
+</ol>
+<p>一个 cache line 不一定每次都到 IMC：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">CPU load</span><br><span class="line">  ├─ L1/L2/LLC hit → 不访问 DRAM</span><br><span class="line">  └─ cache miss    → 才进入 IMC/DRAM</span><br></pre></td></tr></table></figure>
+
+<p>同理，一些平台的 I/O write 可能先进入 LLC 或 I/O write cache，再在稍后写回<br>DRAM。因此“NIC 已把数据 DMA 到 host memory”不总等于“这一时刻 DRAM 芯片已经<br>收到最后一个写命令”；软件可见性和一致性由平台规定的 ordering/coherence 语义<br>保证，而不是要求应用观察每条 DRAM 命令。</p>
+<h4 id="1-3-2-GPU-HBM-Memory-Controller"><a href="#1-3-2-GPU-HBM-Memory-Controller" class="headerlink" title="1.3.2 GPU HBM Memory Controller"></a>1.3.2 GPU HBM Memory Controller</h4><p>GPU HBM controller 是 GPU 自己的内存控制器。一个简化结构是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">SM load/store units、Tensor Core 周边数据请求</span><br><span class="line">Copy Engine / PCIe-NVLink inbound request</span><br><span class="line">                │</span><br><span class="line">                ▼</span><br><span class="line">GPU address translation + on-chip NoC/crossbar</span><br><span class="line">                │</span><br><span class="line">                ▼</span><br><span class="line">       shared L2 cache / L2 slices</span><br><span class="line">                │</span><br><span class="line">                ▼</span><br><span class="line">     HBM memory partitions/controllers</span><br><span class="line">       ├─ request queues / scheduler</span><br><span class="line">       ├─ address mapping</span><br><span class="line">       ├─ ECC / refresh / RAS</span><br><span class="line">       └─ HBM PHY</span><br><span class="line">                │</span><br><span class="line">                ▼</span><br><span class="line">HBM stack → channel/pseudo-channel → bank → row/column</span><br></pre></td></tr></table></figure>
+
+<p>HBM（High Bandwidth Memory）也是 DRAM，只是：</p>
+<ul>
+<li>多颗 DRAM die 垂直堆叠；</li>
+<li>通过 TSV 等封装互连提供非常宽的接口；</li>
+<li>HBM stack 与 GPU 位于同一封装/模组附近；</li>
+<li>使用多个 channel、pseudo-channel 和 bank 并行提供高带宽。</li>
+</ul>
+<p>CUDA 所说的 device memory/global memory，物理上通常由 GPU 的 HBM/GDDR 承载。<br>例如 A100 官方架构文档明确说明，CUDA global/local memory 所在的 device memory<br>使用 HBM2，读写由共享 L2 缓存。</p>
+<p>GPU HBM controller 与 CPU IMC 的总体职责相似，但不是同一块硬件：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>CPU IMC</th>
+<th>GPU HBM Controller</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>直接管理</td>
+<td>CPU attached DDR/LPDDR</td>
+<td>GPU attached HBM/GDDR</td>
+</tr>
+<tr>
+<td>所在位置</td>
+<td>CPU/SoC 内部</td>
+<td>GPU die 内部</td>
+</tr>
+<tr>
+<td>主要请求者</td>
+<td>CPU core、I/O agent、其他 socket</td>
+<td>GPU SM、copy engine、PCIe/NVLink ingress</td>
+</tr>
+<tr>
+<td>cache 前端</td>
+<td>CPU LLC/coherence/home agent</td>
+<td>GPU shared L2/partition</td>
+</tr>
+<tr>
+<td>物理通道</td>
+<td>DDR/LPDDR channels</td>
+<td>HBM stacks/channels/pseudo-channels</td>
+</tr>
+<tr>
+<td>由谁设计</td>
+<td>Intel/AMD/Arm/NVIDIA Grace 等 CPU 厂商</td>
+<td>NVIDIA/AMD 等 GPU 厂商</td>
+</tr>
+</tbody></table>
+<p>所以：</p>
+<ul>
+<li>x86 机器的 CPU memory controller 由 Intel/AMD CPU 和主板内存拓扑决定；</li>
+<li>NVIDIA 独立 GPU 的 HBM controller 是 NVIDIA GPU 架构的一部分；</li>
+<li>Grace Blackwell 中 Grace 的 LPDDR controller 与 Blackwell 的 HBM controller<br>仍是两个控制器，只是 CPU–GPU 之间使用更紧密的 NVLink-C2C/一致性机制。</li>
+</ul>
+<h4 id="1-3-3-GPU-访问-CPU-pinned-memory-时，谁负责什么"><a href="#1-3-3-GPU-访问-CPU-pinned-memory-时，谁负责什么" class="headerlink" title="1.3.3 GPU 访问 CPU pinned memory 时，谁负责什么"></a>1.3.3 GPU 访问 CPU pinned memory 时，谁负责什么</h4><p>以 blade-kvt 的 GPU copy kernel 从 pinned host memory 读取数据为例：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">GPU SM 执行 load(mapped host pointer)</span><br><span class="line">  → GPU MMU / 地址转换</span><br><span class="line">  → GPU PCIe 或 NVLink-C2C 接口</span><br><span class="line">  → CPU Root Complex / coherent I/O agent</span><br><span class="line">  → CPU home/coherence/LLC 路径</span><br><span class="line">  → CPU IMC</span><br><span class="line">  → host DRAM</span><br><span class="line">  → 数据沿互连返回 GPU</span><br><span class="line">  → GPU SM 执行 store(device pointer)</span><br><span class="line">  → GPU L2</span><br><span class="line">  → GPU HBM controller</span><br><span class="line">  → HBM</span><br></pre></td></tr></table></figure>
+
+<p>因此，你问“图里的 memory controller 会负责这部分功能吗”，答案是：</p>
+<blockquote>
+<p><strong>会负责两端最终的 DRAM/HBM 访问，但不会执行整个 copy kernel。</strong></p>
+</blockquote>
+<p>具体分工：</p>
+<ul>
+<li>GPU SM：执行 <code>load src; store dst</code> 的 kernel 指令；</li>
+<li>GPU/CPU 地址转换单元：把虚拟地址/I/O 地址变成可路由的地址；</li>
+<li>PCIe/NVLink-C2C：在 CPU 与 GPU 之间搬 transaction；</li>
+<li>CPU memory controller：服务 pinned host DRAM 的最终读写；</li>
+<li>GPU HBM controller：服务 GPU device memory 的最终读写；</li>
+<li>pinned 属性：保证 host page 不被换出/迁移，并可建立 DMA/GPU mapping；</li>
+<li>pinned 本身不会绕过 CPU IMC，也不会让 host DRAM 变成 HBM。</li>
+</ul>
+<p>如果不是 GPU copy kernel，而是 <code>cudaMemcpyAsync</code> 由 GPU Copy Engine 搬运，则<br>主动执行者从 GPU SM 变成 Copy Engine；两端 memory controller 的职责仍不变。</p>
+<h4 id="1-3-4-如何从性能现象判断卡在哪一层"><a href="#1-3-4-如何从性能现象判断卡在哪一层" class="headerlink" title="1.3.4 如何从性能现象判断卡在哪一层"></a>1.3.4 如何从性能现象判断卡在哪一层</h4><table>
+<thead>
+<tr>
+<th>现象</th>
+<th>更可能检查</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>单核 <code>memcpy</code> 慢</td>
+<td>core/cache、频率、NUMA、本地 DRAM 延迟</td>
+</tr>
+<tr>
+<td>多核带宽到平台上限</td>
+<td>IMC、memory channel 数、DIMM population</td>
+</tr>
+<tr>
+<td>GPU 访问 mapped pinned memory 慢</td>
+<td>PCIe/NVLink-C2C、NUMA、small transaction、host DRAM</td>
+</tr>
+<tr>
+<td>GPUDirect RDMA 慢但 host DRAM 带宽空闲</td>
+<td>GPU–NIC PCIe path、MPS/MRRS、ACS、read latency</td>
+</tr>
+<tr>
+<td>GPU kernel 读 HBM 慢</td>
+<td>L2 hit、coalescing、HBM partition camping、HBM 带宽</td>
+</tr>
+<tr>
+<td>ECC error 增长</td>
+<td>对应 CPU IMC/DIMM 或 GPU HBM/RAS 日志</td>
+</tr>
+</tbody></table>
+<p>“内存带宽瓶颈”也要说明是哪种：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">CPU IMC 带宽</span><br><span class="line">GPU HBM 带宽</span><br><span class="line">PCIe/NVLink 带宽</span><br><span class="line">PCIe Switch upstream 带宽</span><br><span class="line">远端 NUMA interconnect 带宽</span><br></pre></td></tr></table></figure>
+
+<p>它们是不同资源，不能只看一个 <code>memory bandwidth</code> 数字。</p>
+<h3 id="1-4-PCIe-除了“搬数据”还有什么用途"><a href="#1-4-PCIe-除了“搬数据”还有什么用途" class="headerlink" title="1.4 PCIe 除了“搬数据”还有什么用途"></a>1.4 PCIe 除了“搬数据”还有什么用途</h3><p>常见 PCIe Endpoint 包括：</p>
 <ul>
 <li>GPU、AI accelerator、FPGA；</li>
 <li>Ethernet/InfiniBand/RoCE NIC、DPU；</li>
@@ -325,6 +512,82 @@ mjx-container[display="true"] + br {
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">较短路径：</span><br><span class="line">GPU → PCIe Switch → RNIC</span><br><span class="line"></span><br><span class="line">较长路径：</span><br><span class="line">GPU → Switch → Root Complex/NUMA interconnect</span><br><span class="line">    → 另一个 Root Complex/Switch → RNIC</span><br></pre></td></tr></table></figure>
 
 <p>第一条路径通常延迟更低、共享环节更少。但“在同一个 switch 下”只是重要条件，<br>还要检查 ACS/IOMMU、GPU peer-memory/dma-buf、驱动和平台支持。</p>
+<p>这确实是常说“某块 GPU 对某块 RDMA 网卡更有亲和性”的主要硬件原因之一。不过，<br><strong>亲和性不是 GPU 和 RNIC 之间写死的一根专线，也不一定是一对一关系</strong>。它表示<br>两者在当前机器的 I/O topology 上更接近，通常需要经过更少的 switch、host<br>bridge、NUMA interconnect，并与更少的其他设备共享上行链路。</p>
+<p>Linux/NVIDIA 工具里常见的距离大致可以这样理解：</p>
+<table>
+<thead>
+<tr>
+<th><code>nvidia-smi topo -m</code></th>
+<th>GPU 与 NIC 之间的典型路径</th>
+<th>初学者直觉</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>PIX</code></td>
+<td>最多经过一个 PCIe bridge/switch</td>
+<td>很近，常是理想 P2P 路径</td>
+</tr>
+<tr>
+<td><code>PXB</code></td>
+<td>经过多个 PCIe bridge，但不经过 CPU host bridge</td>
+<td>仍在 PCIe fabric 内</td>
+</tr>
+<tr>
+<td><code>PHB</code></td>
+<td>经过同一 CPU socket 的 PCIe Host Bridge</td>
+<td>已到 Root Complex 一侧</td>
+</tr>
+<tr>
+<td><code>NODE</code></td>
+<td>经过同一 NUMA node 内的 PCIe Host Bridge/互连</td>
+<td>NUMA 本地，但不一定同 switch</td>
+</tr>
+<tr>
+<td><code>SYS</code></td>
+<td>跨 NUMA node/socket 的系统互连</td>
+<td>通常最远、共享环节更多</td>
+</tr>
+</tbody></table>
+<p>上表是拓扑分类，不是任何 workload 都严格遵守的固定性能排序。真实性能还受：</p>
+<ul>
+<li>GPU、RNIC 和平台是否支持 PCIe P2P；</li>
+<li>ACS 是否把本可直接转发的 P2P TLP 强制送向上游 Root Complex；</li>
+<li>IOMMU 是否处于平台支持的 passthrough/一一映射方式；</li>
+<li><code>nvidia-peermem</code> 或 dma-buf 等 GPU memory 注册机制；</li>
+<li>PCIe generation、link width、MPS/MRRS、switch oversubscription；</li>
+<li>驱动、固件、BIOS 和安全隔离策略。</li>
+</ul>
+<p>例如，GPU 与 RNIC 同挂一个 PCIe Switch 时，理想路由是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">GPU downstream port</span><br><span class="line">        │  Memory Read/Write TLP</span><br><span class="line">        ▼</span><br><span class="line">    PCIe Switch ─────────► RNIC downstream port</span><br></pre></td></tr></table></figure>
+
+<p>Switch 根据目标 PCIe address 在两个 downstream port 之间转发，不需要先把<br>payload 写进 host DRAM。但是，如果 ACS 的策略要求 <code>P2P Request Redirect</code>，<br>packet 仍可能被送向 upstream port；所以“同 switch”是非常有利的拓扑条件，<br>不是单独足以证明 GPUDirect RDMA 一定成功或一定最快的条件。</p>
+<h5 id="NUMA-是什么"><a href="#NUMA-是什么" class="headerlink" title="NUMA 是什么"></a>NUMA 是什么</h5><p>NUMA 是 <strong>Non-Uniform Memory Access（非一致内存访问）</strong>。现代多 socket 或大型<br>SoC 服务器不会把所有 CPU core、DRAM 和 PCIe Root Port 都接在一个零距离中心点，<br>而是划分为多个 NUMA node。每个 node 通常有：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">NUMA node 0</span><br><span class="line">  ├─ 一组 CPU cores</span><br><span class="line">  ├─ 本地 LLC/home/coherence agent</span><br><span class="line">  ├─ 本地 memory controllers → 本地 DRAM</span><br><span class="line">  └─ 本地 PCIe Root Ports → GPU/NIC/NVMe</span><br><span class="line"></span><br><span class="line">NUMA node 1</span><br><span class="line">  ├─ 另一组 CPU cores</span><br><span class="line">  ├─ 另一组 memory controllers → 另一组 DRAM</span><br><span class="line">  └─ 另一组 PCIe Root Ports → 其他 GPU/NIC/NVMe</span><br><span class="line"></span><br><span class="line">node 0 ◄──── UPI/QPI/Infinity Fabric/片上系统互连 ────► node 1</span><br></pre></td></tr></table></figure>
+
+<p>node 0 的 CPU 读取 node 0 DRAM 是 <strong>local access</strong>；读取 node 1 DRAM 是<br><strong>remote access</strong>。remote access 需要跨 socket/NUMA interconnect，一般延迟<br>更高、有效带宽更低，并与其他跨 node 流量共享链路。因此叫“不一致”：同样是一条<br>load，目标物理页位于不同 node 时，代价不同。</p>
+<p>NUMA 对 GPU/RNIC 通信有三层影响：</p>
+<ol>
+<li><strong>I/O 路径</strong>：GPU 和 RNIC 属于不同 NUMA node 时，P2P traffic 可能跨系统<br>interconnect；即使 payload 不落 host DRAM，这条路径也更长。</li>
+<li><strong>控制路径</strong>：提交 WQE、写 doorbell、poll CQ 的 CPU thread 离 RNIC 太远，<br>MMIO 和 queue memory access 也可能跨 NUMA。</li>
+<li><strong>host-staging 路径</strong>：如果通信先落 pinned host buffer，那么 buffer 所在<br>node 决定哪一个 memory controller/DRAM 被访问；错误的 first-touch 或绑核<br>会多走一次远端 NUMA 链路。</li>
+</ol>
+<h5 id="target-p（GB200）上的实际例子"><a href="#target-p（GB200）上的实际例子" class="headerlink" title="target_p（GB200）上的实际例子"></a><code>target_p</code>（GB200）上的实际例子</h5><p>在 <code>target_p</code> 上运行 <code>nvidia-smi topo -m</code>，可以看到：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">GPU0/GPU1 → NIC0/NIC1 : NODE</span><br><span class="line">GPU0/GPU1 → NIC2/NIC3 : SYS</span><br><span class="line"></span><br><span class="line">GPU2/GPU3 → NIC0/NIC1 : SYS</span><br><span class="line">GPU2/GPU3 → NIC2/NIC3 : NODE</span><br></pre></td></tr></table></figure>
+
+<p>对应的 NUMA 信息是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">GPU0/GPU1 与 mlx5_bond_0/1：NUMA node 0，CPU 0-71</span><br><span class="line">GPU2/GPU3 与 mlx5_bond_2/3：NUMA node 1，CPU 72-143</span><br></pre></td></tr></table></figure>
+
+<p>所以在这台机器上，一个合理的默认选择是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">GPU0/1 优先使用 NIC0/1</span><br><span class="line">GPU2/3 优先使用 NIC2/3</span><br></pre></td></tr></table></figure>
+
+<p>这里的本地关系显示为 <code>NODE</code>，并不是 <code>PIX</code>。这恰好说明：</p>
+<blockquote>
+<p>“GPU–RNIC 亲和性”是拓扑局部性的总称；同一 switch 是很强的一种亲和性，<br>同一 NUMA node 但不同 host-bridge path 也可以形成相对亲和性。</p>
+</blockquote>
+<p>排查时可一起使用：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">nvidia-smi topo -m</span><br><span class="line">numactl --hardware</span><br><span class="line">lspci -Dtv</span><br><span class="line"><span class="built_in">cat</span> /sys/bus/pci/devices/&lt;BDF&gt;/numa_node</span><br></pre></td></tr></table></figure>
+
+<p><code>nvidia-smi topo -m</code> 用来比较 GPU/NIC 的相对距离；<code>numactl --hardware</code> 看<br>CPU 与 memory node；sysfs 的 <code>numa_node</code> 看某个 PCI function 挂在哪个 node；<br><code>lspci -tv</code> 看 bridge/switch 父子关系。四者结合比只看一个“affinity”标签可靠。</p>
 <h3 id="2-2-BDF：它是设备在-PCIe-地址体系中的“门牌号”"><a href="#2-2-BDF：它是设备在-PCIe-地址体系中的“门牌号”" class="headerlink" title="2.2 BDF：它是设备在 PCIe 地址体系中的“门牌号”"></a>2.2 BDF：它是设备在 PCIe 地址体系中的“门牌号”</h3><p>一个设备用 BDF 标识：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Domain:Bus:Device.Function</span><br><span class="line">0000:65:00.0</span><br></pre></td></tr></table></figure>
 
@@ -655,6 +918,71 @@ mjx-container[display="true"] + br {
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">PCIe Completion TLP</span><br><span class="line">  = 回答 Non-Posted PCIe Request，例如 Memory Read</span><br><span class="line"></span><br><span class="line">设备 CQE / CUDA event / RDMA completion</span><br><span class="line">  = 上层设备或软件定义的“整个 operation 到某个阶段完成”</span><br></pre></td></tr></table></figure>
 
 <p>所以，“Memory Write 是 Posted，不需要 Completion TLP”不等于“应用永远收不到<br>完成通知”。设备仍可在整个 DMA/网络 operation 完成后生成自己的 CQE。</p>
+<h4 id="4-1-1-到底拆的是-DMA-行为，还是数据包"><a href="#4-1-1-到底拆的是-DMA-行为，还是数据包" class="headerlink" title="4.1.1 到底拆的是 DMA 行为，还是数据包"></a>4.1.1 到底拆的是 DMA 行为，还是数据包</h4><p>最准确的说法是：</p>
+<blockquote>
+<p>软件提交的一个逻辑 DMA operation 通常仍是一个 descriptor/WQE；设备的 DMA<br>engine 在执行它时，把这段地址范围分解为许多 PCIe transaction，而每个<br>transaction 再表示成一个或多个 TLP。因此从执行角度看是“把 DMA 操作分解”，<br>从线上数据角度看是“把 payload/请求范围 packetize 成多个 TLP”。</p>
+</blockquote>
+<p>这通常不是驱动把一个 8 MiB DMA 重新提交成几万个互相独立的软件任务。常见过程是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">软件：1 个 descriptor {address, length=8 MiB, direction, ...}</span><br><span class="line">                         │</span><br><span class="line">                         ▼</span><br><span class="line">设备 DMA engine：地址生成、边界检查、维护 outstanding request</span><br><span class="line">                         │</span><br><span class="line">                         ▼</span><br><span class="line">PCIe Transaction Layer：生成许多 MWr/MRd/CplD TLP</span><br><span class="line">                         │</span><br><span class="line">                         ▼</span><br><span class="line">Data Link / Physical Layer：逐跳保护、串行化并发送</span><br></pre></td></tr></table></figure>
+
+<h5 id="DMA-Write-怎样拆"><a href="#DMA-Write-怎样拆" class="headerlink" title="DMA Write 怎样拆"></a>DMA Write 怎样拆</h5><p>假设 RNIC 要向 GPU memory 写 8 KiB。DMA engine 会沿目标地址递增，并按以下约束<br>决定每个 Memory Write（MWr）TLP 能带多少 data：</p>
+<ol>
+<li>单个 TLP payload 不能超过路径允许的 <strong>MPS</strong>；</li>
+<li>一个 Memory Request 不能跨越 <strong>4 KiB address boundary</strong>；</li>
+<li>首尾地址可能不是 DW/MPS 对齐，需要用 Byte Enable 和较短的首尾 TLP；</li>
+<li>设备还可能因内部 buffer、ordering、实现策略生成更小的 TLP。</li>
+</ol>
+<p>若地址对齐、MPS 为 256 B，8 KiB 至少需要：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">8192 B / 256 B = 32 个 MWr TLP</span><br><span class="line"></span><br><span class="line">MWr #0  {addr=A+0,    length=256 B, payload[0:256]}</span><br><span class="line">MWr #1  {addr=A+256,  length=256 B, payload[256:512]}</span><br><span class="line">...</span><br><span class="line">MWr #31 {addr=A+7936, length=256 B, payload[7936:8192]}</span><br></pre></td></tr></table></figure>
+
+<p>如果起始地址距离下一个 4 KiB boundary 只有 128 B，则不能让第一个 TLP横跨该<br>边界。一个简化分法是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">128 B + 31 × 256 B + 128 B = 8192 B</span><br></pre></td></tr></table></figure>
+
+<p>也就是至少 33 个 TLP。注意这是教学用下界；不能只凭长度和 MPS 断言设备一定生成<br>完全相同的 packet 序列。</p>
+<h5 id="DMA-Read-怎样拆"><a href="#DMA-Read-怎样拆" class="headerlink" title="DMA Read 怎样拆"></a>DMA Read 怎样拆</h5><p>Read 是两段式，必须把“请求”与“返回数据”分开：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">Requester（例如 RNIC）                  Completer（Root Complex/GPU）</span><br><span class="line">       │  MRd TLP：地址、长度、Tag；通常无 payload   │</span><br><span class="line">       ├────────────────────────────────────────────►│</span><br><span class="line">       │                                             │ 读取目标数据</span><br><span class="line">       │  CplD TLP：Tag、状态、返回的 data           │</span><br><span class="line">       ◄────────────────────────────────────────────┤</span><br><span class="line">       │  按 Tag/地址组合返回片段                     │</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>DMA engine 按 <strong>MRRS</strong> 和 4 KiB boundary 拆成 Memory Read Request；</li>
+<li>Completer 再按 MPS、Read Completion Boundary、可用数据和实现策略，把一次<br>read request 的返回值拆成一个或多个 Completion with Data（CplD）TLP；</li>
+<li>Tag 把多个并发 read 的 CplD 对回原请求。</li>
+</ul>
+<p>例如，8 KiB、MRRS=512 B、地址对齐时，requester 至少发 16 个 MRd Request；<br>若返回方向的 CplD payload 最多为 256 B，则至少返回 32 个 CplD。实际数量还可能<br>因 4 KiB boundary、Read Completion Boundary 和实现策略变多。</p>
+<p>因此 Write 与 Read 的“拆包”不同：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Write DMA</th>
+<th>Read DMA</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>请求 TLP</td>
+<td>MWr，直接携带 data</td>
+<td>MRd，通常只带地址/长度/Tag</td>
+</tr>
+<tr>
+<td>PCIe Completion</td>
+<td>Posted write 无 Cpl TLP</td>
+<td>返回一个或多个 CplD</td>
+</tr>
+<tr>
+<td>主要 size 参数</td>
+<td>MPS</td>
+<td>MRRS 限制请求，MPS/RCB 等影响返回</td>
+</tr>
+<tr>
+<td>DMA 最终完成</td>
+<td>所有片段满足设备定义的完成条件</td>
+<td>所有 CplD 返回并重组</td>
+</tr>
+</tbody></table>
+<p>doorbell 的小 MWr TLP、读取 descriptor 的 MRd/CplD、搬 payload 的 TLP，以及最终<br>写 CQE 的 MWr TLP，也都是不同 transaction；不要把它们误认为同一个“大 TLP”。</p>
+<h5 id="PCIe-TLP-与网络-packet-不是一一对应"><a href="#PCIe-TLP-与网络-packet-不是一一对应" class="headerlink" title="PCIe TLP 与网络 packet 不是一一对应"></a>PCIe TLP 与网络 packet 不是一一对应</h5><p>RNIC 发送 RoCE/TCP packet 时，常见的两边是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">host/GPU memory</span><br><span class="line">  → 多个 PCIe MRd/CplD（RNIC DMA 取数据）</span><br><span class="line">  → RNIC 组装 Ethernet/RoCE packet</span><br><span class="line">  → 网线</span><br><span class="line"></span><br><span class="line">网线</span><br><span class="line">  → RNIC 解析 Ethernet/RoCE packet</span><br><span class="line">  → 多个 PCIe MWr（RNIC DMA 写目标 memory）</span><br><span class="line">  → host/GPU memory</span><br></pre></td></tr></table></figure>
+
+<p>一个网络 packet 可能对应多个 PCIe TLP；一个大 WQE 又可能产生多个网络 packet。<br>两层的 MTU、header、重传和完成语义各自独立，所以不能把“网络抓到一个包”直接<br>等同于“PCIe 上只有一个 TLP”。</p>
 <h3 id="4-2-TLP-的基本结构"><a href="#4-2-TLP-的基本结构" class="headerlink" title="4.2 TLP 的基本结构"></a>4.2 TLP 的基本结构</h3><p>下面先讨论 PCIe Gen3～Gen5 常见的 Non-FLIT 模式。一个 Transaction Layer<br>看到的 TLP 可以概括为：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">┌──────────────┬────────────────┬──────────────────┬──────────────┐</span><br><span class="line">│ TLP Prefix   │ TLP Header     │ Data Payload     │ TLP Digest   │</span><br><span class="line">│ optional     │ 3 DW or 4 DW   │ 0～MPS, optional │ ECRC, optional│</span><br><span class="line">└──────────────┴────────────────┴──────────────────┴──────────────┘</span><br></pre></td></tr></table></figure>
 
@@ -820,8 +1148,21 @@ mjx-container[display="true"] + br {
 <li>LCRC 与 ECRC 的保护范围有什么区别？</li>
 <li>为什么不能把 x16 理解为“16 条 lane 各发送一个独立 TLP”？</li>
 <li>为什么 Gen6 FLIT mode 不能直接套用传统 <code>Sequence + TLP + LCRC</code> 图？</li>
+<li>CPU IMC 为什么不等于 DMA/copy engine？GPU copy kernel 访问 pinned host<br>memory 时，CPU IMC 和 GPU HBM controller 分别负责什么？</li>
+<li>HBM 为什么既是 DRAM，又常被 CUDA 称为 device/global memory 的物理载体？</li>
+<li><code>PIX</code>、<code>NODE</code>、<code>SYS</code> 分别说明了怎样的 GPU–NIC 路径？亲和性为什么不一定<br>是 GPU 与 RNIC 的固定一对一绑定？</li>
+<li>NUMA local access 与 remote access 的路径为什么不同？这会怎样影响<br>GPUDirect RDMA、doorbell/CQ 和 pinned host staging？</li>
+<li>一个 8 KiB DMA Write 在 MPS=256 B 时为什么至少有 32 个 MWr TLP？什么情况<br>会使数量更多？</li>
+<li>Memory Read 为什么既要受 MRRS 影响，又可能返回多个受 MPS/RCB 影响的 CplD？</li>
+<li>为什么一个 RoCE packet 与 PCIe TLP 通常不是一一对应？</li>
 </ol>
 <h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://www.intel.com/content/www/us/en/developer/articles/technical/ddio-analysis-performance-monitoring.html">Intel：CPU Uncore 中的 IIO、CHA/LLC、IMC 与 UPI</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/nvidia-ampere-architecture-whitepaper.pdf">NVIDIA A100 Architecture Whitepaper：L2 与 HBM2 device memory</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.kernel.org/admin-guide/mm/numa_memory_policy.html">Linux kernel：NUMA memory policy 与 node</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/gpudirect-rdma/">NVIDIA GPUDirect RDMA：PCIe topology、IOMMU 与平台限制</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/deploy/nvidia-smi/index.html">NVIDIA <code>nvidia-smi</code>：GPU/NIC topology 的 PIX、PXB、PHB、NODE、SYS 定义</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/archive/11.4.0/gds/best-practices-guide/index.html">NVIDIA GPUDirect Storage Best Practices：PCIe Switch、ACS 与 NIC provisioning</a></li>
 <li><a target="_blank" rel="noopener" href="https://pcisig.com/pci-express-technology-overview">PCI-SIG PCI Express Technology Overview</a></li>
 <li><a target="_blank" rel="noopener" href="https://pcisig.com/blog/pci-express-delivering-needed-bandwidth-open-compute-project">PCI-SIG：PCIe 4.0/5.0 lane 与 x16 带宽表</a></li>
 <li><a target="_blank" rel="noopener" href="https://pcisig.com/sites/default/files/files/PCI-SIG%20Cabling%20Webinar_FINAL.pdf">PCI-SIG：PCIe Link 支持 x1/x2/x4/x8/x16</a></li>
@@ -830,8 +1171,9 @@ mjx-container[display="true"] + br {
 <li><a target="_blank" rel="noopener" href="https://pcisig.com/blog/evolution-pci-express-specification-its-sixth-generation-third-decade-and-still-going-strong">PCI-SIG：PCIe 6.0 FLIT mode</a></li>
 <li><a target="_blank" rel="noopener" href="https://docs.kernel.org/driver-api/pci/index.html">Linux PCI driver API</a></li>
 <li><a target="_blank" rel="noopener" href="https://docs.kernel.org/PCI/pci.html">Linux：How To Write Linux PCI Drivers</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.kernel.org/6.19-rc7/driver-api/pci/pci.html">Linux PCI API：MPS 与 MRRS 配置接口</a></li>
 </ul>
-</div><div class="article-licensing box"><div class="licensing-title"><p>01. PCIe 基础：从 Lane 到 TLP</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/"><span class="level-item">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">58</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">30</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+</div><div class="article-licensing box"><div class="licensing-title"><p>01. PCIe 基础：从 Lane 到 TLP</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"><span class="level-item">02c. RoCE、拥塞控制、PFC/ECN 与重传</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">58</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/">02b. RDMA 操作、WR/CQ 完成与可靠性</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">30</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
             article: {
                 highlight: {
                     clipboard: true,

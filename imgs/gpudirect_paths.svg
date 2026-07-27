@@ -1,45 +1,193 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="940" viewBox="0 0 1600 940" role="img" aria-labelledby="title desc">
+  <title id="title">普通 TCP、通用 Host staging 与 GPUDirect RDMA 数据路径</title>
+  <desc id="desc">三列比较 GPU 数据通过普通 Linux TCP socket、host-staged RDMA 和 GPUDirect RDMA 跨机传输时经过的 GPU memory、host application buffer、kernel socket buffer、RNIC 和网络。</desc>
   <defs>
-    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
-      <path d="M0,0 L9,4.5 L0,9 z" fill="#94a3b8"/>
-    </marker>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity=".12"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#eef3f8"/>
+    </linearGradient>
+    <linearGradient id="tcpHead" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#385aa8"/>
+      <stop offset="1" stop-color="#4e7ac6"/>
+    </linearGradient>
+    <linearGradient id="stageHead" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#a65a19"/>
+      <stop offset="1" stop-color="#d18435"/>
+    </linearGradient>
+    <linearGradient id="gdrHead" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#207a49"/>
+      <stop offset="1" stop-color="#45a369"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#243c56" flood-opacity=".13"/>
     </filter>
+    <marker id="arrowBlue" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0 0L9 4.5L0 9Z" fill="#5572a7"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0 0L9 4.5L0 9Z" fill="#ba722d"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0 0L9 4.5L0 9Z" fill="#338658"/>
+    </marker>
+    <style>
+      .title{font:700 30px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#172b43}
+      .subtitle{font:400 16px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#5c6d81}
+      .panelTitle{font:700 21px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#fff}
+      .panelSub{font:400 13px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#edf4ff}
+      .boxTitle{font:700 16px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#263b53}
+      .body{font:400 13px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#5a6b7f}
+      .small{font:400 12px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#6a7a8d}
+      .arrowLabel{font:600 12px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#53667d}
+      .noteTitle{font:700 16px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#22364e}
+      .note{font:400 13px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;fill:#52657a}
+    </style>
   </defs>
-  <rect width="1200" height="620" rx="18" fill="#f8fafc"/>
-  <text x="32" y="42" font-family="Arial, PingFang SC, sans-serif" font-size="24" font-weight="700" fill="#172033">Host staging 与 GPUDirect RDMA</text>
-<text x="300" y="90" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="20" font-weight="700" fill="#d97706">Host staged</text>
-<rect x="60" y="135" width="210" height="70" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
-  <text x="165" y="175" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Source GPU</text>
-<rect x="390" y="135" width="210" height="70" rx="12" fill="#fff7ed" stroke="#d97706" stroke-width="2" filter="url(#shadow)"/>
-  <text x="495" y="175" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Pinned Host</text>
-<rect x="60" y="365" width="210" height="70" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
-  <text x="165" y="405" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Destination GPU</text>
-<rect x="390" y="365" width="210" height="70" rx="12" fill="#fff7ed" stroke="#d97706" stroke-width="2" filter="url(#shadow)"/>
-  <text x="495" y="405" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Pinned Host</text>
-<line x1="270" y1="170" x2="390" y2="170" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
-<text x="330" y="162" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">D2H</text>
-<line x1="495" y1="205" x2="495" y2="365" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
-<text x="495" y="277" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">NIC / network</text>
-<line x1="390" y1="400" x2="270" y2="400" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
-<text x="330" y="392" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">H2D</text>
-<text x="900" y="90" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="20" font-weight="700" fill="#059669">GPUDirect RDMA</text>
-<rect x="690" y="135" width="210" height="70" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
-  <text x="795" y="165.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Source GPU MR</text>
-  <text x="795" y="184.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">addr + lkey</text>
-<rect x="990" y="135" width="160" height="70" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
-  <text x="1070" y="175" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Source NIC</text>
-<rect x="690" y="365" width="210" height="70" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
-  <text x="795" y="395.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Destination GPU MR</text>
-  <text x="795" y="414.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">raddr + rkey</text>
-<rect x="990" y="365" width="160" height="70" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
-  <text x="1070" y="405" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Destination NIC</text>
-<line x1="900" y1="170" x2="990" y2="170" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
-<text x="945" y="162" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">PCIe</text>
-<line x1="1070" y1="205" x2="1070" y2="365" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
-<text x="1070" y="277" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">RDMA fabric</text>
-<line x1="990" y1="400" x2="900" y2="400" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
-<text x="945" y="392" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">PCIe</text>
-<text x="600" y="520" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" font-weight="400" fill="#172033">CPU 都参与控制面；差别在于 payload 是否经过 Host DRAM 与 D2H/H2D copy</text>
-<text x="1178" y="606" text-anchor="end" font-family="Arial, sans-serif" font-size="11" fill="#526078">NCCL · PCIe · RDMA · Barex learning notes</text></svg>
+
+  <rect width="1600" height="940" fill="url(#bg)"/>
+  <text x="800" y="48" text-anchor="middle" class="title">GPU 跨机通信的三条典型数据路径</text>
+  <text x="800" y="78" text-anchor="middle" class="subtitle">“Host staged”是通用架构模式；blade-kvt 的 gather/scatter 是其中一种具体实现</text>
+
+  <!-- TCP panel -->
+  <g filter="url(#shadow)">
+    <rect x="35" y="110" width="490" height="700" rx="18" fill="#fff" stroke="#cbd8e8"/>
+    <path d="M53 110h454a18 18 0 0 1 18 18v72H35v-72a18 18 0 0 1 18-18Z" fill="url(#tcpHead)"/>
+  </g>
+  <text x="62" y="148" class="panelTitle">① 普通 Linux TCP socket</text>
+  <text x="62" y="176" class="panelSub">默认 GPU→host→kernel→NIC；不是 GPUDirect</text>
+
+  <rect x="70" y="230" width="190" height="62" rx="10" fill="#eef3ff" stroke="#95add8"/>
+  <text x="165" y="255" text-anchor="middle" class="boxTitle">Source GPU / HBM</text>
+  <text x="165" y="278" text-anchor="middle" class="body">离散或连续 device data</text>
+
+  <rect x="300" y="230" width="190" height="62" rx="10" fill="#fff3e4" stroke="#dfb16f"/>
+  <text x="395" y="255" text-anchor="middle" class="boxTitle">App host buffer</text>
+  <text x="395" y="278" text-anchor="middle" class="body">通常 pinned，D2H 目标</text>
+
+  <path d="M260 261H288" stroke="#5572a7" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+  <text x="274" y="247" text-anchor="middle" class="arrowLabel">D2H</text>
+
+  <rect x="155" y="340" width="250" height="72" rx="10" fill="#edf2f7" stroke="#a9b6c5"/>
+  <text x="280" y="367" text-anchor="middle" class="boxTitle">Kernel TCP send buffer / skb</text>
+  <text x="280" y="391" text-anchor="middle" class="body">send() · TCP/IP · GSO/TSO</text>
+  <path d="M395 292C395 318 345 322 315 337" fill="none" stroke="#5572a7" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+  <text x="402" y="323" class="arrowLabel">user→kernel</text>
+
+  <rect x="155" y="460" width="250" height="62" rx="10" fill="#e8f7ef" stroke="#88bfa0"/>
+  <text x="280" y="485" text-anchor="middle" class="boxTitle">Source NIC TX queue</text>
+  <text x="280" y="508" text-anchor="middle" class="body">DMA-read host pages → frames</text>
+  <path d="M280 412V447" stroke="#5572a7" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+
+  <rect x="155" y="564" width="250" height="48" rx="24" fill="#f1f4f8" stroke="#aab7c6"/>
+  <text x="280" y="594" text-anchor="middle" class="boxTitle">Ethernet / IP / TCP byte stream</text>
+  <path d="M280 522V551" stroke="#5572a7" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+
+  <rect x="70" y="660" width="140" height="62" rx="10" fill="#edf2f7" stroke="#a9b6c5"/>
+  <text x="140" y="685" text-anchor="middle" class="boxTitle">Kernel RX/socket</text>
+  <text x="140" y="708" text-anchor="middle" class="body">NIC DMA → TCP</text>
+
+  <rect x="240" y="660" width="115" height="62" rx="10" fill="#fff3e4" stroke="#dfb16f"/>
+  <text x="297.5" y="685" text-anchor="middle" class="boxTitle">App host</text>
+  <text x="297.5" y="708" text-anchor="middle" class="body">recv() buffer</text>
+
+  <rect x="385" y="660" width="105" height="62" rx="10" fill="#eef3ff" stroke="#95add8"/>
+  <text x="437.5" y="685" text-anchor="middle" class="boxTitle">Dest GPU</text>
+  <text x="437.5" y="708" text-anchor="middle" class="body">H2D</text>
+
+  <path d="M280 612C280 635 190 638 155 657" fill="none" stroke="#5572a7" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+  <path d="M210 691H228" stroke="#5572a7" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+  <text x="219" y="677" text-anchor="middle" class="arrowLabel">copy</text>
+  <path d="M355 691H373" stroke="#5572a7" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+  <text x="364" y="677" text-anchor="middle" class="arrowLabel">H2D</text>
+
+  <text x="280" y="766" text-anchor="middle" class="small">常见额外 copy：user↔kernel；MSG_ZEROCOPY 是专门优化</text>
+
+  <!-- Host staged RDMA panel -->
+  <g filter="url(#shadow)">
+    <rect x="555" y="110" width="490" height="700" rx="18" fill="#fff" stroke="#e4d2be"/>
+    <path d="M573 110h454a18 18 0 0 1 18 18v72H555v-72a18 18 0 0 1 18-18Z" fill="url(#stageHead)"/>
+  </g>
+  <text x="582" y="148" class="panelTitle">② 通用 Host-staged RDMA</text>
+  <text x="582" y="176" class="panelSub">GPU 不直接暴露给 RNIC；payload 经 host MR 中转</text>
+
+  <rect x="590" y="230" width="190" height="62" rx="10" fill="#eef3ff" stroke="#95add8"/>
+  <text x="685" y="255" text-anchor="middle" class="boxTitle">Source GPU / HBM</text>
+  <text x="685" y="278" text-anchor="middle" class="body">任意 GPU data layout</text>
+
+  <rect x="820" y="230" width="190" height="62" rx="10" fill="#fff3e4" stroke="#dfb16f"/>
+  <text x="915" y="255" text-anchor="middle" class="boxTitle">Pinned host MR</text>
+  <text x="915" y="278" text-anchor="middle" class="body">registered addr + lkey</text>
+  <path d="M780 261H808" stroke="#ba722d" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
+  <text x="794" y="247" text-anchor="middle" class="arrowLabel">D2H</text>
+
+  <rect x="675" y="375" width="250" height="62" rx="10" fill="#e8f7ef" stroke="#88bfa0"/>
+  <text x="800" y="400" text-anchor="middle" class="boxTitle">Source RNIC</text>
+  <text x="800" y="423" text-anchor="middle" class="body">DMA-read host MR · RDMA WR</text>
+  <path d="M915 292C915 333 855 343 820 372" fill="none" stroke="#ba722d" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
+
+  <rect x="675" y="500" width="250" height="48" rx="24" fill="#f1f4f8" stroke="#aab7c6"/>
+  <text x="800" y="530" text-anchor="middle" class="boxTitle">RoCE / InfiniBand fabric</text>
+  <path d="M800 437V487" stroke="#ba722d" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
+
+  <rect x="590" y="600" width="190" height="62" rx="10" fill="#fff3e4" stroke="#dfb16f"/>
+  <text x="685" y="625" text-anchor="middle" class="boxTitle">Remote pinned MR</text>
+  <text x="685" y="648" text-anchor="middle" class="body">RNIC DMA-write host pages</text>
+
+  <rect x="820" y="600" width="190" height="62" rx="10" fill="#eef3ff" stroke="#95add8"/>
+  <text x="915" y="625" text-anchor="middle" class="boxTitle">Destination GPU</text>
+  <text x="915" y="648" text-anchor="middle" class="body">H2D copy / scatter</text>
+  <path d="M800 548C800 573 725 579 700 597" fill="none" stroke="#ba722d" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
+  <path d="M780 631H808" stroke="#ba722d" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
+  <text x="794" y="617" text-anchor="middle" class="arrowLabel">H2D</text>
+
+  <text x="800" y="710" text-anchor="middle" class="small">blade-kvt：GPU gather → 连续 wire buffer → remote scatter</text>
+  <text x="800" y="734" text-anchor="middle" class="small">其他库也可用 copy engine、buffer pool 或不同 batching</text>
+  <text x="800" y="766" text-anchor="middle" class="small">Host staging 是模式，不限定具体 copy kernel 或协议实现</text>
+
+  <!-- GDR panel -->
+  <g filter="url(#shadow)">
+    <rect x="1075" y="110" width="490" height="700" rx="18" fill="#fff" stroke="#c7dfd1"/>
+    <path d="M1093 110h454a18 18 0 0 1 18 18v72h-490v-72a18 18 0 0 1 18-18Z" fill="url(#gdrHead)"/>
+  </g>
+  <text x="1102" y="148" class="panelTitle">③ GPUDirect RDMA</text>
+  <text x="1102" y="176" class="panelSub">RNIC peer DMA GPU memory；payload 不落 host DRAM</text>
+
+  <rect x="1110" y="230" width="190" height="72" rx="10" fill="#eef3ff" stroke="#95add8"/>
+  <text x="1205" y="256" text-anchor="middle" class="boxTitle">Source GPU MR</text>
+  <text x="1205" y="280" text-anchor="middle" class="body">GPU addr + local lkey</text>
+
+  <rect x="1340" y="230" width="190" height="72" rx="10" fill="#e8f7ef" stroke="#72b38e"/>
+  <text x="1435" y="256" text-anchor="middle" class="boxTitle">Source RNIC</text>
+  <text x="1435" y="280" text-anchor="middle" class="body">PCIe peer DMA read/write</text>
+  <path d="M1300 266H1328" stroke="#338658" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+  <text x="1314" y="252" text-anchor="middle" class="arrowLabel">PCIe</text>
+
+  <rect x="1195" y="420" width="250" height="48" rx="24" fill="#f1f4f8" stroke="#aab7c6"/>
+  <text x="1320" y="450" text-anchor="middle" class="boxTitle">RoCE / InfiniBand fabric</text>
+  <path d="M1435 302C1435 355 1370 377 1335 417" fill="none" stroke="#338658" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+
+  <rect x="1110" y="580" width="190" height="72" rx="10" fill="#e8f7ef" stroke="#72b38e"/>
+  <text x="1205" y="606" text-anchor="middle" class="boxTitle">Destination RNIC</text>
+  <text x="1205" y="630" text-anchor="middle" class="body">校验 raddr + rkey</text>
+
+  <rect x="1340" y="580" width="190" height="72" rx="10" fill="#eef3ff" stroke="#95add8"/>
+  <text x="1435" y="606" text-anchor="middle" class="boxTitle">Destination GPU MR</text>
+  <text x="1435" y="630" text-anchor="middle" class="body">RNIC 直接 DMA 到 HBM</text>
+  <path d="M1305 468C1285 512 1230 530 1210 577" fill="none" stroke="#338658" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+  <path d="M1300 616H1328" stroke="#338658" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+  <text x="1314" y="602" text-anchor="middle" class="arrowLabel">PCIe</text>
+
+  <rect x="1130" y="710" width="380" height="58" rx="10" fill="#edf8f1" stroke="#a2ceb4"/>
+  <text x="1320" y="733" text-anchor="middle" class="boxTitle">CPU 仍负责控制面</text>
+  <text x="1320" y="756" text-anchor="middle" class="body">注册 MR · 建 QP · post WR · poll CQ · 错误处理</text>
+
+  <!-- Bottom cross-cutting note -->
+  <g filter="url(#shadow)">
+    <rect x="35" y="842" width="1530" height="64" rx="15" fill="#fff" stroke="#d2dce7"/>
+  </g>
+  <text x="62" y="868" class="noteTitle">共同点：</text>
+  <text x="145" y="868" class="note">网络仍会按 MTU/MSS 产生多个 frame；NIC 的 host/GPU DMA 又会拆成多个 PCIe TLP。</text>
+  <text x="62" y="892" class="noteTitle">核心差别：</text>
+  <text x="160" y="892" class="note">payload 是否经过 host DRAM、是否发生 D2H/H2D，以及 user↔kernel copy 是否存在。</text>
+  <text x="1565" y="928" text-anchor="end" class="small">通用机制图 · 具体库可能使用不同 copy、buffer 与 completion 策略</text>
+</svg>
