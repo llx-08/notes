@@ -9,7 +9,7 @@ tags: []
 承接 [RDMA学习笔记（1）](/notes/2026/05/25/2026-05-25-rdma-learning-1/)。这一篇聚焦**数据中心网络的层次结构**（ASW/PSW/DSW/DCC…），以及 RoCE 在以太网上跑 RDMA 时的 **PFC / 拥塞 / N 倍重传** 问题，最后落到对 **PD 分离**跨机房传输的启示。
 
 > 更系统的 PFC、ECN/DCQCN、BDP、RNR 与 Barex 参数对照见
-> [RoCE、拥塞控制与重传](nccl_pcie_barex_learning/02c_roce_congestion_and_tuning.md)。
+> [RoCE、拥塞控制与重传](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/)。
 
 ## 数据中心网络的层次（Spine-Leaf / CLOS）
 

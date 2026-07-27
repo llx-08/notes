@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity=".12"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="620" rx="18" fill="#f8fafc"/>
+  <text x="32" y="42" font-family="Arial, PingFang SC, sans-serif" font-size="24" font-weight="700" fill="#172033">Host staging 与 GPUDirect RDMA</text>
+<text x="300" y="90" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="20" font-weight="700" fill="#d97706">Host staged</text>
+<rect x="60" y="135" width="210" height="70" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
+  <text x="165" y="175" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Source GPU</text>
+<rect x="390" y="135" width="210" height="70" rx="12" fill="#fff7ed" stroke="#d97706" stroke-width="2" filter="url(#shadow)"/>
+  <text x="495" y="175" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Pinned Host</text>
+<rect x="60" y="365" width="210" height="70" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
+  <text x="165" y="405" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Destination GPU</text>
+<rect x="390" y="365" width="210" height="70" rx="12" fill="#fff7ed" stroke="#d97706" stroke-width="2" filter="url(#shadow)"/>
+  <text x="495" y="405" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Pinned Host</text>
+<line x1="270" y1="170" x2="390" y2="170" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="330" y="162" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">D2H</text>
+<line x1="495" y1="205" x2="495" y2="365" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="495" y="277" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">NIC / network</text>
+<line x1="390" y1="400" x2="270" y2="400" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="330" y="392" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">H2D</text>
+<text x="900" y="90" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="20" font-weight="700" fill="#059669">GPUDirect RDMA</text>
+<rect x="690" y="135" width="210" height="70" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
+  <text x="795" y="165.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Source GPU MR</text>
+  <text x="795" y="184.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">addr + lkey</text>
+<rect x="990" y="135" width="160" height="70" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
+  <text x="1070" y="175" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Source NIC</text>
+<rect x="690" y="365" width="210" height="70" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
+  <text x="795" y="395.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Destination GPU MR</text>
+  <text x="795" y="414.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">raddr + rkey</text>
+<rect x="990" y="365" width="160" height="70" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
+  <text x="1070" y="405" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Destination NIC</text>
+<line x1="900" y1="170" x2="990" y2="170" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="945" y="162" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">PCIe</text>
+<line x1="1070" y1="205" x2="1070" y2="365" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="1070" y="277" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">RDMA fabric</text>
+<line x1="990" y1="400" x2="900" y2="400" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="945" y="392" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">PCIe</text>
+<text x="600" y="520" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" font-weight="400" fill="#172033">CPU 都参与控制面；差别在于 payload 是否经过 Host DRAM 与 D2H/H2D copy</text>
+<text x="1178" y="606" text-anchor="end" font-family="Arial, sans-serif" font-size="11" fill="#526078">NCCL · PCIe · RDMA · Barex learning notes</text></svg>

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="780" viewBox="0 0 1200 780">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity=".12"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="780" rx="18" fill="#f8fafc"/>
+  <text x="32" y="42" font-family="Arial, PingFang SC, sans-serif" font-size="24" font-weight="700" fill="#172033">RDMA SEND、WRITE 与 WRITE WITH IMMEDIATE</text>
+<text x="600" y="88" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="19" font-weight="700" fill="#2563eb">A：发起端</text>
+<text x="600" y="735" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="19" font-weight="700" fill="#059669">B：接收/被动端</text>
+<rect x="70" y="125" width="290" height="80" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+  <text x="215" y="160.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">SEND</text>
+  <text x="215" y="179.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">local SGE + lkey</text>
+<rect x="70" y="585" width="290" height="80" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
+  <text x="215" y="620.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">RECV WQE</text>
+  <text x="215" y="639.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">预贴 local buffer</text>
+<line x1="215" y1="205" x2="215" y2="585" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="215" y="387" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">匹配 RQ；双方有 CQE</text>
+<rect x="455" y="125" width="290" height="80" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="160.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">RDMA WRITE</text>
+  <text x="600" y="179.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">local SGE + remote addr/rkey</text>
+<rect x="455" y="585" width="290" height="80" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="620.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Remote MR</text>
+  <text x="600" y="639.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">不需要 per-write Recv</text>
+<line x1="600" y1="205" x2="600" y2="585" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="600" y="387" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">one-sided write</text>
+<rect x="840" y="125" width="290" height="80" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+  <text x="985" y="160.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">WRITE WITH IMM</text>
+  <text x="985" y="179.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">payload + imm_data</text>
+<rect x="840" y="585" width="290" height="80" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
+  <text x="985" y="620.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Remote MR + RECV WQE</text>
+  <text x="985" y="639.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">CQE 携带 imm_data</text>
+<line x1="985" y1="205" x2="985" y2="585" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="985" y="387" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">写数据 + 消耗 RQ</text>
+<rect x="405" y="325" width="390" height="95" rx="12" fill="#fff7ed" stroke="#d97706" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="367.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="17" fill="#172033">完成边界</text>
+  <text x="600" y="387.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="17" fill="#172033">post成功 ≠ CQ成功 ≠ 业务处理完成</text>
+<text x="1178" y="766" text-anchor="end" font-family="Arial, sans-serif" font-size="11" fill="#526078">NCCL · PCIe · RDMA · Barex learning notes</text></svg>

@@ -7,10 +7,10 @@ tags: []
 # RDMA学习笔记（1）：基础概念、Verbs 对象与 Barex 对照
 
 > 本文是概念入口。更系统的源码版见
-> [RDMA Verbs 对象模型](nccl_pcie_barex_learning/02a_rdma_verbs_object_model.md)、
-> [RDMA 操作与完成语义](nccl_pcie_barex_learning/02b_rdma_operations_completion_and_reliability.md)；
+> [RDMA Verbs 对象模型](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/)、
+> [RDMA 操作与完成语义](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/)；
 > PCIe/GPU Direct 背景见
-> [GPU、NIC、PCIe 拓扑与 DMA](nccl_pcie_barex_learning/02_pcie_gpu_topology_and_dma.md)。
+> [GPU、NIC、PCIe 拓扑与 DMA](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/)。
 
 DMA(Direct-Memory-Access): 让硬件组件能够在不涉及CPU的情况下直接读写主存，避免占用CPU。实际上GPU也包括这种操作。
 

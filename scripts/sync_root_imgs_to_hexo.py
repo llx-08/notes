@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Copy images from repository root ``imgs/`` into ``hexo-site/source/imgs/``.
+Copy note images into ``hexo-site/source/imgs/``.
 
-- Only **adds/updates** files from root ``imgs/``; does **not** delete files
-  that exist only under Hexo (e.g. ``.gitkeep``).
+- Sources are root ``imgs/`` plus image directories owned by synced series.
+- Only **adds/updates** files; does **not** delete files that exist only under
+  Hexo (e.g. ``.gitkeep``).
 - Skips hidden names (``.*``) and non-file entries.
-- Copies recursively if you add subdirectories under ``imgs/``.
+- Copies recursively if a source contains subdirectories.
 
 Run from anywhere; repo root is inferred from this script's location.
 """
@@ -16,6 +17,11 @@ import shutil
 import sys
 from pathlib import Path
 
+IMAGE_SOURCE_DIRS = (
+    Path("imgs"),
+    Path("nccl_pcie_barex_learning") / "imgs",
+)
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -23,19 +29,11 @@ def repo_root() -> Path:
 
 def sync_imgs(*, dry_run: bool) -> int:
     root = repo_root()
-    src = root / "imgs"
     dest = root / "hexo-site" / "source" / "imgs"
 
     if not dest.parent.is_dir():
         print(f"Error: Hexo source directory not found: {dest.parent}", file=sys.stderr)
         return 1
-
-    if not src.is_dir():
-        if dry_run:
-            print(f"[dry-run] no source dir {src}; nothing to do")
-        else:
-            print(f"Note: {src} missing; skip image sync.")
-        return 0
 
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -69,7 +67,18 @@ def sync_imgs(*, dry_run: bool) -> int:
             print(f"copy {path.relative_to(root)} -> {out.relative_to(root)}")
             copied += 1
 
-    walk(src, Path("."))
+    found_source = False
+    for relative_source in IMAGE_SOURCE_DIRS:
+        source = root / relative_source
+        if not source.is_dir():
+            print(f"Note: {relative_source} missing; skip image source.")
+            continue
+        found_source = True
+        walk(source, Path("."))
+
+    if not found_source:
+        print("Note: no image source directories found; nothing to do.")
+        return 0
 
     label = "[dry-run] " if dry_run else ""
     print(f"{label}Done: {copied} would copy/copied, {unchanged} unchanged.")

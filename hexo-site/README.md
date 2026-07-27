@@ -8,7 +8,12 @@
 
 源码在 `hexo-site/`，仓库根目录下的 `*.md` 为原始笔记副本，已同步到 `source/_posts/`；根目录 **`imgs/`** 会通过脚本同步到 **`source/imgs/`**（`npm run sync-imgs` 或 `npm run build` 会自动执行）。
 
-**系列目录 `ep_learning/`**：`scripts/sync_root_to_hexo_posts.py` 会把其中每个 `*.md` 同步为独立文章（slug 形如 `ep-learning-01-ep-fundamentals`，目录页为 `ep-learning`），写入分类 **`EP 学习笔记`**，并把 `../imgs/` 图链改成 `/imgs/`，系列内 `.md` 互链改成 Hexo permalink。CI / pre-commit 都会跑该脚本。
+**系列目录**：`scripts/sync_root_to_hexo_posts.py` 会把系列中的每个 `*.md` 同步为独立文章，并把 `../imgs/` 图链改成 `/imgs/`、把系列内 `.md` 互链改成 Hexo permalink。当前包含：
+
+- `ep_learning/` → 分类 **`EP 学习笔记`**，slug 前缀 `ep-learning`
+- `nccl_pcie_barex_learning/` → 分类 **`NCCL、PCIe 与 Barex 学习笔记`**，slug 前缀 `nccl-pcie-barex-learning`
+
+两个系列的 `README.md` 都会成为各自的目录文章。配图脚本还会把 `nccl_pcie_barex_learning/imgs/` 同步到 Hexo 的 `/imgs/`。CI / pre-commit 都会运行这些同步脚本。
 
 **提交前自动同步**：在仓库根目录执行一次 **`./scripts/install-git-hooks.sh`**，之后每次 **`git commit`** 会先运行上述两个同步脚本，并把 `source/_posts/`、`source/imgs/` 的变更自动 **git add** 进本次提交。若某次不想跑钩子：**`git commit --no-verify`**。
 

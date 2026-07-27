@@ -6,6 +6,8 @@ Sources:
   1) Repository root ``*.md`` (unchanged behaviour).
   2) ``ep_learning/*.md`` series → posts with slug prefix ``ep-learning-``
      (``ep_learning/README.md`` → slug ``ep-learning``).
+  3) ``nccl_pcie_barex_learning/*.md`` series → posts with slug prefix
+     ``nccl-pcie-barex-learning-`` (its ``README.md`` is the series index).
 
 Convention:
   - Root ``foo_bar.md`` → slug ``foo-bar``.
@@ -13,7 +15,7 @@ Convention:
   - Existing post ``YYYY-MM-DD-<slug>.md`` is updated (front matter kept).
   - New post: ``today-<slug>.md`` with title from first ``#`` heading.
   - Image links ``imgs/`` ``./imgs/`` ``../imgs/`` → ``/imgs/`` (Hexo root).
-  - ``ep_learning`` posts get ``categories: [EP 学习笔记]`` and shared tags.
+  - Each series gets its configured category and shared tags.
   - In-series ``*.md`` / ``README.md`` links → Hexo permalinks.
   - Root note links ``../foo_bar.md`` → matching _posts permalink when found.
 
@@ -36,6 +38,21 @@ from datetime import date
 from pathlib import Path
 
 SKIP_STEMS = frozenset({"readme", "changelog", "license", "contributing"})
+
+SERIES = (
+    {
+        "directory": "ep_learning",
+        "slug_prefix": "ep-learning",
+        "category": "EP 学习笔记",
+        "tags": ["EP", "MoE", "学习笔记"],
+    },
+    {
+        "directory": "nccl_pcie_barex_learning",
+        "slug_prefix": "nccl-pcie-barex-learning",
+        "category": "NCCL、PCIe 与 Barex 学习笔记",
+        "tags": ["NCCL", "PCIe", "RDMA", "Barex", "blade-kvt", "学习笔记"],
+    },
+)
 
 # Match markdown links whose URL ends with .md (optional #anchor)
 _MD_LINK_RE = re.compile(
@@ -73,10 +90,10 @@ def slug_from_root_name(stem: str) -> str:
     return stem.replace("_", "-").lower()
 
 
-def slug_from_ep_learning(stem: str) -> str:
+def slug_from_series_name(stem: str, slug_prefix: str) -> str:
     if stem.lower() == "readme":
-        return "ep-learning"
-    return "ep-learning-" + stem.replace("_", "-").lower()
+        return slug_prefix
+    return slug_prefix + "-" + stem.replace("_", "-").lower()
 
 
 def rewrite_hexo_img_paths(body: str) -> str:
@@ -208,8 +225,11 @@ def rewrite_md_links(
         target = m.group(1)
         anchor = m.group(2) or ""
         base = Path(target).name
-        slug = link_basename_to_slug.get(base) or link_basename_to_slug.get(
-            base.lower()
+        slug = (
+            link_basename_to_slug.get(target)
+            or link_basename_to_slug.get(target.lower())
+            or link_basename_to_slug.get(base)
+            or link_basename_to_slug.get(base.lower())
         )
         if slug is None:
             return m.group(0)
@@ -237,8 +257,9 @@ def sync_one(
     site_root: str,
 ) -> str:
     stem = root_md.stem.lower()
-    # Skip root README etc.; allow ep_learning/README.md
-    if stem in SKIP_STEMS and root_md.parent.name != "ep_learning":
+    # Skip root README etc.; allow a configured series' README.md.
+    series_directories = {str(series["directory"]) for series in SERIES}
+    if stem in SKIP_STEMS and root_md.parent.name not in series_directories:
         return "skip"
 
     raw = root_md.read_text(encoding="utf-8")
@@ -306,16 +327,34 @@ def sync_one(
     return action.split()[0]
 
 
-def collect_link_map(root: Path) -> dict[str, str]:
-    """basename.md -> slug for root notes and ep_learning notes."""
+def collect_link_map(
+    root: Path,
+    *,
+    series_directory: str | None = None,
+    series_slug_prefix: str | None = None,
+) -> dict[str, str]:
+    """Build Markdown target -> slug for root notes and one optional series.
+
+    Qualified ``series_dir/file.md`` targets for every series are always
+    available. Only the active series also gets basename-only entries, so
+    common names such as README.md do not resolve to another series' index.
+    """
     mapping: dict[str, str] = {}
     for p in root.glob("*.md"):
         mapping[p.name] = slug_from_root_name(p.stem)
         mapping[p.name.lower()] = slug_from_root_name(p.stem)
-    ep_dir = root / "ep_learning"
-    if ep_dir.is_dir():
-        for p in ep_dir.glob("*.md"):
-            slug = slug_from_ep_learning(p.stem)
+    for series in SERIES:
+        directory = str(series["directory"])
+        slug_prefix = str(series["slug_prefix"])
+        for p in (root / directory).glob("*.md"):
+            slug = slug_from_series_name(p.stem, slug_prefix)
+            qualified = f"{directory}/{p.name}"
+            mapping[qualified] = slug
+            mapping[qualified.lower()] = slug
+    if series_directory is not None and series_slug_prefix is not None:
+        series_dir = root / series_directory
+        for p in series_dir.glob("*.md"):
+            slug = slug_from_series_name(p.stem, series_slug_prefix)
             mapping[p.name] = slug
             mapping[p.name.lower()] = slug
             if p.stem.lower() == "readme":
@@ -341,7 +380,7 @@ def main() -> int:
 
     today = date.today()
     site_root = hexo_root_prefix(root)
-    link_map = collect_link_map(root)
+    root_link_map = collect_link_map(root)
     slug_to_permalink = build_slug_permalink_map(posts, site_root=site_root)
 
     updated = created = skipped = 0
@@ -355,7 +394,7 @@ def main() -> int:
             slug=slug_from_root_name(p.stem),
             tags=None,
             categories=None,
-            link_basename_to_slug=link_map,
+            link_basename_to_slug=root_link_map,
             slug_to_permalink=slug_to_permalink,
             site_root=site_root,
         )
@@ -366,21 +405,31 @@ def main() -> int:
         elif r == "skip":
             skipped += 1
 
-    ep_dir = root / "ep_learning"
-    ep_tags = ["EP", "MoE", "学习笔记"]
-    ep_categories = ["EP 学习笔记"]
-    if ep_dir.is_dir():
-        # First pass creates all posts / refreshes permalink map
-        for p in sorted(ep_dir.glob("*.md")):
+    for series in SERIES:
+        directory = str(series["directory"])
+        slug_prefix = str(series["slug_prefix"])
+        series_dir = root / directory
+        if not series_dir.is_dir():
+            continue
+        series_tags = list(series["tags"])
+        series_categories = [str(series["category"])]
+        series_link_map = collect_link_map(
+            root,
+            series_directory=directory,
+            series_slug_prefix=slug_prefix,
+        )
+
+        # First pass creates every post and refreshes the permalink map.
+        for p in sorted(series_dir.glob("*.md")):
             r = sync_one(
                 p,
                 posts,
                 dry_run=args.dry_run,
                 today=today,
-                slug=slug_from_ep_learning(p.stem),
-                tags=ep_tags,
-                categories=ep_categories,
-                link_basename_to_slug=link_map,
+                slug=slug_from_series_name(p.stem, slug_prefix),
+                tags=series_tags,
+                categories=series_categories,
+                link_basename_to_slug=series_link_map,
                 slug_to_permalink=slug_to_permalink,
                 site_root=site_root,
             )
@@ -391,18 +440,18 @@ def main() -> int:
             elif r == "skip":
                 skipped += 1
 
-        # Second pass: rewrite in-series links with final permalink map
+        # Second pass rewrites in-series links using the final permalink map.
         if not args.dry_run:
-            for p in sorted(ep_dir.glob("*.md")):
+            for p in sorted(series_dir.glob("*.md")):
                 sync_one(
                     p,
                     posts,
                     dry_run=False,
                     today=today,
-                    slug=slug_from_ep_learning(p.stem),
-                    tags=ep_tags,
-                    categories=ep_categories,
-                    link_basename_to_slug=link_map,
+                    slug=slug_from_series_name(p.stem, slug_prefix),
+                    tags=series_tags,
+                    categories=series_categories,
+                    link_basename_to_slug=series_link_map,
                     slug_to_permalink=slug_to_permalink,
                     site_root=site_root,
                 )

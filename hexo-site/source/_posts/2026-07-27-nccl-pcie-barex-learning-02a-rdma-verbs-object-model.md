@@ -1,0 +1,278 @@
+---
+title: "02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ"
+date: 2026-07-27
+categories: [NCCL、PCIe 与 Barex 学习笔记]
+tags: [NCCL, PCIe, RDMA, Barex, blade-kvt, 学习笔记]
+---
+
+# 02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ
+
+## 1. RDMA 不只是“绕过内核”
+
+更准确的描述：
+
+- 资源创建、权限和内存注册是 slow path，仍由内核 RDMA 子系统管理；
+- 数据发送/接收是 fast path，`libibverbs` provider 通常把 queue/doorbell 映射到用户态；
+- 应用写 WQE、敲 doorbell，RNIC DMA 数据；
+- 完成通过 CQE 返回，应用 polling 或事件驱动消费。
+
+Linux 官方文档明确说明：用户态通过 `/dev/infiniband/uverbsN` 创建资源，fast path 通常直接写 mmap 的硬件寄存器，不需要每个操作都 system call。
+
+## 2. 对象全景
+
+![RDMA Verbs 对象关系与数据流](/imgs/rdma_verbs_objects.svg)
+
+```text
+ibv_device
+  → ibv_context
+      ├─ Protection Domain (PD)
+      │    ├─ Memory Region (MR)
+      │    └─ Queue Pair (QP)
+      ├─ Completion Channel
+      │    └─ Completion Queue (CQ)
+      └─ device/port/GID attributes
+```
+
+| 对象 | 核心职责 | Barex 对应 |
+|---|---|---|
+| Device | RNIC 设备 | `IbvDevice` |
+| Context | 打开的 verbs device | `IbvDevice/XContextImpl` 内部持有 |
+| PD | QP/MR 的保护域 | device 创建的 `ibv_pd` |
+| MR | 注册内存与访问权限 | `memp_t.mr`、`XSimpleMempool` |
+| CQ | 完成队列 | `XContextImpl` 创建/轮询 |
+| QP | SQ+RQ 与传输状态 | `XChannelImpl::ibv_qp_` |
+| SRQ | 多 QP 共享 RQ | Barex 当前 RC channel 路径未使用 |
+| CM/AH | 建联或无连接寻址 | Barex `XConnector/XListener` 自行交换 QP meta |
+
+## 3. Device、Port、GID
+
+一块 RNIC 可以有多个 physical port，每个 port 有：
+
+- state；
+- LID（InfiniBand 常见）；
+- GID table；
+- active MTU；
+- link layer（InfiniBand/Ethernet）。
+
+RoCE 中 GID 关联 IP/VLAN/RoCE version。建联时双方必须选择兼容 GID。
+
+检查：
+
+```bash
+ibv_devices
+ibv_devinfo -v
+rdma link
+show_gids
+```
+
+Barex 在 `XChannelImpl::GetInitData` 中交换 QP number、LID、GID、heartbeat 地址/key 和 NIC id，见：
+
+```text
+$BAREX_ROOT/src/barex/impl/rdma/xchannel_impl.cc:233-258
+```
+
+## 4. Protection Domain
+
+PD 是访问隔离边界。MR 和 QP 必须属于兼容 PD；一个 QP 不能随意使用另一个 PD 的 lkey。
+
+直觉：
+
+```text
+PD A: QP-A1, QP-A2, MR-A1
+PD B: QP-B1, MR-B1
+
+QP-A1 可以使用 MR-A1
+QP-A1 不能使用 MR-B1 的 lkey
+```
+
+多 NIC/多 PD 场景里，“同一个虚拟地址注册过”不够，必须拿到当前 QP 所在 PD 对应的 MR。Barex `TryToChangeMr` 正是为此切换 MR。
+
+## 5. Memory Region
+
+### 5.1 注册做了什么
+
+`ibv_reg_mr(pd, addr, length, access)`：
+
+1. 固定/管理页或建立 ODP；
+2. 建立 RNIC 可用的 DMA 映射；
+3. 写入 RNIC memory translation/protection table；
+4. 返回 lkey/rkey。
+
+访问标志常见：
+
+- `IBV_ACCESS_LOCAL_WRITE`
+- `IBV_ACCESS_REMOTE_WRITE`
+- `IBV_ACCESS_REMOTE_READ`
+- `IBV_ACCESS_REMOTE_ATOMIC`
+
+### 5.2 lkey 与 rkey
+
+- lkey：本地 WQE 的 SGE 使用，证明 RNIC 可以访问 local range。
+- rkey：发送给远端，对方 RDMA Read/Write/Atomic 时使用。
+
+key 不是加密密钥，而是硬件能力标识与保护检查的一部分。泄露 rkey + addr 并不等价于任意访问整机内存，它仍受 QP、PD、MR range 和 access flag 限制；但应用必须将它视为敏感 capability。
+
+### 5.3 生命周期
+
+必须满足：
+
+```text
+MR 注册完成
+  < 所有引用它的 WR post
+  < 所有这些 WR completion
+  < deregister/free
+```
+
+目标进程重启或重新注册后，旧 rkey 必须视为无效。
+
+## 6. Queue Pair
+
+QP = Send Queue + Receive Queue。
+
+### 6.1 SQ 能放什么
+
+- SEND
+- RDMA WRITE
+- RDMA WRITE WITH IMMEDIATE
+- RDMA READ
+- ATOMIC
+
+### 6.2 RQ 给谁用
+
+RQ 主要为接收：
+
+- 对端 SEND；
+- 对端 WRITE WITH IMMEDIATE 产生的 receive completion。
+
+普通 RDMA WRITE/READ 不要求远端应用为每个 payload post Recv。
+
+### 6.3 常见 QP type
+
+| 类型 | 连接/可靠性 | 操作 |
+|---|---|---|
+| RC | 一对一、可靠、有序 | SEND/WRITE/READ/Atomic |
+| UC | 一对一、不可靠 | SEND/WRITE，能力较少 |
+| UD | 无连接、不可靠 datagram | SEND/RECV |
+| DC/XRC 等 | 可扩展连接模型 | 依设备与 provider |
+
+Barex RDMA channel 创建 `IBV_QPT_RC`，见 `xchannel_impl.cc:174-227`。
+
+## 7. RC QP 状态机
+
+```text
+RESET → INIT → RTR → RTS
+                   ↘
+                     ERR → RESET/销毁
+```
+
+- INIT：配置 port、PKey、access flag。
+- RTR：知道对端 QPN/GID/LID/PSN，可接收。
+- RTS：配置 retry、timeout、max_rd_atomic 等，可发送。
+- ERR：已有 WR 可能被 flush，出现 `IBV_WC_WR_FLUSH_ERR`。
+
+Barex `Incubate` 创建 QP，connector/listener 交换 `ChannelInitMeta`，`Init` 推进 QP 并启动 heartbeat。
+
+## 8. Completion Queue
+
+CQ 可被多个 SQ/RQ 共享。CQE/WC 常包含：
+
+- `wr_id`
+- status
+- opcode
+- byte length
+- immediate data
+- QP number
+- vendor error
+
+`wr_id` 完全由应用填充，RNIC 原样带回。Barex 填入 `x_wr_id*`，因此 completion 时能找到 callback、buffer 与 channel。
+
+## 9. Completion Channel 与 polling
+
+两种进度方式：
+
+### Busy polling
+
+```cpp
+while ((n = ibv_poll_cq(cq, max, wc)) >= 0) {
+  process(wc, n);
+}
+```
+
+延迟低但占 CPU。
+
+### Event-driven
+
+CQ 绑定 completion channel，先收 event，再 poll CQ。注意 event 只表示“CQ 可能有数据”，仍需 poll 并重新 arm notification。
+
+Barex 把 completion channel fd 放进 epoll，在 `ProcessIoEvents` 中 poll CQ，兼顾事件驱动和批处理。
+
+## 10. 建联：RDMA CM 与自定义 OOB
+
+两种常见方式：
+
+1. `librdmacm`：resolve addr/route、connect/accept。
+2. 应用自己用 TCP/共享存储交换 QP metadata，再调用 `ibv_modify_qp`。
+
+Barex 属于第二类：
+
+```text
+XConnector/XListener (TCP OOB)
+  → 交换 QPN/GID/LID/PSN/heartbeat MR
+  → 修改 RC QP
+  → XChannel active
+```
+
+所以 Barex 的 TCP 建联通路与 RDMA payload 通路必须分开排查。
+
+## 11. 最小生命周期伪代码
+
+```cpp
+dev_list = ibv_get_device_list();
+ctx = ibv_open_device(dev);
+pd = ibv_alloc_pd(ctx);
+cq = ibv_create_cq(ctx, ...);
+mr = ibv_reg_mr(pd, buf, len, access);
+qp = ibv_create_qp(pd, {send_cq=cq, recv_cq=cq, ...});
+
+modify_qp_to_init(qp);
+exchange_qp_meta_over_oob();
+modify_qp_to_rtr(qp, peer);
+modify_qp_to_rts(qp, retry_and_timeout);
+
+ibv_post_recv(qp, ...);  // 如果要收 SEND/WRITE_WITH_IMM
+ibv_post_send(qp, ...);
+ibv_poll_cq(cq, ...);
+
+destroy_qp();
+dereg_mr();
+destroy_cq();
+dealloc_pd();
+close_device();
+```
+
+销毁顺序应确保没有 inflight WR。
+
+## 12. Barex 对照阅读
+
+| Verbs 概念 | 文件/函数 |
+|---|---|
+| device/PD/CQ | `impl/rdma/xdevice_manager_impl.*`、`xcontext_impl.*` |
+| QP create | `xchannel_impl.cc:71-230` |
+| exchange meta | `GetInitData/Init` |
+| MR | `xgpu_mempool_impl.*`、`xsimple_mempool_impl.*` |
+| post WR | `XChannelImpl::PostSend` |
+| poll CQ | `XContextImpl::ProcessIoEvents` |
+| WC dispatch | `ProcessOneIoEvent` |
+| channel error | `HandleWcStatusError` |
+
+## 13. 自检
+
+1. 为什么同一地址在不同 PD 上需要不同 MR/lkey？
+2. 普通 RDMA Write 为什么不需要远端 RQ？
+3. `wr_id` 为什么是连接 WR 与业务 callback 的关键？
+4. QP 进入 ERR 后为什么后续大量 completion 都是 FLUSH_ERR？
+
+## 参考
+
+- [Linux Userspace verbs access](https://docs.kernel.org/infiniband/user_verbs.html)
+- [rdma-core](https://github.com/linux-rdma/rdma-core)
