@@ -24,6 +24,7 @@ categories: [EP 学习笔记]
 | 2 | [02_modular_kernel_and_moe_kernels.md](/notes/2026/07/24/2026-07-24-ep-learning-02-modular-kernel-and-moe-kernels/) | Router → Dispatch → Experts → Combine；align/permute/GEMM | 4–6h |
 | 2a | [02a_deepgemm.md](/notes/2026/07/24/2026-07-24-ep-learning-02a-deepgemm/) | DeepGEMM：grouped contiguous、FP8、vLLM Experts 路径（含图） | 3–4h |
 | 3 | [03_deepep.md](/notes/2026/07/24/2026-07-24-ep-learning-03-deepep/) | DeepEP HT/LL、RDMA buffer、与 NCCL/PPLX 对比 | 4–6h |
+| 3a | [通信组生命周期](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03a-communication-group-lifecycle/) | PyTorch/NCCL/DeepEP 怎样建组与扩缩容；结合源码和流程图 | 3–5h |
 | 4 | [04_megamoe.md](/notes/2026/07/24/2026-07-24-ep-learning-04-megamoe/) | DeepSeek V4 MegaMoE、DeepGEMM、`prepare_megamoe` | 3–4h |
 | 5 | [05_eplb_and_load_balance.md](/notes/2026/07/24/2026-07-24-ep-learning-05-eplb-and-load-balance/) | 热点 expert、分层 rebalance、物理/逻辑 expert | 2–3h |
 | 6 | [06_code_reading_map.md](/notes/2026/07/24/2026-07-24-ep-learning-06-code-reading-map/) | 按文件/函数的精读顺序 | 随读 |

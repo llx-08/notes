@@ -6,6 +6,7 @@
 > 跨机实战补充：[../vllm_cross_node_expert_parallelism.md](../vllm_cross_node_expert_parallelism.md)  
 > 硬件/RDMA 零基础：[../nccl_pcie_barex_learning/00_hardware_network_primer.md](../nccl_pcie_barex_learning/00_hardware_network_primer.md)
 > RDMA 基础：[../rdma_learning_1.md](../rdma_learning_1.md)
+> 通信组构建与扩缩容：[../nccl_pcie_barex_learning/03a_communication_group_lifecycle.md](../nccl_pcie_barex_learning/03a_communication_group_lifecycle.md)
 
 ---
 
@@ -20,6 +21,11 @@
 vLLM / SGLang 通过适配层调用 `deep_ep.Buffer.dispatch` / `combine`（及 LL 变体）。
 
 上游项目：https://github.com/deepseek-ai/DeepEP  
+
+> 名字提醒：DeepEP 2.1.0 的 `ElasticBuffer` 中 “Elastic” 当前明确指底层内存
+> 形态的灵活性，不等于 ProcessGroup 成员可以热插拔。V1 `enable_shrink` 的
+> mask 也不会改变 `group.size()`。完整解释、构造代码与扩缩容状态机见
+> [通信组生命周期](../nccl_pcie_barex_learning/03a_communication_group_lifecycle.md)。
 
 本地适配（`vllm_comm`）：
 

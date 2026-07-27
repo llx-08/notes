@@ -17,6 +17,7 @@
 | 2 | [02_modular_kernel_and_moe_kernels.md](02_modular_kernel_and_moe_kernels.md) | Router → Dispatch → Experts → Combine；align/permute/GEMM | 4–6h |
 | 2a | [02a_deepgemm.md](02a_deepgemm.md) | DeepGEMM：grouped contiguous、FP8、vLLM Experts 路径（含图） | 3–4h |
 | 3 | [03_deepep.md](03_deepep.md) | DeepEP HT/LL、RDMA buffer、与 NCCL/PPLX 对比 | 4–6h |
+| 3a | [通信组生命周期](../nccl_pcie_barex_learning/03a_communication_group_lifecycle.md) | PyTorch/NCCL/DeepEP 怎样建组与扩缩容；结合源码和流程图 | 3–5h |
 | 4 | [04_megamoe.md](04_megamoe.md) | DeepSeek V4 MegaMoE、DeepGEMM、`prepare_megamoe` | 3–4h |
 | 5 | [05_eplb_and_load_balance.md](05_eplb_and_load_balance.md) | 热点 expert、分层 rebalance、物理/逻辑 expert | 2–3h |
 | 6 | [06_code_reading_map.md](06_code_reading_map.md) | 按文件/函数的精读顺序 | 随读 |

@@ -1,7 +1,8 @@
 # DashScope 推理请求：详细流程、生命周期与排队机制
 
-> 结合 4 个仓库梳理（代码在 `ecs:~/codes/`）：
-> `dashscope-platform`（Java 网关）→ `dashscope-serving`（Python 服务层）→ `dashllm`（引擎编排）→ `vllm`（推理引擎）。
+> 结合 5 个仓库梳理（代码在 `ecs:~/codes/`）：
+> `dashscope-platform`（Java 网关与 Turbo）→ `dashserving`（Pod 内 Serving Runtime）
+> → `dashscope-serving`（Python 业务服务层）→ `dashllm`（引擎编排）→ `vllm`（推理引擎）。
 > 面向"一条推理请求从进来到吐 token 经历了什么、在哪里排队"这个问题。
 
 ## 0. 全局分层（TL;DR）
@@ -16,18 +17,22 @@ Client(HTTP/gRPC/WS)
 ② Turbo sidecar + 全局批调度 GlobalBatchingScheduler  —— 真正的跨实例请求队列（Redis）
       │  batching 模式：入 Redis 队列 → 4 维准入 → 拉给本地引擎
       ▼
-③ dashscope-serving   —— Python FastAPI/WebSocket，模型侧服务（分词、prompt 构建、后处理）
+③ dashserving Daemon  —— Pod 内 Runtime：Capability 路由、Worker/GPU 生命周期、engineIdx→Worker
+      │  一个 Daemon 管理 chat worker 与 dashllm engine worker
+      ▼
+④ dashscope-serving   —— Python 业务服务（分词、prompt 构建、工具调用、后处理）
       │  无独立排队，透传；serving 端完成 tokenization → input_ids
       ▼
-④ dashllm   —— 驱动 **同步** vLLM v1 LLMEngine 的编排层（PD 分离、KV 传输）
+⑤ dashllm   —— 驱动 **同步** vLLM v1 LLMEngine 的编排层（PD 分离、KV 传输）
       │  _priority_admission 准入 → _input_queue → 后台线程 step()
       ▼
-⑤ vLLM v1 scheduler   —— waiting/running 队列，逐 token 调度（真正的引擎级排队）
+⑥ vLLM v1 scheduler   —— waiting/running 队列，逐 token 调度（真正的引擎级排队）
 ```
 
 配图：
 - `end_to_end_lifecycle.svg` —— 端到端全景（各层 + 所有排队点 ◆）
 - `platform_pipeline.svg` —— 网关 6 阶段 Handler Pipeline 细节
+- `hierarchical_request_routing.svg` —— Service → Pod → engine worker → DP rank 分层调度
 - `vllm_scheduler.svg` —— vLLM waiting/running 准入细节
 
 ![端到端生命周期](end_to_end_lifecycle.svg)
@@ -54,7 +59,7 @@ Client(HTTP/gRPC/WS)
 6. **Post-Response**：`ResponseErrorHandler`、`BackoffDelayHandler`、计量、日志、trace
 
 ### 1.3 路由（Stage 2）
-- **VirtualRoute**（`VirtualRouteHandler`→`VirtualRouteService`）：两阶段 **Filter→Selector**。8 个 Filter 依次收窄候选物理服务（Phrase/ForwardCluster/Retry/Edge/Preferred/UserWhitelist/Weight/Rule），再由 Selector（Groovy 脚本或内置）选 1 个，得到 `physicalServiceId`；非本集群 → `ctx.forward()` 跨集群转发。
+- **VirtualRoute**（`VirtualRouteHandler`→`VirtualRouteService`）：两阶段 **Filter→Selector**。Filter 依次收窄候选物理服务（Phrase/ForwardCluster/Retry/Edge/Preferred/UserWhitelist/Weight/GlobalRouting/Rule），再由 Selector（Groovy 脚本或内置）选 1 个，得到 `physicalServiceId`；非本集群 → `ctx.forward()` 跨集群转发。内置 Selector 包括 weighted、user-weighted、bin-pack、cache-aware、cache-aware-pure、cache-aware-balanced、length-aware。
 - **服务发现**（`PhysicalRouteHandler`）：`ServiceRoute`（Redis/File 缓存），`addressType` ∈ {HostPort, HostPortList, PaiEasService, NacosService}；实例列表进 `ServerListCache`（两级 Caffeine）。
 - **负载均衡**（`RequestBalanceHandler`→`BalanceServiceSelector`）：`RoundRobinBalancer`（原子自增取模）；跨集群走 `InterClusterBalanceServiceSelector`。
 
@@ -67,7 +72,7 @@ Client(HTTP/gRPC/WS)
 > 注意：这些是"限流/拒绝"，**真正把请求排起来等的队列在 ②**。
 
 ### 1.5 调后端（Stage 4）
-`BackendServiceSelector` 按 `backend_protocol > sub_protocol > protocol` 选实现：gRPC / HTTP(sse/raw/OpenAI) / WebSocket / **batching** / **router** / forward。目标由 `physicalServiceId` 解析为 `ip:port`；**batching 模式没有直连地址**——请求进 Redis，由 Turbo 拉取。
+`BackendServiceSelector` 按 `backend_protocol > sub_protocol > protocol` 选实现：gRPC / HTTP(sse/raw/OpenAI) / WebSocket / **batching** / **router** / **scheduler** / forward。目标由 `physicalServiceId` 解析为 `ip:port`；**batching 模式可以跳过 API 侧实例 balance**——请求进 Redis，由 Turbo 拉取；router/scheduler 模式则先向外部调度器请求 `endpoint + instanceId + engineIdx`。
 
 ---
 
@@ -88,9 +93,12 @@ Client(HTTP/gRPC/WS)
 
 ---
 
-## 3. ③ dashscope-serving（Python 服务层）
+## 3. ③ dashserving + ④ dashscope-serving（Pod 内 Runtime 与 Python 服务层）
 
-FastAPI + uvicorn；LLM 文本默认走 **WebSocket 流式**（`fastapi_stream_server.py:54`）。**本层无独立排队/并发上限，是透传**。
+`dashserving` 是 Rust Daemon + Python Worker Runtime；`dashscope-serving` 是运行在其中的
+Chat/业务 Worker。部署也兼容 Aquila、FastAPI/uvicorn、WebSocket 等旧路径。DServ 一体化模式下，
+Daemon 在同一 Pod 中同时启动 `dashscope-serving` chat workers 与 `dashllm` engine workers。
+业务服务层本身没有类似 Redis 的跨实例队列，主要完成协议、prompt、工具和模型调用。
 
 ### 3.1 生命周期
 1. **入口**：WS 收一帧 JSON → `RequestBody{header,payload}` → `GPT3Header/Payload` → `QwenQueryContext`。
@@ -111,7 +119,7 @@ FastAPI + uvicorn；LLM 文本默认走 **WebSocket 流式**（`fastapi_stream_s
 
 ---
 
-## 4. ④ dashllm + ⑤ vLLM（引擎级排队）
+## 4. ⑤ dashllm + ⑥ vLLM（引擎级排队）
 
 ![vLLM 调度器](vllm_scheduler.svg)
 
@@ -186,16 +194,16 @@ P（Prefill）与 D（Decode）是**两个不同的物理服务**。网关（Vir
 | 4 | ② Turbo | **GlobalBatching Redis 队列** | **真正的跨实例请求队列**(LIST/ZSET/Bucket) | `GlobalBatchingScheduler` |
 | 5 | ② Turbo | 4 维准入 | 引擎负载准入(running/prefilling×batch/token) | 全局批调度 |
 | 6 | ② Turbo | Router tryAdmit | 超载拒绝→重排 | `RouterMeterService` |
-| 7 | ③ serving | （无） | 透传，仅无界线程池 | `fastapi_stream_server.py:20` |
-| 8 | ④ dashllm | `_priority_admission` | 高/低优先级槽位准入 | `processor.py:1495` |
-| 9 | ④ dashllm | `_input_queue` / `output_queue_map` | 线程交接 + 每请求输出解复用 | `_vllm_v1.py:580/451` |
-| 10 | ⑤ vLLM | **waiting 队列** | 引擎级请求排队 | `scheduler.py` |
-| 11 | ⑤ vLLM | `max_num_seqs` | running 并发上限 | schedule() |
-| 12 | ⑤ vLLM | `max_num_batched_tokens` | 每 step token 预算 | schedule() |
-| 13 | ⑤ vLLM | KV-cache block 准入 | `allocate_slots` 失败即背压/抢占 | schedule() |
-| 14 | ⑤ vLLM | `WAITING_FOR_REMOTE_KVS` | PD 消费端等 KV 传输 | `scheduler.py:828` |
+| 7 | ④ serving | （无） | 透传，仅无界线程池 | `fastapi_stream_server.py:20` |
+| 8 | ⑤ dashllm | `_priority_admission` | 高/低优先级槽位准入 | `processor.py:1495` |
+| 9 | ⑤ dashllm | `_input_queue` / `output_queue_map` | 线程交接 + 每请求输出解复用 | `_vllm_v1.py:580/451` |
+| 10 | ⑥ vLLM | **waiting 队列** | 引擎级请求排队 | `scheduler.py` |
+| 11 | ⑥ vLLM | `max_num_seqs` | running 并发上限 | schedule() |
+| 12 | ⑥ vLLM | `max_num_batched_tokens` | 每 step token 预算 | schedule() |
+| 13 | ⑥ vLLM | KV-cache block 准入 | `allocate_slots` 失败即背压/抢占 | schedule() |
+| 14 | ⑥ vLLM | `WAITING_FOR_REMOTE_KVS` | PD 消费端等 KV 传输 | `scheduler.py:828` |
 
-**一句话**：跨实例的"排队等资源"发生在 **② Turbo 全局批调度（Redis 队列 + 4 维准入）**；单实例内"逐 token 排队/背压"发生在 **⑤ vLLM 调度器（waiting/running + KV block 预算）**；网关(①)只做限流/拒绝/路由，服务层(③)透传。
+**一句话**：跨实例的"排队等资源"发生在 **② Turbo 全局批调度（Redis 队列 + 4 维准入）**；单实例内"逐 token 排队/背压"发生在 **⑥ vLLM 调度器（waiting/running + KV block 预算）**；网关(①)只做限流/拒绝/路由，业务服务层(④)主要负责预处理和透传。
 
 ---
 
@@ -217,3 +225,306 @@ P（Prefill）与 D（Decode）是**两个不同的物理服务**。网关（Vir
 | vLLM 调度器 | `vllm/vllm/v1/core/sched/scheduler.py`（waiting/running、schedule()、allocate_slots）|
 
 > 备注：部署是否启用 PD 分离 / 一体式(integrated) / 具体批调度策略，均由配置决定；本文描述的是 decoupled + batching 的典型 LLM 文本链路。
+
+---
+
+## 7. Service → Pod → DP rank：请求究竟怎样选中执行位置
+
+这一节区分四个经常被混为一谈的对象：
+
+1. **Virtual Service**：用户请求中的逻辑服务 ID。
+2. **Physical Service**：某个集群中的实际部署/资源池。
+3. **Pod/Replica**：物理服务下的一个服务实例，通常暴露 Turbo endpoint。
+4. **engine slot / DP rank**：Pod 内一个独立的 engine worker；线上 header 使用
+   0-based `engineIdx`，而口语中的“DP-rank1/2”通常是 1-based。
+
+![Service 到 DP rank 的分层调度](hierarchical_request_routing.svg)
+
+### 7.1 第一层：Virtual Service 选择 Physical Service
+
+`dashscope-api` 的首帧处理顺序是：
+
+```text
+VirtualRouteHandler
+  → RequestForwardHandler（目标在其他集群时）
+  → PhysicalRouteHandler
+  → RequestBalanceHandler
+  → BackendService.invoke()
+```
+
+`VirtualRouteService` 先执行 Filter，再运行 weighted、bin-pack、cache-aware、
+length-aware 等 Selector，最终得到 `physicalServiceId`。这层最多选择到“哪个集群中的哪个部署”，
+还没有选择具体 Pod 或 DP rank。
+
+控制面上，`dashscope-manager` 将 Virtual/Physical route 发布到各集群 API Server；
+`dashscope-scaler` 根据 metric → decide → limit → reallocate → execute 流程调整副本数。
+二者会改变候选集合和容量，但不执行单请求的实时 Pod 选择。
+
+### 7.2 第二层：Physical Service 选择 Pod——三条不同路径
+
+#### 路径 A：普通 Nacos / PAI-EAS balance
+
+API 从 Nacos 读取健康实例并 round-robin：
+
+```text
+physicalServiceId
+  → ServiceRoute.endpoint(addressType=NacosService)
+  → selectInstances(serviceName, healthy=true)
+  → RoundRobinBalancer
+  → podIP:turboPort
+```
+
+Turbo 只有在后端健康后才注册 Nacos；连续不健康或收到 SIGTERM 时注销。因此 Nacos 列表本身
+已经做了一轮 Pod 健康过滤。
+
+这一层不读取每个 DP 的 token 数。若请求没有携带 `x-ds-multi-engine-index`，Pod 内再按
+本地默认策略选择 engine worker。
+
+#### 路径 B：外部 router / scheduler
+
+当 backend protocol 为 `router` 或 `scheduler` 时，API 调用外部调度器，得到：
+
+```text
+endpoint = podIP:port
+instanceId = podCanonicalId_index_i
+engineIdx = i
+```
+
+API 将 `engineIdx` 写入：
+
+```text
+x-ds-multi-engine-index: i
+```
+
+并把请求发往所选 Pod 的 Turbo 8887 端口。Turbo 对这个 engine 做 per-engine running、
+prefilling、token 准入；过载时返回 `THROTTLING_CONCURRENCY`，API 把失败 instance ID
+加入排除列表，再请求 scheduler 重排。
+
+所以这条路径的调度对象不是单纯 Pod，而是一个**逻辑实例 `Pod + engineIdx`**。
+
+> 当前 `dash*` 仓库只包含 scheduler/router 客户端协议、结果解析、失败排除和重调度；
+> 外部 scheduler 的候选打分、token load 权重以及同分 tie-break 算法不在这些仓库中。
+> 因而只看当前源码，不能断言它一定执行“选择 running token 最少的 engine”。
+
+#### 路径 C：global batching
+
+batching 请求先进入 Redis 队列，Turbo 作为消费者主动拉取。没有显式配置
+`scheduler_type` 时，代码默认使用 `batch-level`：
+
+```java
+if (schedulerType is blank) {
+    schedulerType = BATCH_LEVEL;
+}
+```
+
+默认 `BatchLevelScheduler` 的关键行为是：
+
+1. 各 Pod 的 Turbo 竞争 Redis queue lock。
+2. 获得锁的 Turbo 用 `RPOP` 拉取一批请求。
+3. 谁先拿到锁/先轮询到请求，谁取得这批流量。
+4. `BatchLevelScheduler.getRunningTokenNum()` 直接返回 `0`，它不会汇总全部 Pod/DP
+   的 running token 再做全局最小值选择。
+
+PD-prefill、cache-aware、sticky 等 scheduler 会维护每个本地 engine 的 running/prefilling
+batch/token 指标，用于容量门限、bucket 归属和拉取资格；但其基本形态仍是多个合格消费者竞争/
+分片拉取，不等价于一个中心组件对所有 engine 做简单 `argmin(runningTokenNum)`。
+
+### 7.3 第三层：Turbo 的 engineIdx 准入
+
+对于 router/scheduler 路径，Turbo 读取 `x-ds-multi-engine-index`：
+
+- `0 <= i < engineNum`：对 engine `i` 做准入并转发。
+- `i=-1`、缺失、无法解析或越界：随机选择合法 engine，并把真实结果写回 header。
+- 对应 engine 过载：拒绝本次尝试，交给 API/scheduler 重排；最后一次尝试可用
+  `force_accept` 强制接受。
+
+因此外部 scheduler 的选择不是无条件生效：Turbo 是 Pod 内最后一道容量保护。
+
+### 7.4 第四层：dashserving 如何把 engineIdx 映射到 Worker
+
+`dashserving` Daemon 维护：
+
+```text
+capability JSON → [workerAddress0, workerAddress1, ...]
+```
+
+默认 balance mode 下：
+
+```text
+有 engineIdx=i  → workerAddresses[i]
+无 engineIdx     → 健康 worker round-robin
+index 越界       → fallback round-robin
+```
+
+可选 `DSV_BALANCE_MODE`：
+
+| mode | engineIdx 行为 | 无显式 index 时 |
+|---|---|---|
+| Default | 精确路由 | 健康 worker round-robin |
+| `rr` | **忽略** | round-robin |
+| `lc` | **忽略** | 按 inflight request 数最少；不是 token 数 |
+| `prefix` | 精确 index 优先 | prefix affinity，过载时临时 least-loaded |
+
+配置优先级为 `UniConfig > DSV_BALANCE_MODE env > Default`。若需要外部 scheduler 指定的
+engineIdx 严格落到对应 worker，应使用 Default 或 `prefix`，而不是 `rr/lc`。
+
+### 7.5 一体化 Chat + Model 为什么是“两跳”
+
+当前 DServ 一体化启动顺序是：
+
+```bash
+dashserving run \
+  dashllm.worker.llm:worker \
+  app.qwen_bailian_app:worker \
+  --backend 'kserve://{"capability":{"type":"chat"}}'
+```
+
+Pod 内链路：
+
+```text
+Turbo
+  → capability={"type":"chat"}
+  → 任一健康 chat worker
+  → dashscope-serving 构造 prompt/input_ids
+  → 把原 header（包括 engineIdx）写入 ds_header_attributes
+  → LLMClientV1 本地二次调用
+  → capability={}
+  → engineIdx 对应的 dashllm engine worker
+```
+
+Daemon 发现同 Pod 存在 `dashllm.worker.llm:worker` 时，第一跳选择 chat worker会故意忽略
+engineIdx，避免用模型 engine 的编号错误索引 chat worker；第二跳到模型 capability 时才按
+engineIdx 精确选择 dashllm worker。
+
+### 7.6 engineIdx 到 vLLM DP rank
+
+Daemon 按顺序启动 worker，并设置：
+
+```text
+DSV_WORKER_GLOBAL_INDEX=i
+  → Python worker 启动前设置 DS_LLM_PROC_RANK=i
+```
+
+当前 launcher 将 dashllm engine worker 放在列表最前面，因此其 global index、注册表地址顺序
+和 Pod 内 engineIdx 都是 `0..N-1`。这是精确映射成立的重要部署不变量。
+
+vLLM 的全局 DP rank 计算为：
+
+```text
+dp_rank =
+    RANK_ID * DS_LLM_MULTI_ENGINE_NUM
+    + DS_LLM_PROC_RANK
+
+if dp_rank >= data_parallel_size:
+    dp_rank %= data_parallel_size
+```
+
+单节点、两个 engine 时，`RANK_ID=0`，所以 `engineIdx=0/1` 对应口语中的
+`DP-rank1/2`。多节点时 `RANK_ID` 是分布式节点 rank，不能无条件等同于 K8s Pod ordinal。
+
+### 7.7 具体例子：2 个 Pod，每个 Pod 有 2 个 DP
+
+假设下面的数字是每个 engine 当前的 `runningTokenNum`，所有实例都健康：
+
+| 逻辑实例 | 代码中的 engineIdx | 当前 running token |
+|---|---:|---:|
+| pod1-DP-rank1 | 0 | 10 |
+| pod1-DP-rank2 | 1 | 20 |
+| pod2-DP-rank1 | 0 | 9 |
+| pod2-DP-rank2 | 1 | 9 |
+
+现在到来一个输入长度为 9 token 的请求。
+
+#### 按本文典型配置的默认 global batching（`batch-level`）
+
+**无法仅凭这四个 token 数确定目标。**
+
+默认 `batch-level` 不执行：
+
+```text
+argmin([10, 20, 9, 9])
+```
+
+而是由 pod1/pod2 的 Turbo 竞争 Redis queue lock 并拉取请求。因此：
+
+- pod1 先获得锁，请求就可能进入 pod1；
+- pod2 先获得锁，请求就可能进入 pod2；
+- 后续 Pod 内 worker 选择还取决于是否已经有 engineIdx、dashserving balance mode 和
+  本地 scheduler；
+- 请求自身“9 token”主要用于入队信息、容量检查和后续 token 计数，不会自动使它被发往
+  当前恰好有 9 running token 的 engine。
+
+所以对“目前默认模式会去哪里”的严格回答是：**不确定，四个逻辑实例都有可能，不能由这组
+token 快照唯一推导。**
+
+#### 普通 Nacos + dashserving Default
+
+同样无法由 token 数决定。API 先 round-robin 选 Pod，Pod 内没有 engineIdx 时 Daemon 再
+round-robin 选健康 engine worker。结果由两个 round-robin cursor 的当前位置决定。
+
+#### 外部 router/scheduler
+
+当前仓库看不到外部 scheduler 的打分实现，因此也不能从源码证明结果。如果线上策略确实是
+“选择 running token 最少的逻辑实例”，最小值有两个：
+
+```text
+pod2-DP-rank1 = 9
+pod2-DP-rank2 = 9
+```
+
+此时一定会选择 **pod2**，但 rank1/rank2 仍取决于 scheduler 的同分 tie-break。若额外规定
+“同分选 engineIdx 最小”，则结果是：
+
+```text
+pod2-DP-rank1（engineIdx=0）
+```
+
+接收请求后，如果简单把 9 个输入 token 加到 running token 计数，其负载会从 `9 → 18`。
+但“同分选最小 index”只是讲解用的显式假设，不是当前可见源码能够证明的线上规则。
+
+#### dashserving `lc` 也不是 least-token
+
+`lc` 比较的是每个 worker 的 **inflight 请求数**，不是 running token。四个 token 数即使不同，
+只要 inflight 数相同，仍通过内部 tie-break 选 worker；不能根据 `10/20/9/9` 推导结果。
+
+### 7.8 要让这个例子可唯一回答，需要哪些观测
+
+至少还需要：
+
+1. ServiceRoute 的 backend protocol：Nacos、batching、router 还是 scheduler。
+2. batching 的 `scheduler_type` 和 `scheduler_config`。
+3. dashserving 当前 `DSV_BALANCE_MODE`/UniConfig。
+4. 请求是否已携带 `x-ds-multi-engine-index`。
+5. 外部 scheduler 的实际打分与 tie-break 配置。
+6. token 数的语义：input token、running token、prefilling token，还是剩余 token。
+
+线上排查时应同时记录：
+
+```text
+physicalServiceId
+backend_protocol
+selected endpoint / instanceId / engineIdx
+x-ds-multi-engine-index
+dashserving worker address / DS_LLM_PROC_RANK
+vLLM data_parallel_rank
+```
+
+这样才能把一次请求从 Service、Pod 一直关联到最终 DP rank。
+
+### 7.9 本节关键源码
+
+| 主题 | 文件 |
+|---|---|
+| API 首帧路由顺序 | `dashscope-platform/dashscope-api/.../HandlerPipeline.java:91-106` |
+| Virtual Service selector | `.../VirtualRouteService.java:69-89,136-205` |
+| Nacos 健康实例与 RR | `.../NacosBalanceService.java:75-106`、`RoundRobinBalancer.java:74-82` |
+| Turbo Nacos 注册/摘除 | `dashscope-turbo/.../NacosRegistrationService.java:159-205,247-270` |
+| scheduler 返回 endpoint/engineIdx | `.../SchedulerBackendHandler.java:136-151` |
+| router session / 重排 | `.../RouterScheduleSession.java:268-305,474-505` |
+| Turbo per-engine 准入 | `.../DeepPilotRouterHandler.java:94-119,199-239` |
+| batching 默认策略 | `.../GlobalBatchingSchedulerSelector.java:32-42` |
+| batch-level 队列竞争 | `.../BatchLevelScheduler.java:235-305` |
+| dashserving 本地 balance | `dashserving/rsrc/routing/capability.rs:315-365,740-755` |
+| worker index 环境变量 | `dashserving/rsrc/worker/manager.rs:414-424` |
+| Chat header 二次透传 | `dashscope-serving/.../gpt3_service.py:695-745` |
+| vLLM DP rank 计算 | `dashllm/core/backend/_backend_vllm.py:548-567` |

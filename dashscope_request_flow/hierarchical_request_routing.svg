@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820">
+  <defs>
+    <style>
+      .title { font: 700 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172033; }
+      .subtitle { font: 400 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #536078; }
+      .box-title { font: 700 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172033; }
+      .text { font: 400 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #29344a; }
+      .small { font: 400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #536078; }
+      .code { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #29344a; }
+      .arrow { stroke: #52627a; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+      .dashed { stroke: #8b97aa; stroke-width: 1.8; stroke-dasharray: 7 6; fill: none; marker-end: url(#arrowMuted); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#52627a"/>
+    </marker>
+    <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8b97aa"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-15%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#23304a" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="820" fill="#f7f9fc"/>
+  <text x="640" y="46" text-anchor="middle" class="title">DashScope 分层调度：Service → Pod → engine worker → DP rank</text>
+  <text x="640" y="74" text-anchor="middle" class="subtitle">每一层只解决自己的选择问题；token 负载是否参与取决于实际 backend protocol 与 scheduler 配置</text>
+
+  <g filter="url(#shadow)">
+    <rect x="460" y="105" width="360" height="82" rx="14" fill="#e8f0ff" stroke="#5b7fd6" stroke-width="2"/>
+    <text x="640" y="136" text-anchor="middle" class="box-title">1. dashscope-api：Virtual Route</text>
+    <text x="640" y="163" text-anchor="middle" class="text">virtualServiceId → cluster + physicalServiceId</text>
+  </g>
+
+  <path d="M640 188 L640 228" class="arrow"/>
+
+  <g filter="url(#shadow)">
+    <rect x="375" y="230" width="530" height="92" rx="14" fill="#eef8f3" stroke="#4e9a72" stroke-width="2"/>
+    <text x="640" y="262" text-anchor="middle" class="box-title">2. ServiceRoute：选择 Pod 的方式</text>
+    <text x="640" y="289" text-anchor="middle" class="text">Nacos RR ｜ 外部 router/scheduler ｜ Redis global batching</text>
+    <text x="640" y="311" text-anchor="middle" class="small">只有 scheduler/router 会显式返回 endpoint + engineIdx；batching 默认是消费者竞争拉取</text>
+  </g>
+
+  <path d="M505 322 C505 350 305 348 305 382" class="arrow"/>
+  <path d="M775 322 C775 350 975 348 975 382" class="arrow"/>
+
+  <g filter="url(#shadow)">
+    <rect x="85" y="385" width="440" height="238" rx="16" fill="#ffffff" stroke="#6f8fc8" stroke-width="2"/>
+    <text x="305" y="418" text-anchor="middle" class="box-title">Pod 1 · Turbo / dashserving Daemon</text>
+    <text x="305" y="442" text-anchor="middle" class="small">pod1 endpoint；健康注册/摘流；per-engine 准入</text>
+
+    <rect x="115" y="472" width="180" height="112" rx="12" fill="#f1f5ff" stroke="#7c96d1"/>
+    <text x="205" y="500" text-anchor="middle" class="box-title">engineIdx 0</text>
+    <text x="205" y="526" text-anchor="middle" class="text">engine worker 0</text>
+    <text x="205" y="550" text-anchor="middle" class="code">DS_LLM_PROC_RANK=0</text>
+    <text x="205" y="573" text-anchor="middle" class="small">口语：DP-rank1</text>
+
+    <rect x="315" y="472" width="180" height="112" rx="12" fill="#f1f5ff" stroke="#7c96d1"/>
+    <text x="405" y="500" text-anchor="middle" class="box-title">engineIdx 1</text>
+    <text x="405" y="526" text-anchor="middle" class="text">engine worker 1</text>
+    <text x="405" y="550" text-anchor="middle" class="code">DS_LLM_PROC_RANK=1</text>
+    <text x="405" y="573" text-anchor="middle" class="small">口语：DP-rank2</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="755" y="385" width="440" height="238" rx="16" fill="#ffffff" stroke="#6f8fc8" stroke-width="2"/>
+    <text x="975" y="418" text-anchor="middle" class="box-title">Pod 2 · Turbo / dashserving Daemon</text>
+    <text x="975" y="442" text-anchor="middle" class="small">pod2 endpoint；健康注册/摘流；per-engine 准入</text>
+
+    <rect x="785" y="472" width="180" height="112" rx="12" fill="#f1f5ff" stroke="#7c96d1"/>
+    <text x="875" y="500" text-anchor="middle" class="box-title">engineIdx 0</text>
+    <text x="875" y="526" text-anchor="middle" class="text">engine worker 0</text>
+    <text x="875" y="550" text-anchor="middle" class="code">DS_LLM_PROC_RANK=0</text>
+    <text x="875" y="573" text-anchor="middle" class="small">口语：DP-rank1</text>
+
+    <rect x="985" y="472" width="180" height="112" rx="12" fill="#f1f5ff" stroke="#7c96d1"/>
+    <text x="1075" y="500" text-anchor="middle" class="box-title">engineIdx 1</text>
+    <text x="1075" y="526" text-anchor="middle" class="text">engine worker 1</text>
+    <text x="1075" y="550" text-anchor="middle" class="code">DS_LLM_PROC_RANK=1</text>
+    <text x="1075" y="573" text-anchor="middle" class="small">口语：DP-rank2</text>
+  </g>
+
+  <path d="M205 584 C205 655 470 648 470 685" class="dashed"/>
+  <path d="M405 584 C405 635 545 648 545 685" class="dashed"/>
+  <path d="M875 584 C875 635 735 648 735 685" class="dashed"/>
+  <path d="M1075 584 C1075 655 810 648 810 685" class="dashed"/>
+
+  <g filter="url(#shadow)">
+    <rect x="320" y="686" width="640" height="96" rx="14" fill="#fff5e8" stroke="#d49445" stroke-width="2"/>
+    <text x="640" y="717" text-anchor="middle" class="box-title">3. dashllm / vLLM：局部 engineIdx → 全局 DP rank</text>
+    <text x="640" y="745" text-anchor="middle" class="code">dp_rank = RANK_ID × DS_LLM_MULTI_ENGINE_NUM + DS_LLM_PROC_RANK</text>
+    <text x="640" y="769" text-anchor="middle" class="small">单节点时 dp_rank≈engineIdx；多节点时还必须考虑分布式 RANK_ID</text>
+  </g>
+</svg>

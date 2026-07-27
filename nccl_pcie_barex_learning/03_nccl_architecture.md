@@ -52,6 +52,13 @@ crash 或 data corruption。
 
 ![NCCL 从 API 到数据面的架构](imgs/nccl_architecture.svg)
 
+如果你想继续追问“这些 rank 最初怎样成为一个 communicator”“运行中能否加入或
+删除节点”，请在本章后阅读
+[03a 通信组生命周期](03a_communication_group_lifecycle.md)。其中会把 PyTorch
+ProcessGroup、NCCL communicator、DeepEP Buffer 三层对象逐一对齐，并结合
+`new_group`、TorchElastic、`ncclCommGrow/Shrink` 和 DeepEP 源码说明动态成员
+的能力边界。
+
 ### 2.1 rank 是逻辑身份，不是 PCIe 编号
 
 NCCL rank 常与一张 CUDA device 一一对应，但它只是 communicator 内的 `[0,

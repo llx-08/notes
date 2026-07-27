@@ -49,6 +49,7 @@ KVT_ROOT=~/codes/blade-kvt
 | 2b | [02b RDMA 操作与完成](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/) | SEND/WRITE/READ、WR/CQ、RNR/retry 的精确语义是什么？ |
 | 2c | [02c RoCE 与拥塞](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/) | PFC、ECN/DCQCN、BDP 与重传如何影响 GPU 通信？ |
 | 3 | [03 NCCL 架构](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/) | communicator、channel、kernel、proxy 各做什么？ |
+| 3a | [03a 通信组生命周期](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03a-communication-group-lifecycle/) | PyTorch/NCCL/DeepEP 怎样建组？成员能否 grow、shrink 或热加入？ |
 | 4 | [04 NCCL 拓扑与传输](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-04-nccl-topology-and-transport/) | P2P/SHM/NET 如何选择？PCIe/NVLink/NIC 如何串起来？ |
 | 5 | [05 NCCL 算法与协议](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-05-nccl-algorithms-protocols-and-performance/) | Ring/Tree 与 Simple/LL/LL128 如何影响性能？ |
 | 6 | [06 Barex 架构](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-06-barex-architecture/) | XContext/XChannel/MR/WR/CQ 的对象与线程模型是什么？ |

@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="920" viewBox="0 0 1400 920">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#64748b"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity=".10"/>
+    </filter>
+  </defs>
+
+  <rect width="1400" height="920" rx="20" fill="#f8fafc"/>
+  <text x="40" y="48" font-family="Arial, PingFang SC, sans-serif" font-size="27" font-weight="700" fill="#172033">通信组怎样从“几台机器”变成可传 GPU Tensor 的数据面</text>
+  <text x="40" y="78" font-family="Arial, PingFang SC, sans-serif" font-size="15" fill="#526078">两节点、每节点两进程示例；橙色是控制面，蓝/绿/紫色是逐层创建的数据面对象</text>
+
+  <text x="45" y="120" font-family="Arial, PingFang SC, sans-serif" font-size="18" font-weight="700" fill="#172033">A. 成员和编号</text>
+
+  <rect x="45" y="140" width="300" height="225" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="2" filter="url(#shadow)"/>
+  <text x="65" y="172" font-family="Arial, PingFang SC, sans-serif" font-size="17" font-weight="700" fill="#172033">Node A</text>
+  <rect x="65" y="193" width="260" height="62" rx="9" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="80" y="217" font-family="Arial, PingFang SC, sans-serif" font-size="14" font-weight="700" fill="#172033">worker A0 · global rank 0</text>
+  <text x="80" y="239" font-family="Arial, PingFang SC, sans-serif" font-size="13" fill="#526078">LOCAL_RANK 0 → cuda:0</text>
+  <rect x="65" y="273" width="260" height="62" rx="9" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="80" y="297" font-family="Arial, PingFang SC, sans-serif" font-size="14" font-weight="700" fill="#172033">worker A1 · global rank 1</text>
+  <text x="80" y="319" font-family="Arial, PingFang SC, sans-serif" font-size="13" fill="#526078">LOCAL_RANK 1 → cuda:1</text>
+
+  <rect x="375" y="140" width="300" height="225" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="2" filter="url(#shadow)"/>
+  <text x="395" y="172" font-family="Arial, PingFang SC, sans-serif" font-size="17" font-weight="700" fill="#172033">Node B</text>
+  <rect x="395" y="193" width="260" height="62" rx="9" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="410" y="217" font-family="Arial, PingFang SC, sans-serif" font-size="14" font-weight="700" fill="#172033">worker B0 · global rank 2</text>
+  <text x="410" y="239" font-family="Arial, PingFang SC, sans-serif" font-size="13" fill="#526078">LOCAL_RANK 0 → cuda:0</text>
+  <rect x="395" y="273" width="260" height="62" rx="9" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="410" y="297" font-family="Arial, PingFang SC, sans-serif" font-size="14" font-weight="700" fill="#172033">worker B1 · global rank 3</text>
+  <text x="410" y="319" font-family="Arial, PingFang SC, sans-serif" font-size="13" fill="#526078">LOCAL_RANK 1 → cuda:1</text>
+
+  <rect x="715" y="140" width="640" height="225" rx="14" fill="#fff7ed" stroke="#d97706" stroke-width="2" filter="url(#shadow)"/>
+  <circle cx="755" cy="178" r="19" fill="#d97706"/>
+  <text x="755" y="184" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#fff">1</text>
+  <text x="790" y="184" font-family="Arial, PingFang SC, sans-serif" font-size="17" font-weight="700" fill="#172033">torchrun / Elastic Agent + Rendezvous</text>
+  <text x="745" y="218" font-family="Arial, PingFang SC, sans-serif" font-size="14" fill="#526078">成员到齐 → 确定 generation → 分配 RANK / WORLD_SIZE → 告知 MASTER_ADDR / PORT</text>
+  <rect x="745" y="242" width="580" height="88" rx="9" fill="#ffffff" stroke="#f59e0b"/>
+  <text x="765" y="268" font-family="Arial, PingFang SC, sans-serif" font-size="14" font-weight="700" fill="#172033">TCPStore / PrefixStore（小元数据控制面）</text>
+  <text x="765" y="293" font-family="Arial, PingFang SC, sans-serif" font-size="13" fill="#526078">set/get：group namespace、NCCL unique ID、地址/handle、barrier key</text>
+  <text x="765" y="315" font-family="Arial, PingFang SC, sans-serif" font-size="13" fill="#526078">模型 tensor 不通过这里传输</text>
+
+  <line x1="700" y1="390" x2="700" y2="420" stroke="#64748b" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <rect x="45" y="425" width="1310" height="100" rx="14" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+  <circle cx="82" cy="475" r="19" fill="#2563eb"/>
+  <text x="82" y="481" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#fff">2</text>
+  <text x="120" y="461" font-family="Arial, PingFang SC, sans-serif" font-size="17" font-weight="700" fill="#172033">PyTorch：init_process_group → default ProcessGroup WORLD</text>
+  <text x="120" y="489" font-family="Arial, PingFang SC, sans-serif" font-size="14" fill="#526078">有序成员 [0,1,2,3] · global↔group rank 映射 · Store · backend=NCCL · group_name/generation</text>
+  <text x="120" y="511" font-family="Arial, PingFang SC, sans-serif" font-size="13" fill="#526078">new_group([0,2]) 会另建子 ProcessGroup；不会修改 WORLD，也不能引入 WORLD 外的 rank</text>
+
+  <line x1="700" y1="525" x2="700" y2="555" stroke="#64748b" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <rect x="45" y="560" width="1310" height="116" rx="14" fill="#ecfdf5" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
+  <circle cx="82" cy="618" r="19" fill="#059669"/>
+  <text x="82" y="624" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#fff">3</text>
+  <text x="120" y="594" font-family="Arial, PingFang SC, sans-serif" font-size="17" font-weight="700" fill="#172033">ProcessGroupNCCL：为 CUDA device 创建/缓存 ncclComm_t</text>
+  <text x="120" y="622" font-family="Arial, PingFang SC, sans-serif" font-size="14" fill="#526078">rank 0: ncclGetUniqueId → Store.set；其他 rank: Store.get → 所有人 ncclCommInitRank(nranks, id, rank)</text>
+  <text x="120" y="648" font-family="Arial, PingFang SC, sans-serif" font-size="13" fill="#526078">NCCL bootstrap → topology → ring/tree/channel → P2P/SHM/NET connectors；未给 device_id 时常在首个 collective 懒创建</text>
+
+  <line x1="700" y1="676" x2="700" y2="706" stroke="#64748b" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <rect x="45" y="711" width="1310" height="122" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
+  <circle cx="82" cy="772" r="19" fill="#7c3aed"/>
+  <text x="82" y="778" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#fff">4</text>
+  <text x="120" y="745" font-family="Arial, PingFang SC, sans-serif" font-size="17" font-weight="700" fill="#172033">DeepEP：Buffer / ElasticBuffer(group=ep_group)</text>
+  <text x="120" y="775" font-family="Arial, PingFang SC, sans-serif" font-size="14" fill="#526078">读取 group.rank()/size() → 交换 device ID、CUDA IPC handle、NVSHMEM/NCCL 信息 → 建 EP 专用 buffer/QP/runtime</text>
+  <text x="120" y="802" font-family="Arial, PingFang SC, sans-serif" font-size="13" fill="#526078">初始化完成后，dispatch/combine 的 token payload 才走 NVLink / PCIe / RDMA / NCCL GIN 数据面</text>
+
+  <rect x="45" y="855" width="410" height="40" rx="9" fill="#fff7ed" stroke="#d97706"/>
+  <text x="250" y="881" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="700" fill="#92400e">控制面：建群、编号、交换很小的元数据</text>
+  <rect x="480" y="855" width="875" height="40" rx="9" fill="#ecfeff" stroke="#0f766e"/>
+  <text x="917" y="881" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="700" fill="#115e59">数据面：NCCL collective / DeepEP token payload；不通过 TCPStore 搬大 tensor</text>
+</svg>
