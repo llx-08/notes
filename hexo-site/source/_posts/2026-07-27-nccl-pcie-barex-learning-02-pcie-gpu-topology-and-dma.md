@@ -47,17 +47,98 @@ payload 仍是那 64 MiB 原始字节；DMA 描述符只是告诉硬件去哪里
 不能只算一次 1.98 ms。Direct GDR 省掉 host 中转，但仍要经历 GPU↔NIC 的 PCIe
 访问和网络传输。
 
-## 1. 三种搬运路径
+## 1. 四种需要分清的搬运路径
 
-### 1.1 CPU bounce buffer
+### 1.1 通用 Host staging / CPU bounce buffer
 
 ```text
-GPU A ─D2H→ Host memory ─network→ Host memory ─H2D→ GPU B
+Source GPU
+  → D2H copy
+  → source host buffer
+  → I/O device / network
+  → destination host buffer
+  → H2D copy
+  → Destination GPU
 ```
 
-需要 GPU copy engine、CPU/host memory 带宽和额外同步。TCP 与 blade-kvt staged 路径属于这一大类，虽然实际网络 copy 可能仍由 NIC DMA 完成。
+Host staging 是一个**通用架构模式**，并不是 blade-kvt 定义的协议。只要某个 I/O
+设备或通信栈不能直接访问 GPU memory，应用或通信库就可以先把数据复制到它能访问
+的 host buffer，再完成 I/O。
 
-### 1.2 GPU P2P
+中间 host buffer 通常使用 pinned/page-locked memory，因为它：
+
+- 不会在 DMA 期间被 OS 换出或迁移；
+- 能建立稳定的 GPU/NIC DMA mapping；
+- 支持真正的异步 CUDA D2H/H2D copy；
+- 可以复用，避免每次传输临时 pin/unpin。
+
+但“host staged”只规定 payload 经 host memory 中转，**不规定**：
+
+- 一定使用 TCP 还是 RDMA；
+- 一定由 GPU copy engine、GPU kernel 还是 CPU `memcpy` 完成 gather/scatter；
+- buffer 一定在物理地址上连续；
+- 一个应用传输对应一个网络 packet。
+
+例如 MPI、UCX 或自研通信库都可能实现 GPU→pinned host→NIC 的 fallback。NVIDIA
+对传统 I/O 路径的概括也是：peer device 与 GPU 之间先经过 system memory，需要
+两次 DMA；GPUDirect RDMA 才移除这个 bounce buffer。
+
+### 1.2 普通 Linux TCP socket 的 GPU→GPU 路径
+
+最常见、没有 GPU-direct socket 扩展的 TCP 路径比上一节还要多出 Linux socket
+层：
+
+```text
+发送端
+Source GPU/HBM
+  → CUDA D2H
+  → application host buffer
+  → send()/write()/sendmsg()
+  → kernel TCP send buffer / sk_buff
+  → TCP 分段、IP/Ethernet header、qdisc
+  → NIC TX descriptor
+  → NIC DMA-read host pages
+  → Ethernet
+
+接收端
+Ethernet
+  → NIC DMA-write RX buffers
+  → NAPI / IP / TCP
+  → kernel socket receive buffer
+  → recv()/read()
+  → application host buffer
+  → CUDA H2D
+  → Destination GPU/HBM
+```
+
+初学时可以先把普通 `send()`/`recv()` 理解为：
+
+```text
+GPU → 用户态 host buffer → 内核 socket buffer → NIC
+NIC → 内核 socket buffer → 用户态 host buffer → GPU
+```
+
+其中 CPU 运行 CUDA API、系统调用和 TCP/IP 协议栈；GPU copy engine 或 kernel
+负责 D2H/H2D；NIC DMA engine 负责 host memory 与网线之间的数据移动。这里的
+“CPU 参与”不等于 CPU core 亲自驱动网线发送每个 bit。
+
+几个重要例外和优化：
+
+- `sendmsg/writev` 可以让一次系统调用描述多个 `iovec`，即 scatter-gather
+  user buffers；这减少 syscall 次数，但不保证完全没有 copy。
+- Linux `MSG_ZEROCOPY` 可以对较大的 host buffer 避免发送侧 user→kernel
+  payload copy，但要 pin page 并异步回收；Linux 文档指出它通常在约 10 KiB
+  以上才可能划算。
+- GSO/TSO 可以让协议栈一次交给 NIC 一个较大的逻辑 TCP segment，由软件或 NIC
+  再按 MSS 分段。应用的大 `send` 仍不会变成一个超大 Ethernet frame。
+- 新的 dma-buf/device-memory TCP 属于专门扩展，不能反推普通 socket 可以直接
+  `send(cuda_pointer)`。
+
+因此 TCP 也属于 host-staged 大类，但普通 TCP 的 host path 往往同时包含
+application buffer 与 kernel socket buffer；“host staged RDMA”则可以让 RNIC
+直接 DMA 已注册的 pinned host MR，二者不能画成完全相同的协议栈。
+
+### 1.3 GPU P2P
 
 同机 GPU 可通过 NVLink 或 PCIe P2P 直接访问对端显存，不经过用户态 host bounce buffer。
 
@@ -65,7 +146,7 @@ GPU A ─D2H→ Host memory ─network→ Host memory ─H2D→ GPU B
 GPU0 ── NVLink / PCIe Switch ── GPU1
 ```
 
-### 1.3 GPUDirect RDMA
+### 1.4 GPUDirect RDMA
 
 NIC 直接 DMA GPU memory：
 
@@ -75,7 +156,23 @@ GPU memory ←→ GPU BAR / peer mapping ←→ PCIe fabric ←→ NIC DMA
 
 CPU 仍负责建联、注册内存、post WR 和处理 completion，但不搬运 payload。
 
-![Host staged 与 GPUDirect RDMA 数据路径](/imgs/gpudirect_paths.svg)
+![普通 TCP、通用 Host staged 与 GPUDirect RDMA 数据路径](/imgs/gpudirect_paths.svg)
+
+#### 这张图依据什么
+
+这张图首先是**通用机制图，不是从 blade-kvt 代码反推出来的标准定义**：
+
+- Host-staged 与 GPUDirect RDMA 的边界依据 NVIDIA GPUDirect RDMA 文档：前者
+  经过 system memory bounce buffer，后者允许第三方 PCIe device 直接访问
+  GPU memory。
+- TCP 一列依据标准 Linux socket 数据路径、`sendmsg/iovec`、GSO/TSO 和 NIC
+  queue/DMA 机制。
+- pinned host memory 的作用依据 CUDA Programming Guide。
+
+blade-kvt 是它的一个具体实例：TCP/staged 路径选择用 GPU kernel 把离散 KV
+block gather 到连续的 pinned host wire buffer，对端再按 metadata scatter；
+别的库完全可以用 `cudaMemcpyAsync`、多个 `iovec`、预注册 buffer pool 或其他
+方式实现同一个通用 host-staged 模式。
 
 ## 2. 为什么“同一台机器”还不够
 
@@ -128,24 +225,78 @@ nvidia-smi topo -p2p n
 
 对 blade-kvt，应同时看 GPU↔NIC 距离，而不是只看 GPU↔GPU。
 
-## 4. NUMA 的两种影响
+## 4. NUMA：为什么同一地址类型会有不同访问代价
 
-### 4.1 控制面
+NUMA 是 **Non-Uniform Memory Access，非一致内存访问架构**。“非一致”不是说
+数据内容不一致，而是说：CPU 或 I/O device 访问不同位置的 memory 时，延迟、
+带宽和经过的互连不同。
+
+### 4.1 从硬件结构理解 NUMA node
+
+一台服务器可以抽象成多个 node：
+
+```text
+NUMA node 0
+  ├─ CPU cores 0..N
+  ├─ LLC / coherence-home agents
+  ├─ memory controllers 0..M → local DRAM 0
+  └─ PCIe Root Ports → GPU0 / NIC0 / NVMe0
+
+NUMA node 1
+  ├─ CPU cores ...
+  ├─ other memory controllers → local DRAM 1
+  └─ other PCIe Root Ports → GPU1 / NIC1
+
+node 0 ◄──── socket/SoC interconnect ────► node 1
+```
+
+对 node 0 的 core 来说：
+
+```text
+访问 node 0 DRAM：local memory access
+访问 node 1 DRAM：remote memory access
+```
+
+remote access 必须多经过 UPI/QPI、Infinity Fabric 或 SoC fabric，通常增加延迟，
+占用跨 node 带宽。NUMA 不严格等于“多 CPU socket”：一个 socket/大型 SoC
+也可能暴露多个 NUMA node；反过来，平台也可能把多个硬件域交织成较少的 OS node。
+
+Linux 的 NUMA node 同时描述：
+
+- 哪些 logical CPUs 靠近哪些 memory controllers/DRAM；
+- 一块物理页属于哪个 memory node；
+- PCIe device 靠近哪个 node；
+- node-to-node 的相对 distance。
+
+普通匿名内存常遵循 first-touch：哪个 node 上的 CPU thread 第一次实际写入页面，
+页面往往就分配到哪个 node；`numactl --membind/--preferred/--interleave` 可以改变
+policy。Pinned memory 只是把页锁住，并不会自动把已经分错 node 的页面迁到 NIC
+附近。
+
+### 4.2 控制面
 
 创建 QP、post WR、poll CQ 的 CPU thread 如果跑在远端 NUMA node，会增加 MMIO、cache miss 和内存访问延迟。
 
-### 4.2 数据面
+### 4.3 数据面
 
 - staged/TCP 路径经过 host pinned buffer，直接消耗该 NUMA node 的内存带宽。
 - direct GDR payload 不经 host DRAM，但拓扑仍可能经过 CPU I/O fabric。
+
+例如 source GPU、RNIC 和 pinned buffer 分别位于三个不同 node 时，D2H、NIC DMA
+和控制线程可能都跨 NUMA。只绑定 CPU、不绑定 memory，或者只选择亲和 NIC、不管
+host buffer 的 node，都可能留下瓶颈。
 
 检查：
 
 ```bash
 numactl --hardware
+numactl --show
 cat /sys/bus/pci/devices/0000:65:00.0/numa_node
 cat /sys/bus/pci/devices/0000:17:00.0/numa_node
 ```
+
+sysfs 返回 `-1` 时表示内核没有给这个 device 提供明确的 NUMA affinity，不表示
+“访问所有 node 一样快”。仍要结合 `lspci -tv`、固件拓扑和实测。
 
 ## 5. IOMMU、ACS 与 P2P
 
@@ -250,9 +401,19 @@ dmesg | rg -i 'iommu|dmabuf|peer.?mem|rdma'
 2. 为什么 `rkey` 不能在目标进程重启后继续复用？
 3. 为什么 WRITE_WITH_IMM 可能遇到 RNR，而普通 RDMA WRITE 通常不消耗接收 WR？
 4. 为什么 staged 模式的网络很快，端到端仍可能慢？
+5. 普通 TCP 从 GPU 到 GPU 通常经过哪些 user/kernel/host buffer？TSO 为什么没有
+   消除 D2H/H2D？
+6. Host staging 为什么是通用模式，而不是 blade-kvt 独有的 copy kernel？
+7. NUMA 的“non-uniform”究竟指数据不一致，还是访问代价不一致？
+8. Pinned buffer 为什么仍可能分配在错误的 NUMA node？
 
 ## 参考
 
 - [NVIDIA GPUDirect RDMA](https://docs.nvidia.com/cuda/archive/12.6.3/gpudirect-rdma/index.html)
+- [NVIDIA CUDA Programming Guide：Page-Locked Host Memory](https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html#page-locked-host-memory)
+- [Linux：`sendmsg` 与 scatter-gather `iovec`](https://man7.org/linux/man-pages/man2/sendmsg.2.html)
+- [Linux：`MSG_ZEROCOPY`](https://docs.kernel.org/networking/msg_zerocopy.html)
+- [Linux：TCP Segmentation Offload / GSO / GRO](https://docs.kernel.org/networking/segmentation-offloads.html)
+- [Linux：NUMA memory policy](https://docs.kernel.org/admin-guide/mm/numa_memory_policy.html)
 - [Linux PCI Peer-to-Peer DMA Support](https://docs.kernel.org/driver-api/pci/p2pdma.html)
 - [NVIDIA GPUDirect 概览](https://developer.nvidia.com/gpudirect)

@@ -113,6 +113,113 @@ QP-A1 不能使用 MR-B1 的 lkey
 
 多 NIC/多 PD 场景里，“同一个虚拟地址注册过”不够，必须拿到当前 QP 所在 PD 对应的 MR。Barex `TryToChangeMr` 正是为此切换 MR。
 
+### 4.1 PD、MR、QP 到底怎样对应
+
+先纠正一句容易产生误解的话：
+
+> MR 不是“注册在 GPU 上”，而是把一段 host/GPU virtual address range 注册给
+> 某个 RNIC 的 PD，使该 RNIC 可以对它执行被授权的 DMA。
+
+它们的基数关系通常是：
+
+```text
+1 个 ibv_context（打开的一块 RNIC）
+  ├─ 可以创建多个 PD
+  │
+  ├─ PD A
+  │   ├─ MR A0
+  │   ├─ MR A1
+  │   ├─ MR A2
+  │   ├─ QP A0 ── SQ + RQ
+  │   └─ QP A1 ── SQ + RQ
+  │
+  └─ PD B
+      ├─ MR B0
+      └─ QP B0 ── SQ + RQ
+```
+
+关键约束：
+
+1. 一个 MR 在调用 `ibv_reg_mr(pd, ...)` 时属于**一个 PD**；
+2. 一个普通 QP 在调用 `ibv_create_qp(pd, ...)` 时也属于**一个 PD**；
+3. 一个 PD 可以同时包含很多 MR 和很多 QP；
+4. 同一 PD 的多个 QP 可以使用其中任意合法 MR 的 lkey；
+5. 同一 virtual address range 若要被另一个 PD/RNIC 使用，通常要在那个 PD 上
+   重新注册，得到另一组 `ibv_mr/lkey/rkey`。
+
+例如发送端：
+
+```text
+PD-A
+  ├─ QP-A
+  └─ MR-A {addr=GPU_buffer, length=1 GiB, lkey=0x1111}
+
+post_send(QP-A, sge.lkey=0x1111)  → 合法
+post_send(QP-B, sge.lkey=0x1111)  → PD 不匹配，通常得到 local protection error
+```
+
+远端 RDMA Write 使用的 `rkey` 属于**远端的 MR/PD**。本地发送方不需要也无法拿到
+远端的 `ibv_pd*`；它只把 `(raddr, rkey)` 放进 WQE，对端 RNIC 用自己的
+translation/protection table 校验。也就是说：
+
+```text
+本地 lkey：约束“本地 QP 可以从哪段 local memory DMA”
+远端 rkey：约束“到达远端 RNIC 的请求可以访问哪段 remote memory”
+```
+
+PD 是本机 HCA 内部的隔离对象，不会作为 network packet 字段直接传给对端。
+
+### 4.2 “一个 GPU 可以注册任意数量的 MR”吗
+
+逻辑上，同一 GPU 上可以有很多 allocation，也可以把不同范围分别注册成很多 MR；
+甚至同一范围可以因多 RNIC/多 PD 而拥有多份注册。但不是数学意义上的“任意数量”：
+
+- HCA 有 `max_mr`、`max_mr_size` 等上限；
+- 每个 MR 消耗 RNIC translation/protection table、driver 和 host memory 资源；
+- GPU memory pinning、BAR/dma-buf/peer-memory mapping 也有资源成本；
+- 系统 locked-memory limit、权限以及其他进程已经占用的资源会降低实际可用数量；
+- 频繁 reg/dereg 是 slow path，可能远比一次数据传输本身更贵。
+
+因此高性能通信库通常：
+
+- 注册较大的长期存活 buffer/MR；
+- 使用 registration cache；
+- 对 MR 做池化和复用；
+- 避免为每个 4 KiB block 单独 reg/dereg。
+
+可以用 `ibv_query_device()`/`ibv_devinfo -v` 查询 HCA 报告的 `max_mr`、`max_qp`、
+`max_qp_wr`、`max_sge`、`max_cq` 等上限。但官方 man page 特别说明：这些只是
+device upper bounds，真实可创建数量还受机器配置、host memory、权限和现有占用影响。
+
+### 4.3 Barex 当前版本怎样做
+
+Barex 的 RDMA device manager 对每块可用 RNIC：
+
+```cpp
+ib_ctx = ctx_list[i];
+ib_pd = ibv_alloc_pd(ib_ctx);
+```
+
+也就是每个 RNIC device context 建立自己的 PD。`XGpuMempoolImpl::MrForAllDevices`
+会把同一 GPU buffer 分别注册到每块 RNIC 的 PD，并保存：
+
+```text
+nic_id 0 → ibv_mr 0 → lkey/rkey 0
+nic_id 1 → ibv_mr 1 → lkey/rkey 1
+...
+```
+
+创建 channel/QP 时，`XChannelImpl::Incubate` 使用当前 RNIC 的 PD 调
+`ibv_create_qp(pd, ...)`；真正 post WR 前，`TryToChangeMr` 再按
+`local_nic_id_` 选出与这个 QP/PD 匹配的 MR。
+
+所以 Barex 的“同一个 GPU buffer 有多个 MR”不是重复劳动，而是在解决：
+
+```text
+同一个地址 + 不同 RNIC/PD
+  → 必须使用不同的 RNIC registration 和 lkey
+```
+
 ## 5. Memory Region
 
 ### 5.1 注册做了什么
@@ -154,6 +261,34 @@ MR 注册完成
 ## 6. Queue Pair
 
 QP = Send Queue + Receive Queue。
+
+更具体地说，QP 是 RNIC 上的一个通信执行上下文。应用把 Work Request 写入 SQ/RQ，
+RNIC 取走并执行，完成结果进入 CQ。QP 通常还包含：
+
+- QP Number（QPN），用于标识网络端点；
+- transport type，例如 RC/UC/UD；
+- 当前状态 RESET/INIT/RTR/RTS/ERR；
+- 对端 QPN、PSN、GID/LID、retry/timeout 等连接状态；
+- SQ/RQ depth、最大 SGE、inline data 等 capacity；
+- 它所属的 PD，以及 send/receive CQ。
+
+所以 QP 既不是“一个网络 packet”，也不是“一个 GPU”。在 RC 模式中，一条逻辑
+点对点连接通常至少对应两端各一个 QP：
+
+```text
+Host A: QP-A(SQ/RQ)  ◄──── RC connection ────►  QP-B(SQ/RQ): Host B
+```
+
+同一 GPU worker 可以同时创建多个 QP，例如：
+
+- 对不同 remote worker 各建 QP；
+- 为同一 peer 建多个 channel/QP 增加 outstanding work 或并行度；
+- 把控制流量和 bulk data 分到不同 QP；
+- 多 RNIC 时，每块 NIC 建各自 QP。
+
+QP 数量同样受硬件与软件限制。HCA 报告 `max_qp`；每个 QP 的 SQ/RQ 深度又受
+`max_qp_wr`，单个 WR 的 scatter-gather 数受 `max_sge` 限制。创建 1000 个空闲
+QP 与创建 1000 个深队列 QP 的资源代价也不同，所以 `max_qp` 不能直接当作推荐值。
 
 ### 6.1 SQ 能放什么
 
@@ -313,8 +448,16 @@ close_device();
 2. 普通 RDMA Write 为什么不需要远端 RQ？
 3. `wr_id` 为什么是连接 WR 与业务 callback 的关键？
 4. QP 进入 ERR 后为什么后续大量 completion 都是 FLUSH_ERR？
+5. 一个 PD 能否有多个 MR 和多个 QP？一个普通 QP 能否同时属于两个 PD？
+6. 为什么“同一个 GPU buffer 已注册”仍不代表任意 RNIC/QP 都能使用这个 lkey？
+7. `max_qp`、`max_mr` 为什么只是 upper bound，而不是应用应该创建的数量？
 
 ## 参考
 
 - [Linux Userspace verbs access](https://docs.kernel.org/infiniband/user_verbs.html)
+- [Linux RDMA：PD 关联 QP、MR、MW、AH 等对象](https://docs.kernel.org/driver-api/infiniband.html)
+- [`ibv_alloc_pd(3)`](https://man7.org/linux/man-pages/man3/ibv_alloc_pd.3.html)
+- [`ibv_reg_mr(3)`：PD、访问权限、lkey 与 rkey](https://man7.org/linux/man-pages/man3/ibv_reg_mr_ex.3.html)
+- [`ibv_create_qp(3)`：QP 与 PD、SQ/RQ capacity](https://man7.org/linux/man-pages/man3/ibv_create_qp.3.html)
+- [`ibv_query_device(3)`：max_qp、max_mr、max_pd 等设备上限](https://man7.org/linux/man-pages/man3/ibv_query_device.3.html)
 - [rdma-core](https://github.com/linux-rdma/rdma-core)

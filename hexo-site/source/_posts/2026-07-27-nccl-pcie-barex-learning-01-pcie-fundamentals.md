@@ -63,7 +63,207 @@ PCI Express 是点对点、分组交换、全双工的串行互连。它不是�
 controller 直接管理；GPU 的 HBM 由 GPU HBM controller 直接管理。PCIe 在设备
 需要访问 host memory 或另一个 PCIe Endpoint 时承载对应 transaction。
 
-### 1.3 PCIe 除了“搬数据”还有什么用途
+### 1.3 CPU Memory Controller 与 GPU HBM Controller 到底是什么结构
+
+Memory Controller（内存控制器）不是“一块负责复制数据的芯片”，而是
+**DRAM/HBM 前面的请求调度器、协议控制器和物理接口管理者**。它接收较抽象的
+“读某地址”“写某地址”请求，最后产生 DRAM 芯片所需的命令、地址、数据和严格
+时序。
+
+![CPU DRAM 控制器、PCIe I/O 与 GPU HBM 控制器的分层结构](/imgs/memory_controller_paths.svg)
+
+先把几个部件分开：
+
+| 部件 | 输入 | 输出 | 是否理解“拷贝 8 MiB” |
+|---|---|---|---:|
+| CPU/GPU core | 指令 | load/store、cache request | core 执行循环时理解软件操作 |
+| Copy/DMA engine | descriptor：地址、长度、方向 | 一串 memory transaction | 是 |
+| PCIe Transaction Layer | 单次读写事务 | Memory Read/Write/Completion TLP | 否 |
+| Root Complex/IIO | PCIe TLP 与 CPU 内部请求 | 路由、协议转换后的内部事务 | 否 |
+| Memory Controller | memory read/write request | DRAM ACT/RD/WR/PRE/REF 等命令 | 否 |
+| DDR/HBM DRAM | DRAM 命令 | 存储或返回 bit | 否 |
+
+#### 1.3.1 CPU Integrated Memory Controller（IMC）
+
+现代服务器 CPU 的内存控制器通常集成在 CPU/SoC 内，因此常叫 IMC。一个简化的
+CPU socket 可以画成：
+
+```text
+CPU cores
+  → L1/L2 cache
+  → LLC + coherence/home agent
+  → on-chip mesh/ring/fabric
+  → memory-side agent / IMC
+      ├─ request queues
+      ├─ address decoder
+      ├─ read/write scheduler
+      ├─ ECC / scrub / refresh
+      └─ DDR PHY
+          → channel 0 → DIMM → rank/bank/row/column
+          → channel 1 → DIMM → rank/bank/row/column
+          → ...
+```
+
+PCIe 设备访问 host memory 时，还多一条入口：
+
+```text
+NIC/GPU/NVMe 发 PCIe Memory Request
+  → Root Port / Integrated I/O（IIO）
+  → 可选 IOMMU 地址转换
+  → CPU coherent interconnect / home agent / LLC
+  → IMC
+  → DDR/LPDDR
+```
+
+不同 CPU 架构的方框名字会不同。例如 Intel 文档常见 IIO、IRP、CHA/Home Agent、
+M2M、IMC；AMD、Arm、Grace 会使用不同名字。但职责可以归纳成以下几层：
+
+1. **I/O 接口层**：接收 PCIe/CXL 请求，遵守 PCIe ordering，转换成片上事务；
+2. **一致性与 home 层**：判断 cache line 由谁拥有，是否需要 snoop/失效/回写；
+3. **内存控制层**：把最终 DRAM 请求排队、映射并调度；
+4. **PHY 层**：把数字命令变成 DDR/LPDDR 总线上的电气信号。
+
+CPU IMC 主要负责：
+
+1. **地址映射**：把物理地址拆成 channel、DIMM、rank、bank group、bank、row、
+   column。平台可能通过 address interleaving 把连续 cache line 分散到多个 channel。
+2. **请求队列**：读、写以及不同请求者的流量先进入队列。读通常更影响前台延迟，
+   写可以先进入 write buffer 后批量排空。
+3. **调度**：尽量利用 bank-level parallelism 和 row-buffer hit，同时避免请求
+   长期饿死。
+4. **DRAM 时序**：满足 `tRCD`、`tRP`、`tRAS` 等约束；这些不是 CPU 指令能随意
+   跳过的等待时间。
+5. **刷新与维护**：DRAM 会漏电，需要 refresh；平台还可能执行 patrol scrub。
+6. **ECC/RAS**：生成、检查和纠正 ECC，统计 correctable/uncorrectable error。
+7. **QoS/仲裁**：CPU core、GPU、NIC、加速器同时访问时分配有限带宽。
+
+一个 cache line 不一定每次都到 IMC：
+
+```text
+CPU load
+  ├─ L1/L2/LLC hit → 不访问 DRAM
+  └─ cache miss    → 才进入 IMC/DRAM
+```
+
+同理，一些平台的 I/O write 可能先进入 LLC 或 I/O write cache，再在稍后写回
+DRAM。因此“NIC 已把数据 DMA 到 host memory”不总等于“这一时刻 DRAM 芯片已经
+收到最后一个写命令”；软件可见性和一致性由平台规定的 ordering/coherence 语义
+保证，而不是要求应用观察每条 DRAM 命令。
+
+#### 1.3.2 GPU HBM Memory Controller
+
+GPU HBM controller 是 GPU 自己的内存控制器。一个简化结构是：
+
+```text
+SM load/store units、Tensor Core 周边数据请求
+Copy Engine / PCIe-NVLink inbound request
+                │
+                ▼
+GPU address translation + on-chip NoC/crossbar
+                │
+                ▼
+       shared L2 cache / L2 slices
+                │
+                ▼
+     HBM memory partitions/controllers
+       ├─ request queues / scheduler
+       ├─ address mapping
+       ├─ ECC / refresh / RAS
+       └─ HBM PHY
+                │
+                ▼
+HBM stack → channel/pseudo-channel → bank → row/column
+```
+
+HBM（High Bandwidth Memory）也是 DRAM，只是：
+
+- 多颗 DRAM die 垂直堆叠；
+- 通过 TSV 等封装互连提供非常宽的接口；
+- HBM stack 与 GPU 位于同一封装/模组附近；
+- 使用多个 channel、pseudo-channel 和 bank 并行提供高带宽。
+
+CUDA 所说的 device memory/global memory，物理上通常由 GPU 的 HBM/GDDR 承载。
+例如 A100 官方架构文档明确说明，CUDA global/local memory 所在的 device memory
+使用 HBM2，读写由共享 L2 缓存。
+
+GPU HBM controller 与 CPU IMC 的总体职责相似，但不是同一块硬件：
+
+| | CPU IMC | GPU HBM Controller |
+|---|---|---|
+| 直接管理 | CPU attached DDR/LPDDR | GPU attached HBM/GDDR |
+| 所在位置 | CPU/SoC 内部 | GPU die 内部 |
+| 主要请求者 | CPU core、I/O agent、其他 socket | GPU SM、copy engine、PCIe/NVLink ingress |
+| cache 前端 | CPU LLC/coherence/home agent | GPU shared L2/partition |
+| 物理通道 | DDR/LPDDR channels | HBM stacks/channels/pseudo-channels |
+| 由谁设计 | Intel/AMD/Arm/NVIDIA Grace 等 CPU 厂商 | NVIDIA/AMD 等 GPU 厂商 |
+
+所以：
+
+- x86 机器的 CPU memory controller 由 Intel/AMD CPU 和主板内存拓扑决定；
+- NVIDIA 独立 GPU 的 HBM controller 是 NVIDIA GPU 架构的一部分；
+- Grace Blackwell 中 Grace 的 LPDDR controller 与 Blackwell 的 HBM controller
+  仍是两个控制器，只是 CPU–GPU 之间使用更紧密的 NVLink-C2C/一致性机制。
+
+#### 1.3.3 GPU 访问 CPU pinned memory 时，谁负责什么
+
+以 blade-kvt 的 GPU copy kernel 从 pinned host memory 读取数据为例：
+
+```text
+GPU SM 执行 load(mapped host pointer)
+  → GPU MMU / 地址转换
+  → GPU PCIe 或 NVLink-C2C 接口
+  → CPU Root Complex / coherent I/O agent
+  → CPU home/coherence/LLC 路径
+  → CPU IMC
+  → host DRAM
+  → 数据沿互连返回 GPU
+  → GPU SM 执行 store(device pointer)
+  → GPU L2
+  → GPU HBM controller
+  → HBM
+```
+
+因此，你问“图里的 memory controller 会负责这部分功能吗”，答案是：
+
+> **会负责两端最终的 DRAM/HBM 访问，但不会执行整个 copy kernel。**
+
+具体分工：
+
+- GPU SM：执行 `load src; store dst` 的 kernel 指令；
+- GPU/CPU 地址转换单元：把虚拟地址/I/O 地址变成可路由的地址；
+- PCIe/NVLink-C2C：在 CPU 与 GPU 之间搬 transaction；
+- CPU memory controller：服务 pinned host DRAM 的最终读写；
+- GPU HBM controller：服务 GPU device memory 的最终读写；
+- pinned 属性：保证 host page 不被换出/迁移，并可建立 DMA/GPU mapping；
+- pinned 本身不会绕过 CPU IMC，也不会让 host DRAM 变成 HBM。
+
+如果不是 GPU copy kernel，而是 `cudaMemcpyAsync` 由 GPU Copy Engine 搬运，则
+主动执行者从 GPU SM 变成 Copy Engine；两端 memory controller 的职责仍不变。
+
+#### 1.3.4 如何从性能现象判断卡在哪一层
+
+| 现象 | 更可能检查 |
+|---|---|
+| 单核 `memcpy` 慢 | core/cache、频率、NUMA、本地 DRAM 延迟 |
+| 多核带宽到平台上限 | IMC、memory channel 数、DIMM population |
+| GPU 访问 mapped pinned memory 慢 | PCIe/NVLink-C2C、NUMA、small transaction、host DRAM |
+| GPUDirect RDMA 慢但 host DRAM 带宽空闲 | GPU–NIC PCIe path、MPS/MRRS、ACS、read latency |
+| GPU kernel 读 HBM 慢 | L2 hit、coalescing、HBM partition camping、HBM 带宽 |
+| ECC error 增长 | 对应 CPU IMC/DIMM 或 GPU HBM/RAS 日志 |
+
+“内存带宽瓶颈”也要说明是哪种：
+
+```text
+CPU IMC 带宽
+GPU HBM 带宽
+PCIe/NVLink 带宽
+PCIe Switch upstream 带宽
+远端 NUMA interconnect 带宽
+```
+
+它们是不同资源，不能只看一个 `memory bandwidth` 数字。
+
+### 1.4 PCIe 除了“搬数据”还有什么用途
 
 常见 PCIe Endpoint 包括：
 
@@ -162,6 +362,124 @@ GPU → Switch → Root Complex/NUMA interconnect
 
 第一条路径通常延迟更低、共享环节更少。但“在同一个 switch 下”只是重要条件，
 还要检查 ACS/IOMMU、GPU peer-memory/dma-buf、驱动和平台支持。
+
+这确实是常说“某块 GPU 对某块 RDMA 网卡更有亲和性”的主要硬件原因之一。不过，
+**亲和性不是 GPU 和 RNIC 之间写死的一根专线，也不一定是一对一关系**。它表示
+两者在当前机器的 I/O topology 上更接近，通常需要经过更少的 switch、host
+bridge、NUMA interconnect，并与更少的其他设备共享上行链路。
+
+Linux/NVIDIA 工具里常见的距离大致可以这样理解：
+
+| `nvidia-smi topo -m` | GPU 与 NIC 之间的典型路径 | 初学者直觉 |
+|---|---|---|
+| `PIX` | 最多经过一个 PCIe bridge/switch | 很近，常是理想 P2P 路径 |
+| `PXB` | 经过多个 PCIe bridge，但不经过 CPU host bridge | 仍在 PCIe fabric 内 |
+| `PHB` | 经过同一 CPU socket 的 PCIe Host Bridge | 已到 Root Complex 一侧 |
+| `NODE` | 经过同一 NUMA node 内的 PCIe Host Bridge/互连 | NUMA 本地，但不一定同 switch |
+| `SYS` | 跨 NUMA node/socket 的系统互连 | 通常最远、共享环节更多 |
+
+上表是拓扑分类，不是任何 workload 都严格遵守的固定性能排序。真实性能还受：
+
+- GPU、RNIC 和平台是否支持 PCIe P2P；
+- ACS 是否把本可直接转发的 P2P TLP 强制送向上游 Root Complex；
+- IOMMU 是否处于平台支持的 passthrough/一一映射方式；
+- `nvidia-peermem` 或 dma-buf 等 GPU memory 注册机制；
+- PCIe generation、link width、MPS/MRRS、switch oversubscription；
+- 驱动、固件、BIOS 和安全隔离策略。
+
+例如，GPU 与 RNIC 同挂一个 PCIe Switch 时，理想路由是：
+
+```text
+GPU downstream port
+        │  Memory Read/Write TLP
+        ▼
+    PCIe Switch ─────────► RNIC downstream port
+```
+
+Switch 根据目标 PCIe address 在两个 downstream port 之间转发，不需要先把
+payload 写进 host DRAM。但是，如果 ACS 的策略要求 `P2P Request Redirect`，
+packet 仍可能被送向 upstream port；所以“同 switch”是非常有利的拓扑条件，
+不是单独足以证明 GPUDirect RDMA 一定成功或一定最快的条件。
+
+##### NUMA 是什么
+
+NUMA 是 **Non-Uniform Memory Access（非一致内存访问）**。现代多 socket 或大型
+SoC 服务器不会把所有 CPU core、DRAM 和 PCIe Root Port 都接在一个零距离中心点，
+而是划分为多个 NUMA node。每个 node 通常有：
+
+```text
+NUMA node 0
+  ├─ 一组 CPU cores
+  ├─ 本地 LLC/home/coherence agent
+  ├─ 本地 memory controllers → 本地 DRAM
+  └─ 本地 PCIe Root Ports → GPU/NIC/NVMe
+
+NUMA node 1
+  ├─ 另一组 CPU cores
+  ├─ 另一组 memory controllers → 另一组 DRAM
+  └─ 另一组 PCIe Root Ports → 其他 GPU/NIC/NVMe
+
+node 0 ◄──── UPI/QPI/Infinity Fabric/片上系统互连 ────► node 1
+```
+
+node 0 的 CPU 读取 node 0 DRAM 是 **local access**；读取 node 1 DRAM 是
+**remote access**。remote access 需要跨 socket/NUMA interconnect，一般延迟
+更高、有效带宽更低，并与其他跨 node 流量共享链路。因此叫“不一致”：同样是一条
+load，目标物理页位于不同 node 时，代价不同。
+
+NUMA 对 GPU/RNIC 通信有三层影响：
+
+1. **I/O 路径**：GPU 和 RNIC 属于不同 NUMA node 时，P2P traffic 可能跨系统
+   interconnect；即使 payload 不落 host DRAM，这条路径也更长。
+2. **控制路径**：提交 WQE、写 doorbell、poll CQ 的 CPU thread 离 RNIC 太远，
+   MMIO 和 queue memory access 也可能跨 NUMA。
+3. **host-staging 路径**：如果通信先落 pinned host buffer，那么 buffer 所在
+   node 决定哪一个 memory controller/DRAM 被访问；错误的 first-touch 或绑核
+   会多走一次远端 NUMA 链路。
+
+##### `target_p`（GB200）上的实际例子
+
+在 `target_p` 上运行 `nvidia-smi topo -m`，可以看到：
+
+```text
+GPU0/GPU1 → NIC0/NIC1 : NODE
+GPU0/GPU1 → NIC2/NIC3 : SYS
+
+GPU2/GPU3 → NIC0/NIC1 : SYS
+GPU2/GPU3 → NIC2/NIC3 : NODE
+```
+
+对应的 NUMA 信息是：
+
+```text
+GPU0/GPU1 与 mlx5_bond_0/1：NUMA node 0，CPU 0-71
+GPU2/GPU3 与 mlx5_bond_2/3：NUMA node 1，CPU 72-143
+```
+
+所以在这台机器上，一个合理的默认选择是：
+
+```text
+GPU0/1 优先使用 NIC0/1
+GPU2/3 优先使用 NIC2/3
+```
+
+这里的本地关系显示为 `NODE`，并不是 `PIX`。这恰好说明：
+
+> “GPU–RNIC 亲和性”是拓扑局部性的总称；同一 switch 是很强的一种亲和性，
+> 同一 NUMA node 但不同 host-bridge path 也可以形成相对亲和性。
+
+排查时可一起使用：
+
+```bash
+nvidia-smi topo -m
+numactl --hardware
+lspci -Dtv
+cat /sys/bus/pci/devices/<BDF>/numa_node
+```
+
+`nvidia-smi topo -m` 用来比较 GPU/NIC 的相对距离；`numactl --hardware` 看
+CPU 与 memory node；sysfs 的 `numa_node` 看某个 PCI function 挂在哪个 node；
+`lspci -tv` 看 bridge/switch 父子关系。四者结合比只看一个“affinity”标签可靠。
 
 ### 2.2 BDF：它是设备在 PCIe 地址体系中的“门牌号”
 
@@ -552,6 +870,116 @@ PCIe Completion TLP
 所以，“Memory Write 是 Posted，不需要 Completion TLP”不等于“应用永远收不到
 完成通知”。设备仍可在整个 DMA/网络 operation 完成后生成自己的 CQE。
 
+#### 4.1.1 到底拆的是 DMA 行为，还是数据包
+
+最准确的说法是：
+
+> 软件提交的一个逻辑 DMA operation 通常仍是一个 descriptor/WQE；设备的 DMA
+> engine 在执行它时，把这段地址范围分解为许多 PCIe transaction，而每个
+> transaction 再表示成一个或多个 TLP。因此从执行角度看是“把 DMA 操作分解”，
+> 从线上数据角度看是“把 payload/请求范围 packetize 成多个 TLP”。
+
+这通常不是驱动把一个 8 MiB DMA 重新提交成几万个互相独立的软件任务。常见过程是：
+
+```text
+软件：1 个 descriptor {address, length=8 MiB, direction, ...}
+                         │
+                         ▼
+设备 DMA engine：地址生成、边界检查、维护 outstanding request
+                         │
+                         ▼
+PCIe Transaction Layer：生成许多 MWr/MRd/CplD TLP
+                         │
+                         ▼
+Data Link / Physical Layer：逐跳保护、串行化并发送
+```
+
+##### DMA Write 怎样拆
+
+假设 RNIC 要向 GPU memory 写 8 KiB。DMA engine 会沿目标地址递增，并按以下约束
+决定每个 Memory Write（MWr）TLP 能带多少 data：
+
+1. 单个 TLP payload 不能超过路径允许的 **MPS**；
+2. 一个 Memory Request 不能跨越 **4 KiB address boundary**；
+3. 首尾地址可能不是 DW/MPS 对齐，需要用 Byte Enable 和较短的首尾 TLP；
+4. 设备还可能因内部 buffer、ordering、实现策略生成更小的 TLP。
+
+若地址对齐、MPS 为 256 B，8 KiB 至少需要：
+
+```text
+8192 B / 256 B = 32 个 MWr TLP
+
+MWr #0  {addr=A+0,    length=256 B, payload[0:256]}
+MWr #1  {addr=A+256,  length=256 B, payload[256:512]}
+...
+MWr #31 {addr=A+7936, length=256 B, payload[7936:8192]}
+```
+
+如果起始地址距离下一个 4 KiB boundary 只有 128 B，则不能让第一个 TLP横跨该
+边界。一个简化分法是：
+
+```text
+128 B + 31 × 256 B + 128 B = 8192 B
+```
+
+也就是至少 33 个 TLP。注意这是教学用下界；不能只凭长度和 MPS 断言设备一定生成
+完全相同的 packet 序列。
+
+##### DMA Read 怎样拆
+
+Read 是两段式，必须把“请求”与“返回数据”分开：
+
+```text
+Requester（例如 RNIC）                  Completer（Root Complex/GPU）
+       │  MRd TLP：地址、长度、Tag；通常无 payload   │
+       ├────────────────────────────────────────────►│
+       │                                             │ 读取目标数据
+       │  CplD TLP：Tag、状态、返回的 data           │
+       ◄────────────────────────────────────────────┤
+       │  按 Tag/地址组合返回片段                     │
+```
+
+- DMA engine 按 **MRRS** 和 4 KiB boundary 拆成 Memory Read Request；
+- Completer 再按 MPS、Read Completion Boundary、可用数据和实现策略，把一次
+  read request 的返回值拆成一个或多个 Completion with Data（CplD）TLP；
+- Tag 把多个并发 read 的 CplD 对回原请求。
+
+例如，8 KiB、MRRS=512 B、地址对齐时，requester 至少发 16 个 MRd Request；
+若返回方向的 CplD payload 最多为 256 B，则至少返回 32 个 CplD。实际数量还可能
+因 4 KiB boundary、Read Completion Boundary 和实现策略变多。
+
+因此 Write 与 Read 的“拆包”不同：
+
+| | Write DMA | Read DMA |
+|---|---|---|
+| 请求 TLP | MWr，直接携带 data | MRd，通常只带地址/长度/Tag |
+| PCIe Completion | Posted write 无 Cpl TLP | 返回一个或多个 CplD |
+| 主要 size 参数 | MPS | MRRS 限制请求，MPS/RCB 等影响返回 |
+| DMA 最终完成 | 所有片段满足设备定义的完成条件 | 所有 CplD 返回并重组 |
+
+doorbell 的小 MWr TLP、读取 descriptor 的 MRd/CplD、搬 payload 的 TLP，以及最终
+写 CQE 的 MWr TLP，也都是不同 transaction；不要把它们误认为同一个“大 TLP”。
+
+##### PCIe TLP 与网络 packet 不是一一对应
+
+RNIC 发送 RoCE/TCP packet 时，常见的两边是：
+
+```text
+host/GPU memory
+  → 多个 PCIe MRd/CplD（RNIC DMA 取数据）
+  → RNIC 组装 Ethernet/RoCE packet
+  → 网线
+
+网线
+  → RNIC 解析 Ethernet/RoCE packet
+  → 多个 PCIe MWr（RNIC DMA 写目标 memory）
+  → host/GPU memory
+```
+
+一个网络 packet 可能对应多个 PCIe TLP；一个大 WQE 又可能产生多个网络 packet。
+两层的 MTU、header、重传和完成语义各自独立，所以不能把“网络抓到一个包”直接
+等同于“PCIe 上只有一个 TLP”。
+
 ### 4.2 TLP 的基本结构
 
 下面先讨论 PCIe Gen3～Gen5 常见的 Non-FLIT 模式。一个 Transaction Layer
@@ -767,9 +1195,26 @@ T = 固定软件开销
 19. LCRC 与 ECRC 的保护范围有什么区别？
 20. 为什么不能把 x16 理解为“16 条 lane 各发送一个独立 TLP”？
 21. 为什么 Gen6 FLIT mode 不能直接套用传统 `Sequence + TLP + LCRC` 图？
+22. CPU IMC 为什么不等于 DMA/copy engine？GPU copy kernel 访问 pinned host
+    memory 时，CPU IMC 和 GPU HBM controller 分别负责什么？
+23. HBM 为什么既是 DRAM，又常被 CUDA 称为 device/global memory 的物理载体？
+24. `PIX`、`NODE`、`SYS` 分别说明了怎样的 GPU–NIC 路径？亲和性为什么不一定
+    是 GPU 与 RNIC 的固定一对一绑定？
+25. NUMA local access 与 remote access 的路径为什么不同？这会怎样影响
+    GPUDirect RDMA、doorbell/CQ 和 pinned host staging？
+26. 一个 8 KiB DMA Write 在 MPS=256 B 时为什么至少有 32 个 MWr TLP？什么情况
+    会使数量更多？
+27. Memory Read 为什么既要受 MRRS 影响，又可能返回多个受 MPS/RCB 影响的 CplD？
+28. 为什么一个 RoCE packet 与 PCIe TLP 通常不是一一对应？
 
 ## 参考
 
+- [Intel：CPU Uncore 中的 IIO、CHA/LLC、IMC 与 UPI](https://www.intel.com/content/www/us/en/developer/articles/technical/ddio-analysis-performance-monitoring.html)
+- [NVIDIA A100 Architecture Whitepaper：L2 与 HBM2 device memory](https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/nvidia-ampere-architecture-whitepaper.pdf)
+- [Linux kernel：NUMA memory policy 与 node](https://docs.kernel.org/admin-guide/mm/numa_memory_policy.html)
+- [NVIDIA GPUDirect RDMA：PCIe topology、IOMMU 与平台限制](https://docs.nvidia.com/cuda/gpudirect-rdma/)
+- [NVIDIA `nvidia-smi`：GPU/NIC topology 的 PIX、PXB、PHB、NODE、SYS 定义](https://docs.nvidia.com/deploy/nvidia-smi/index.html)
+- [NVIDIA GPUDirect Storage Best Practices：PCIe Switch、ACS 与 NIC provisioning](https://docs.nvidia.com/cuda/archive/11.4.0/gds/best-practices-guide/index.html)
 - [PCI-SIG PCI Express Technology Overview](https://pcisig.com/pci-express-technology-overview)
 - [PCI-SIG：PCIe 4.0/5.0 lane 与 x16 带宽表](https://pcisig.com/blog/pci-express-delivering-needed-bandwidth-open-compute-project)
 - [PCI-SIG：PCIe Link 支持 x1/x2/x4/x8/x16](https://pcisig.com/sites/default/files/files/PCI-SIG%20Cabling%20Webinar_FINAL.pdf)
@@ -778,3 +1223,4 @@ T = 固定软件开销
 - [PCI-SIG：PCIe 6.0 FLIT mode](https://pcisig.com/blog/evolution-pci-express-specification-its-sixth-generation-third-decade-and-still-going-strong)
 - [Linux PCI driver API](https://docs.kernel.org/driver-api/pci/index.html)
 - [Linux：How To Write Linux PCI Drivers](https://docs.kernel.org/PCI/pci.html)
+- [Linux PCI API：MPS 与 MRRS 配置接口](https://docs.kernel.org/6.19-rc7/driver-api/pci/pci.html)

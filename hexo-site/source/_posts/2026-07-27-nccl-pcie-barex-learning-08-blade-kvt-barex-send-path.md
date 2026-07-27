@@ -93,6 +93,113 @@ pybind 对应：
 
 `submit` 阶段只积累任务，不发送数据。
 
+### 2.1 当前 blade-kvt 与 vLLM 是否在同一进程、共享 CUDA context
+
+对本文固定的版本：
+
+```text
+vLLM       058f6b130e789096ab685c58fe90fdb97c149774
+blade-kvt  752697132e8b0409ad134724fec2882c9ca57380
+```
+
+答案是：
+
+> blade-kvt 作为 Python/C++ extension 加载在 vLLM 的 **GPU model worker
+> 进程**中；它和这个 worker 内的 PyTorch/vLLM 对同一 device 使用同一个 CUDA
+> primary context。它不等于运行在 vLLM scheduler/front-end 主进程，也不表示
+> 所有 TP worker 共用一个进程。
+
+代码证据是一条完整的指针传递链：
+
+```text
+vllm/v1/worker/gpu_model_runner.py
+  → kv_transfer_group.register_kv_caches(kv_caches)
+
+vllm/v1/hybrid_connector/kvtbackend.py
+  → bladekv.KVTransferClient/Server(
+        layers=_flatten_cache(kv_caches))
+
+blade_kvt/kv_transfer_impl.py
+  → cache.data_ptr()
+  → init_kv_transfer_client/server(layer_addrs=...)
+
+kvtransfer_pybind.cpp
+  → C++ Context / Barex MR registration
+```
+
+vLLM 刚分配好的 `torch.Tensor` 被直接交给 blade-kvt，后者把 `data_ptr()` 的数值
+传入 C++，没有经过 CUDA IPC handle、Unix socket 或共享内存。这只有在当前
+blade-kvt 对象与 tensor 地址位于同一个 process address space 时才成立。
+
+blade-kvt 当前 CUDA 路径使用 `cudaSetDevice`、CUDA Runtime、自己创建的
+thread-local streams 和 kernels；源码中没有显式 `cuCtxCreate` 创建私有
+Driver API context。CUDA 官方语义是：同一进程里，Runtime API 的使用者默认共享
+“每 device、每 process 一个”的 primary context。因此可以概括为：
+
+```text
+同一个 OS worker process
+  └─ 同一个 GPU primary CUDA context
+       ├─ PyTorch/vLLM allocations、kernels、streams
+       └─ blade-kvt streams、events、copy kernels、GPU MR address
+```
+
+但是，“共享 context”不等于“共享默认 stream”或“自动有执行顺序”。blade-kvt
+创建自己的 CUDA stream，并通过 vLLM/KVT 记录的 CUDA event、`wait_layer_ready`
+以及必要的 stream synchronization 建立依赖。若缺少这些同步，网络线程可能在
+forward 尚未写完 KV block 时就开始读取。
+
+### 2.2 如果把 blade-kvt 拆成独立进程
+
+拆分后，两个进程各有自己的 CUDA context 和 virtual address space：
+
+```text
+vLLM worker process                 KVT service process
+PyTorch allocation ptr=0xABC        不能直接使用数值 0xABC
+        │
+        ├─ export CUDA IPC/VMM handle ─► import → local device pointer
+        ├─ export IPC event/同步协议 ──► wait before NIC/copy
+        └─ lifetime/control RPC       ──► register MR、transfer、completion
+```
+
+CUDA 官方文档明确规定：device pointer 和 CUDA event handle 只能被创建它的
+进程直接使用；跨进程必须交换 CUDA IPC 或 VMM 的 process-portable handle，
+再在目标进程获得一个 process-local pointer。
+
+因此当前代码若只把 blade-kvt 对象搬到另一个进程，会立即遇到：
+
+1. **裸 `data_ptr` 失效**：KVT 不能直接注册或 launch kernel 访问 vLLM 的数值地址；
+2. **同步句柄失效**：当前 event/stream 依赖要改为 CUDA IPC event 或显式 RPC；
+3. **生命周期变复杂**：vLLM 不能在 KVT 尚未 completion 时 free/reuse allocation；
+4. **MR 要重建**：KVT 要对自己 import 后的 mapping 做 RNIC registration，并在
+   unmap 前等待 WR 完成、deregister；
+5. **资源增加**：独立 CUDA context 会占用 device/host memory、driver threads，
+   GPU 还可能产生 context scheduling 开销；
+6. **错误边界更清楚**：KVT 崩溃不一定直接杀死 vLLM worker，升级和限流也更独立，
+   这是拆进程的主要工程收益。
+
+另一种更简单但性能更低的拆分方法是：
+
+```text
+vLLM GPU
+  → vLLM 进程 D2H 到共享 host buffer
+  → KVT 进程从 host buffer 发 TCP/RDMA
+```
+
+这样不必把 GPU pointer 跨进程交给 KVT，但变成 host-staged 路径，增加 D2H/H2D、
+host memory bandwidth 和 NUMA 成本。
+
+所以“拆进程”不是不可行，而是需要把当前的函数调用集成改造成一套明确的：
+
+```text
+GPU allocation export/import
++ event synchronization
++ MR registration cache
++ buffer lifetime protocol
++ control IPC / error recovery
+```
+
+它是架构重构，不是简单把现有线程换成一个 subprocess。
+
 ## 3. StepTasks：按目标聚合
 
 `KvTransferClient::submit_req_send`：
@@ -339,6 +446,146 @@ GPU blocks
 
 ![blade-kvt 三种发送模式](/imgs/blade_kvt_send_modes.svg)
 
+### 12.1 为什么先把离散小块 gather 成连续大 buffer
+
+假设一层需要发送 64 个不连续 KV block，每个 4 KiB：
+
+```text
+GPU source:
+[block 7] ... [block 91] ... [block 13] ...  共 64 段
+
+blade-kvt gather 后的 pinned host wire buffer:
+[RPC header][IpcBlock metadata][block 7 bytes][block 91 bytes]...[block 13 bytes]
+                                      连续 256 KiB payload
+```
+
+这里“连续地址”主要指一个连续的**进程虚拟地址/wire byte range**。`cudaMallocHost`
+保证页被 pinned，但底层 DRAM page 不必物理连续；GPU/NIC 的 DMA mapping 与
+scatter-gather table 可以处理多个物理页。它也不表示 256 KiB 会成为一个
+Ethernet packet。
+
+当前源码分两步减少碎片：
+
+1. `TCPChannel::register_data()` 对 `PEQD` 的相邻 interval 调
+   `merge_interval()`，能相邻的 GPU range 先合并；
+2. `TCPChannel::send_data()` 为一层构造一个预分配 `CUDA_HOST` message，
+   `copy_handle_data_with_kernel()` 按 `IpcBlock.src_offset` 从离散 GPU 地址
+   gather 到每个 tensor 的连续 blob，最后只调用一次 Barex `Send()`。
+
+接收端解析同一个 message，利用其中的 `IpcBlock.dst_offset` 把连续 blob scatter
+回离散 GPU KV block。
+
+#### 好处 1：摊薄每次操作的固定延迟
+
+沿用前文性能模型：
+
+```text
+T(one operation) ≈ Tfixed + bytes / bandwidth
+```
+
+若 64 个小 block 各自发送：
+
+```text
+Tsmall ≈ 64 × Tfixed + total_bytes / bandwidth
+```
+
+先聚合再发送：
+
+```text
+Tlarge ≈ Tgather + 1 × Tfixed + total_bytes / bandwidth
+```
+
+`Tfixed` 可能包含函数调用、锁、队列分配、`send`/doorbell、调度、callback、
+promise/future 和 completion 处理。只要省下的 `63 × Tfixed` 大于额外 gather
+成本，聚合就更快。小 block 越小、数量越多，通常越容易满足这个条件。
+
+#### 好处 2：减少 CPU、内核网络栈与 Barex 对象开销
+
+如果每个 block 分开发送，可能产生更多：
+
+- C++/Barex `Send` 调用；
+- socket send 操作、`sk_buff` 组织和 queue 操作；
+- application message header；
+- callback、future 和 reqid 状态；
+- buffer ownership/refcount 与错误处理分支。
+
+聚合后 metadata 仍需记录每段的 source/destination offset，但控制对象从“每
+block 一套”变成“一层/一批一套”。
+
+#### 好处 3：让 TCP/GSO/TSO 和 NIC 更容易进入吞吐区间
+
+TCP 是 byte stream。应用提交一个 256 KiB buffer 后，Linux TCP 和 NIC 仍会按
+MSS/MTU 分成许多 TCP segment/Ethernet frame；如果启用 GSO/TSO，协议栈可以先
+处理一个较大的逻辑 buffer，再由软件/NIC 完成 segmentation 和 checksum。
+
+```text
+1 个 256 KiB application message
+  → 若干 large skb / TSO work
+  → 很多个 MSS-sized TCP segment
+  → NIC TX DMA
+  → PCIe 上又是许多 Memory Read TLP
+```
+
+因此聚合优化的是**应用、通信库、内核和 NIC 的任务粒度**，不是突破 MTU，也不是
+把整批数据变成一个 TLP。它与 01 章“一个 DMA descriptor 会分成许多 TLP”是同一
+种分层思想。
+
+#### 好处 4：连续 destination 简化 framing 与接收端解析
+
+当前 wire layout 是：
+
+```text
+固定 header
++ tensor 数量
++ 每个 tensor 的 block metadata
++ 每个 tensor 的连续 data blob
+```
+
+接收端收到一个完整 Barex message 后就能检查总长度、逐 tensor 解析并启动 H2D
+scatter，不需要维护 64 个小 message 的乱序业务状态和“这一层是否收齐”计数。
+TCP 自己保证 byte stream 有序，但应用仍需要 framing；合并后 framing 数量更少。
+
+#### 好处 5：更容易复用 pinned buffer 和做流水线
+
+blade-kvt 按 layer 预分配 host buffer，并在 layer ready 后执行：
+
+```text
+layer i:   D2H gather → TCP send → remote H2D
+layer i+1:      forward / gather ...
+```
+
+buffer size 和生命周期可预测，更适合池化、NUMA 绑定、容量检查和端到端计时。
+
+#### 代价与边界
+
+聚合不是免费优化：
+
+- 增加一次 source D2H gather 和 destination H2D scatter；
+- 消耗两端 host memory bandwidth 与 pinned memory；
+- 必须等到一批中足够多的 block ready，过大的 batch 会增加首字节延迟；
+- gather kernel 访问过于离散时，GPU memory coalescing 可能较差；
+- 大 buffer 占用 socket send buffer/队列更久，backpressure 与超时策略要匹配；
+- pinned buffer 如果分配在错误 NUMA node，会让 GPU copy 或 NIC DMA 跨 NUMA。
+
+因此应通过 block count/size sweep 找 break-even，而不是无条件“越大越好”。
+Linux `MSG_ZEROCOPY` 文档同样展示了这个规律：避免 copy 会引入 page pin 和
+completion bookkeeping，小消息反而可能不划算。
+
+#### 为什么不用 `writev/sendmsg` 直接发送离散 GPU block
+
+普通 `writev/sendmsg` 的 `iovec` 可以描述多个**CPU 可访问的 host buffer**，能减少
+system call 数，但不能让标准 Linux TCP 自动读取普通 CUDA device pointer。当前
+blade-kvt 还需要：
+
+- 把 GPU KV block 搬到 TCP 可消费的 host memory；
+- 可选完成 BF16→FP8；
+- 构造统一 metadata；
+- 在对端按不同 `dst_offset` scatter。
+
+因此连续 pinned wire buffer 是合理实现。若未来使用专门的 GPU-aware TCP、
+dma-buf device-memory TCP 或不同的通信接口，可以重新评估 copy 与 scatter-gather
+策略。
+
 ## 13. send-done 是第四条独立路径
 
 KV payload 完成后，`KvSendStub::send_done` 经普通 TCP 长连接发送业务完成通知：
@@ -394,3 +641,15 @@ blade_kvt/kv_transfer_impl.py
 3. direct RDMA 与 staged RDMA 的完成边界分别是什么？
 4. `flush_send` 与 `RDMAChannel::flush` 为什么不能混为一谈？
 5. send-done 为什么不等于网络 CQ completion？
+6. 为什么 blade-kvt 与 vLLM worker 当前能直接交换 `torch.Tensor.data_ptr()`？
+7. 拆成独立进程后，为什么不能只把这个数值地址通过 socket 发给 KVT service？
+8. 把 64 个小 block 聚合后，为什么网络上仍会有多个 TCP segment 和 PCIe TLP？
+9. 聚合在什么情况下可能因 gather、等待或 NUMA 成本而得不偿失？
+
+## 参考
+
+- [CUDA Driver/Runtime interoperability：每 device、每 process 的 primary context](https://docs.nvidia.com/cuda/cuda-driver-api/driver-vs-runtime-api.html)
+- [CUDA Programming Guide：跨进程 device pointer/event 必须使用 IPC/VMM handle](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/inter-process-communication.html)
+- [Linux `sendmsg(2)`：`iovec` scatter-gather](https://man7.org/linux/man-pages/man2/sendmsg.2.html)
+- [Linux `MSG_ZEROCOPY`](https://docs.kernel.org/networking/msg_zerocopy.html)
+- [Linux TCP Segmentation Offload / GSO](https://docs.kernel.org/networking/segmentation-offloads.html)
