@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信 本章写给第一次接触服务器硬件和高性能网络的读者。 目标不是记住缩写，而是能回答： 一个 GPU tensor 从机器 A 到机器 B， 中间究竟经过哪些硬件与软件？ 1. 先画出一台服务器 一台多 GPU 服务器可以先粗略画成： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19"><meta property="og:type" content="blog"><meta property="og:title" content="00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信 本章写给第一次接触服务器硬件和高性能网络的读者。 目标不是记住缩写，而是能回答： 一个 GPU tensor 从机器 A 到机器 B， 中间究竟经过哪些硬件与软件？ 1. 先画出一台服务器 一台多 GPU 服务器可以先粗略画成： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-27T05:46:40.447Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/"},"headline":"00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-27T05:46:40.447Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信 本章写给第一次接触服务器硬件和高性能网络的读者。 目标不是记住缩写，而是能回答： 一个 GPU tensor 从机器 A 到机器 B， 中间究竟经过哪些硬件与软件？ 1. 先画出一台服务器 一台多 GPU 服务器可以先粗略画成： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信 本章写给第一次接触服务器硬件和高性能网络的读者。 目标不是记住缩写，而是能回答： 一个 GPU tensor 从机器 A 到机器 B， 中间究竟经过哪些硬件与软件？ 1. 先画出一台服务器 一台多 GPU 服务器可以先粗略画成： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19"><meta property="og:type" content="blog"><meta property="og:title" content="00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信 本章写给第一次接触服务器硬件和高性能网络的读者。 目标不是记住缩写，而是能回答： 一个 GPU tensor 从机器 A 到机器 B， 中间究竟经过哪些硬件与软件？ 1. 先画出一台服务器 一台多 GPU 服务器可以先粗略画成： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-27T09:03:43.087Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/"},"headline":"00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-27T09:03:43.087Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信 本章写给第一次接触服务器硬件和高性能网络的读者。 目标不是记住缩写，而是能回答： 一个 GPU tensor 从机器 A 到机器 B， 中间究竟经过哪些硬件与软件？ 1. 先画出一台服务器 一台多 GPU 服务器可以先粗略画成： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
   (function () {
       function switchTab() {
           if (!location.hash) {
@@ -142,7 +142,7 @@ mjx-container[display="true"] + br {
   display: none;
 }
 </style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
-</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-27T05:46:40.447Z" title="7/27/2026, 5:46:40 AM">2026-07-27</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">22 分钟读完 (大约3295个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</h1><div class="content"><h1 id="00-零基础导读：CPU、内存、PCIe、DMA、网络与-GPU-通信"><a href="#00-零基础导读：CPU、内存、PCIe、DMA、网络与-GPU-通信" class="headerlink" title="00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信"></a>00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</h1><blockquote>
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-27T09:03:43.087Z" title="7/27/2026, 9:03:43 AM">2026-07-27</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">1 小时读完 (大约10037个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</h1><div class="content"><h1 id="00-零基础导读：CPU、内存、PCIe、DMA、网络与-GPU-通信"><a href="#00-零基础导读：CPU、内存、PCIe、DMA、网络与-GPU-通信" class="headerlink" title="00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信"></a>00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</h1><blockquote>
 <p>本章写给第一次接触服务器硬件和高性能网络的读者。<br>目标不是记住缩写，而是能回答：<strong>一个 GPU tensor 从机器 A 到机器 B，<br>中间究竟经过哪些硬件与软件？</strong></p>
 </blockquote>
 <hr>
@@ -157,6 +157,172 @@ mjx-container[display="true"] + br {
 <li>NIC/RNIC：网卡；支持 RDMA 的网卡常叫 RNIC 或 HCA。</li>
 </ul>
 <p>这些设备需要一条本机互连。PCIe 就是最常见的设备互连之一。</p>
+<h3 id="1-1-CPU-DRAM、GPU-DRAM-和-CUDA-global-memory"><a href="#1-1-CPU-DRAM、GPU-DRAM-和-CUDA-global-memory" class="headerlink" title="1.1 CPU DRAM、GPU DRAM 和 CUDA global memory"></a>1.1 CPU DRAM、GPU DRAM 和 CUDA global memory</h3><p>NVIDIA 文档所说的：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">The host CPU has attached DRAM,</span><br><span class="line">and every GPU in a system has its own attached DRAM.</span><br></pre></td></tr></table></figure>
+
+<p>是在强调一台异构机器里有<strong>多块物理内存</strong>，而不是所有处理器共享同一组内存芯片。</p>
+<h4 id="CPU-attached-DRAM-是不是我们平时说的内存"><a href="#CPU-attached-DRAM-是不是我们平时说的内存" class="headerlink" title="CPU attached DRAM 是不是我们平时说的内存"></a>CPU attached DRAM 是不是我们平时说的内存</h4><p>是。它通常就是操作系统和普通程序所说的：</p>
+<ul>
+<li>系统内存（system memory）；</li>
+<li>主存（main memory）；</li>
+<li>host memory；</li>
+<li>日常口语中的“内存”或“内存条”。</li>
+</ul>
+<p>x86 服务器上常见的物理器件是 DDR4/DDR5 DIMM；Grace CPU 使用板载<br>LPDDR5X。它们的具体封装不同，但都属于 DRAM。CPU core 访问它们的大致路径是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">CPU load/store</span><br><span class="line">  → CPU cache</span><br><span class="line">  → CPU internal interconnect</span><br><span class="line">  → CPU integrated memory controller</span><br><span class="line">  → DDR/LPDDR DRAM</span><br></pre></td></tr></table></figure>
+
+<p>这里通常不经过 PCIe。</p>
+<h4 id="GPU-attached-DRAM-是什么"><a href="#GPU-attached-DRAM-是什么" class="headerlink" title="GPU attached DRAM 是什么"></a>GPU attached DRAM 是什么</h4><p>它就是 GPU 自己直接连接的大容量片外内存，常被叫作：</p>
+<ul>
+<li>GPU memory；</li>
+<li>device memory；</li>
+<li>显存或 VRAM；</li>
+<li>在数据中心 GPU 上通常是 HBM/HBM2e/HBM3/HBM3e；</li>
+<li>在一些消费级 GPU 上可能是 GDDR6/GDDR6X。</li>
+</ul>
+<p>HBM 和 GDDR 都是 DRAM 技术。GPU 里还有 register、shared memory、L1/L2 cache，<br>但这些主要由片上 SRAM 实现，不是这里所说的 attached DRAM。</p>
+<p>GPU SM 访问自己 HBM 的典型路径是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">GPU thread 的 global load/store</span><br><span class="line">  → GPU L1/L2 cache</span><br><span class="line">  → GPU internal interconnect</span><br><span class="line">  → GPU HBM memory controller</span><br><span class="line">  → HBM DRAM</span><br></pre></td></tr></table></figure>
+
+<p>这同样不需要先经过 PCIe。只有数据要去 CPU memory、另一块不能通过 NVLink<br>直达的 GPU、NIC 等外部位置时，才需要 CPU-GPU/设备互连。</p>
+<h4 id="GPU-DRAM-就等于-global-memory-吗"><a href="#GPU-DRAM-就等于-global-memory-吗" class="headerlink" title="GPU DRAM 就等于 global memory 吗"></a>GPU DRAM 就等于 global memory 吗</h4><p>对初学阶段，可以先记成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">cudaMalloc() 得到的 device allocation</span><br><span class="line">        ↓ 通常物理驻留</span><br><span class="line">当前 GPU 的 HBM/GDDR</span><br><span class="line">        ↓ 在 CUDA 程序中</span><br><span class="line">以 global memory 的方式被 kernel 访问</span><br></pre></td></tr></table></figure>
+
+<p>但严格说，二者属于不同层次：</p>
+<table>
+<thead>
+<tr>
+<th>词</th>
+<th>描述的层次</th>
+<th>回答的问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DRAM/HBM/GDDR</td>
+<td>物理存储器件</td>
+<td>bit 最终存在哪种芯片里</td>
+</tr>
+<tr>
+<td>GPU device memory</td>
+<td>物理归属/分配位置</td>
+<td>allocation 当前属于哪块 GPU</td>
+</tr>
+<tr>
+<td>CUDA global memory</td>
+<td>CUDA 编程模型中的 memory space</td>
+<td>哪些线程可通过 global load/store 访问</td>
+</tr>
+</tbody></table>
+<p>因此，“GPU attached DRAM 是 global memory 的主要物理承载”比“二者完全等同”<br>更准确。几个反例能说明为什么不能画绝对等号：</p>
+<ol>
+<li>mapped pinned host memory 物理上仍在 CPU DRAM，但 GPU kernel 可以通过<br>CPU-GPU interconnect 对它发起访问；</li>
+<li><code>cudaMallocManaged()</code> 的 managed page 可能在 CPU DRAM 和 GPU DRAM 之间迁移；</li>
+<li>Unified Virtual Addressing 统一的是<strong>虚拟地址空间</strong>，不会把多块物理 DRAM<br>自动焊成一块；</li>
+<li>多 GPU 机器中，GPU0 和 GPU1 通常各有自己的 HBM。GPU0 上的 <code>cudaMalloc</code><br>allocation 不会自动出现在 GPU1 的 HBM 中。</li>
+</ol>
+<p>例如：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cudaSetDevice</span>(<span class="number">0</span>);</span><br><span class="line"><span class="type">float</span>* p0;</span><br><span class="line"><span class="built_in">cudaMalloc</span>(&amp;p0, nbytes);  <span class="comment">// 通常由 GPU0 的 HBM 物理承载</span></span><br><span class="line"></span><br><span class="line"><span class="built_in">cudaSetDevice</span>(<span class="number">1</span>);</span><br><span class="line"><span class="type">float</span>* p1;</span><br><span class="line"><span class="built_in">cudaMalloc</span>(&amp;p1, nbytes);  <span class="comment">// 通常由 GPU1 的 HBM 物理承载</span></span><br></pre></td></tr></table></figure>
+
+<p>虽然 <code>p0</code>、<code>p1</code> 都处在进程的 unified virtual address space 中，但它们属于不同<br>GPU 的物理内存。GPU1 要访问 <code>p0</code>，还需要 peer access、NVLink/PCIe P2P 等条件。</p>
+<p>Grace Blackwell 的 ATS、硬件一致性和 NVLink-C2C 让 CPU/GPU 互访更方便，但<br>“地址可访问/保持一致”仍不等于“物理位置与访问带宽都相同”。分析性能时始终要问：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">allocation 现在物理驻留在哪里？</span><br><span class="line">访问它的 processor 是谁？</span><br><span class="line">两者之间经过哪条 interconnect？</span><br></pre></td></tr></table></figure>
+
+<h3 id="1-2-Memory-Controller-到底是什么"><a href="#1-2-Memory-Controller-到底是什么" class="headerlink" title="1.2 Memory Controller 到底是什么"></a>1.2 Memory Controller 到底是什么</h3><p>Memory Controller（内存控制器）是<strong>处理器与其直接连接的 DRAM 之间的硬件控制器</strong>。<br>它不像 CPU core 那样执行 C++ 代码，也不像 DMA engine 那样接收一个“把 A 搬到 B”<br>的高级任务；它处在每一次 DRAM 访问的末端，把来自 CPU core、GPU SM、DMA engine<br>等发起者的内存请求，转换成 DRAM 芯片能够理解的时序和命令。</p>
+<p>它通常负责：</p>
+<ol>
+<li><strong>地址解析与映射</strong>：决定某个物理地址落在哪个 memory channel、DIMM、<br>rank、bank、row、column。</li>
+<li><strong>请求排队与调度</strong>：同时来了很多读写请求时，选择先服务哪一个，尽量提高<br>row-buffer 命中率，同时避免某一类请求长期饿死。</li>
+<li><strong>DRAM 协议与时序</strong>：发出 activate、read、write、precharge 等命令，并满足<br>DRAM 对命令间隔的要求。</li>
+<li><strong>刷新（refresh）</strong>：DRAM 单元会漏电，必须周期性刷新。</li>
+<li><strong>数据完整性</strong>：在支持的平台上完成 ECC 检查/纠错、错误上报等工作。</li>
+<li><strong>并行通道管理</strong>：让多个 memory channel、bank 尽量并行工作。</li>
+<li><strong>流量控制和 QoS</strong>：在 CPU core、GPU、NIC 等请求者之间仲裁有限的内存带宽。</li>
+</ol>
+<p>一台异构服务器里可能同时存在好几种“内存控制器”：</p>
+<table>
+<thead>
+<tr>
+<th>名称</th>
+<th>控制的物理内存</th>
+<th>通常位于哪里</th>
+<th>主要由谁决定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>CPU Integrated Memory Controller（IMC）</td>
+<td>DDR/LPDDR 系统内存</td>
+<td>CPU/SoC 内部</td>
+<td>CPU/SoC 厂商与平台设计</td>
+</tr>
+<tr>
+<td>GPU HBM Memory Controller</td>
+<td>GPU HBM</td>
+<td>GPU 芯片内部</td>
+<td>GPU 厂商，例如 NVIDIA</td>
+</tr>
+<tr>
+<td>其他设备的内存控制器</td>
+<td>NIC/DPU/SSD 自带的 DRAM 或 Flash</td>
+<td>对应设备内部</td>
+<td>对应设备厂商</td>
+</tr>
+</tbody></table>
+<p>所以“memory controller 是不是 NVIDIA 的”没有一个统一答案：</p>
+<ul>
+<li>x86 服务器的 DDR memory controller 一般集成在 Intel/AMD CPU 中；</li>
+<li>Grace CPU 的 LPDDR memory controller 属于 NVIDIA Grace CPU；</li>
+<li>Blackwell GPU 的 HBM controller 属于 NVIDIA GPU；</li>
+<li>它们是不同控制器，不应只用一个方框概括。</li>
+</ul>
+<p>还要区分下面四个容易混淆的部件：</p>
+<table>
+<thead>
+<tr>
+<th>部件</th>
+<th>最简职责</th>
+<th>会不会执行一次完整拷贝任务</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Memory Controller</td>
+<td>把读写请求落实到 DRAM/HBM</td>
+<td>不负责理解“整个 buffer 拷贝”</td>
+</tr>
+<tr>
+<td>PCIe Root Complex</td>
+<td>把 CPU/内存系统接到 PCIe 树</td>
+<td>负责路由 PCIe transaction，不等于 DRAM 控制器</td>
+</tr>
+<tr>
+<td>DMA Engine</td>
+<td>根据地址和长度发起一串读写</td>
+<td>会，是 payload 搬运的主动执行者之一</td>
+</tr>
+<tr>
+<td>CPU/GPU Core</td>
+<td>执行 load/store 指令</td>
+<td>会，例如 CPU <code>memcpy</code> 或 GPU copy kernel</td>
+</tr>
+</tbody></table>
+<h3 id="1-3-用-blade-kvt-的-copy-kernel-理解“谁在执行”"><a href="#1-3-用-blade-kvt-的-copy-kernel-理解“谁在执行”" class="headerlink" title="1.3 用 blade-kvt 的 copy kernel 理解“谁在执行”"></a>1.3 用 blade-kvt 的 copy kernel 理解“谁在执行”</h3><p><code>blade-kvt/kvtransfer/src/copy_kernels.cu</code> 中的<br><code>copy_h2d_direct_kernel()</code> 和 <code>copy_d2h_direct_kernel()</code> 是 <strong>GPU SM 执行的<br>CUDA kernel</strong>。以 H2D 为例，源码的核心行为可以简化成：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// src 指向 CPU pinned memory；dst 指向 GPU HBM</span></span><br><span class="line">dv[lane_id] = sv[lane_id];</span><br></pre></td></tr></table></figure>
+
+<p>实际源码会在对齐时用 <code>int4</code> 做 16 Byte 向量化访问，不对齐时再退化为更小的<br>load/store。<code>copy_kernels.cpp</code> 中的 <code>copy_handle_data_kernel_direct()</code> 则负责构造<br>offset/length 元数据并 launch kernel。用于 staging 的 host buffer 由<br><code>cudaMallocHost()</code> 分配，因此它既被 page-lock，又可以映射到 GPU 地址空间。</p>
+<p>这条 H2D 路径应拆成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">GPU SM 执行 load(host pinned address)</span><br><span class="line">  → GPU 的地址转换与 CPU-GPU interconnect 接口</span><br><span class="line">  → PCIe（传统独立 GPU）或 NVLink-C2C（Grace Blackwell）</span><br><span class="line">  → CPU/SoC 的 host-memory controller</span><br><span class="line">  → 读取系统 DRAM</span><br><span class="line">  → 数据返回 GPU</span><br><span class="line">  → GPU HBM controller 把 store 写入 HBM</span><br></pre></td></tr></table></figure>
+
+<p>D2H 则反过来：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">GPU HBM controller 提供源数据</span><br><span class="line">  → GPU SM 发出写 host pinned address 的 store</span><br><span class="line">  → CPU-GPU interconnect</span><br><span class="line">  → CPU/SoC 的 host-memory controller</span><br><span class="line">  → 写入系统 DRAM</span><br></pre></td></tr></table></figure>
+
+<p>因此，“copy kernel 通过 memory controller 执行 GPU 访问 CPU pinned memory”<br>这句话只对了一半：</p>
+<ul>
+<li><strong>执行 kernel 的是 GPU SM</strong>，不是 memory controller；</li>
+<li>host memory controller 确实会服务最终的系统 DRAM 读写；</li>
+<li>GPU HBM controller 会服务 HBM 一端；</li>
+<li>中间究竟走 PCIe 还是 NVLink-C2C，由机器的 CPU-GPU 互连拓扑决定；</li>
+<li>pinned 只保证页面稳定并建立设备可访问映射，它不会让远端内存突然拥有 HBM<br>一样的延迟和带宽。</li>
+</ul>
+<p>NVIDIA CUDA 文档也明确说明：GPU kernel 访问 mapped page-locked host memory 时，<br>transaction 要跨 CPU-GPU interconnect，在不同平台上可能是 PCIe 或 NVLink-C2C。</p>
 <hr>
 <h2 id="2-带宽、延迟和吞吐不是同一个词"><a href="#2-带宽、延迟和吞吐不是同一个词" class="headerlink" title="2. 带宽、延迟和吞吐不是同一个词"></a>2. 带宽、延迟和吞吐不是同一个词</h2><h3 id="2-1-带宽：单位时间最多能搬多少"><a href="#2-1-带宽：单位时间最多能搬多少" class="headerlink" title="2.1 带宽：单位时间最多能搬多少"></a>2.1 带宽：单位时间最多能搬多少</h3><p>例如“单方向 32 GB/s”表示理论上 1 秒最多传约 32 GB。</p>
 <p>传 1 GiB 的理想时间：</p>
@@ -173,7 +339,106 @@ mjx-container[display="true"] + br {
 <li>小消息：固定延迟占比大。</li>
 <li>大消息：数据量/带宽占比大。</li>
 </ul>
-<h3 id="2-3-吞吐：系统实际完成多少工作"><a href="#2-3-吞吐：系统实际完成多少工作" class="headerlink" title="2.3 吞吐：系统实际完成多少工作"></a>2.3 吞吐：系统实际完成多少工作</h3><p>吞吐可以是 GB/s，也可以是 requests/s、tokens/s。高链路带宽不保证高业务吞吐：<br>GPU kernel、锁、队列深度、负载不均衡都可能成为瓶颈。</p>
+<p>这里的“固定”是<strong>简化模型中的启动成本</strong>，意思是它不会随着 payload 字节数线性<br>增加，并不是每次都精确相等。排队、缓存命中、操作系统调度、重传都会让它抖动。</p>
+<h4 id="六个阶段各自在做什么"><a href="#六个阶段各自在做什么" class="headerlink" title="六个阶段各自在做什么"></a>六个阶段各自在做什么</h4><table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>典型工作</th>
+<th>主要执行者</th>
+<th>常见可变因素</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>准备描述符</td>
+<td>生成 WR/WQE/SGE，写地址、长度、lkey/rkey、opcode、flags</td>
+<td>应用、通信库、驱动</td>
+<td>是否分配内存、是否批量、锁竞争</td>
+</tr>
+<tr>
+<td>doorbell</td>
+<td>用 MMIO write 或 doorbell record 告诉设备“队列尾部更新了”</td>
+<td>CPU，或特定 GPU-initiated 机制</td>
+<td>写合并、内存屏障、PCIe posted write</td>
+</tr>
+<tr>
+<td>设备取任务</td>
+<td>RNIC 读取 WQE，检查 QP 状态，调度队列，DMA 读取源数据</td>
+<td>RNIC</td>
+<td>WQE cache、QP 数、队列深度、PCIe credit</td>
+</tr>
+<tr>
+<td>链路传输</td>
+<td>packetize、加协议头、序列化比特、交换机转发、可靠性处理</td>
+<td>RNIC、PHY、网络交换机</td>
+<td>MTU、拥塞、PFC/ECN、重传、跳数</td>
+</tr>
+<tr>
+<td>对端处理</td>
+<td>解析包、校验访问权限、重组、地址转换、DMA 写目标内存</td>
+<td>对端 RNIC；有时还有对端软件</td>
+<td>rkey、目标内存类型、PCIe 拓扑、队列</td>
+</tr>
+<tr>
+<td>completion</td>
+<td>生成 CQE/ACK，更新生产者索引，应用 poll 或处理中断</td>
+<td>RNIC、CPU/应用</td>
+<td>CQ moderation、poll 频率、中断调度</td>
+</tr>
+</tbody></table>
+<p>“准备描述符”不是准备每一个 payload 字节，而是在填一张任务单。例如一个<br>RDMA WRITE 的 WQE 可以表达：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">从本地 [addr, length, lkey]</span><br><span class="line">写到远端 [remote_addr, rkey]</span><br><span class="line">完成后是否产生 CQE</span><br></pre></td></tr></table></figure>
+
+<p>doorbell 也不是门铃式地“唤醒整个操作系统”，而通常是一次很短的寄存器/队列<br>通知。设备看到新的 producer index 后，才知道有多少个新 WQE 可以执行。</p>
+<h4 id="“一次发送完成”必须先定义终点"><a href="#“一次发送完成”必须先定义终点" class="headerlink" title="“一次发送完成”必须先定义终点"></a>“一次发送完成”必须先定义终点</h4><p>“发送时间”至少有五种不同口径：</p>
+<ol>
+<li><strong>submit latency</strong>：应用开始构造任务，到 doorbell 提交完成。</li>
+<li><strong>local completion</strong>：本地 buffer 已经可以安全复用。</li>
+<li><strong>remote memory visibility</strong>：payload 已经到达远端目标内存。</li>
+<li><strong>remote notification</strong>：远端 CQE、立即数或通知已经可见。</li>
+<li><strong>application completion</strong>：远端应用/kernel 已经消费或处理完数据。</li>
+</ol>
+<p>它们的终点逐渐变强，时间也通常逐渐变长。一个本地 send completion 往往不能<br>自动证明“远端业务代码已经处理完”；必须阅读具体 transport、opcode 和 API 的<br>completion 语义。</p>
+<h3 id="2-3-它是不是三级流水线"><a href="#2-3-它是不是三级流水线" class="headerlink" title="2.3 它是不是三级流水线"></a>2.3 它是不是三级流水线</h3><p>可以把发送端、链路、接收端看成三级流水线来入门，但真实系统更像多级流水线：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">应用/WQE</span><br><span class="line">   ↓</span><br><span class="line">发送 RNIC：取 WQE → DMA 读 → packetize</span><br><span class="line">   ↓</span><br><span class="line">本机 PCIe → 网卡端口 → 网络交换机</span><br><span class="line">   ↓</span><br><span class="line">接收 RNIC：解析 → 校验 → DMA 写</span><br><span class="line">   ↓</span><br><span class="line">CQE/通知 → 接收应用或 GPU kernel</span><br></pre></td></tr></table></figure>
+
+<p>假设每个阶段处理一个 packet 的服务时间分别为 <code>s1, s2, ... sk</code>。第一个 packet<br>要等待流水线填满，近似经历：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">first_packet_latency ≈ s1 + s2 + ... + sk</span><br></pre></td></tr></table></figure>
+
+<p>但是后续 packet 可以与前一个 packet 重叠。当流水线稳定后，理想吞吐受最慢阶段<br>限制：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">packet_interval ≈ max(s1, s2, ... sk)</span><br><span class="line">N 个 packet 的时间 ≈ 流水线填充时间 + (N - 1) × packet_interval</span><br></pre></td></tr></table></figure>
+
+<p>因此，传 100 个 packet 通常不是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">100 × (所有阶段时间之和)</span><br></pre></td></tr></table></figure>
+
+<p>这正是网络能做到“高带宽但单包仍有微秒级延迟”的原因。窗口、队列深度和 credit<br>允许多个 packet/WQE 同时 in-flight。</p>
+<p>不过，“每个阶段都不阻塞”并不准确。所有硬件队列都是有限的：</p>
+<ul>
+<li>SQ/CQ 满了会产生 backpressure；</li>
+<li>PCIe flow-control credit 用完要等对端归还；</li>
+<li>TCP congestion window/receive window 会限制在途数据；</li>
+<li>RDMA RC 也有 QP 深度、credit、ACK、重试等约束；</li>
+<li>接收端写入 HBM/DRAM 太慢，也会反向限制发送速率。</li>
+</ul>
+<p>更准确的说法是：<strong>阶段之间通常可以并行重叠，但需要队列与流控，拥塞时会阻塞或<br>反压。</strong></p>
+<h3 id="2-4-延迟和带宽究竟怎么测"><a href="#2-4-延迟和带宽究竟怎么测" class="headerlink" title="2.4 延迟和带宽究竟怎么测"></a>2.4 延迟和带宽究竟怎么测</h3><p>如果要测应用看到的有效带宽（goodput），应选定清晰的开始和完成边界，然后计算：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">goodput = 成功传到目标位置的有效 payload 字节数 / 总经过时间</span><br></pre></td></tr></table></figure>
+
+<p>例如发送 100 次、每次 8 MiB，并以远端写完成为终点：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">goodput = 100 × 8 MiB / 从第一笔提交到最后一笔完成的时间</span><br></pre></td></tr></table></figure>
+
+<p>不能只测“某个 packet 从发送口出来到接收口进去的时间”再叫它带宽：</p>
+<ul>
+<li><code>packet_bits / 物理链路速率</code> 是 serialization time（序列化时间）；</li>
+<li>发送 timestamp 到接收 timestamp 是 one-way latency，需要两台机器精确对时；</li>
+<li>一段时间内收到的有效字节数才是吞吐/goodput；</li>
+<li>网卡宣称的 400 Gb/s 是 line rate，不等于应用一定能得到 50 GB/s payload。</li>
+</ul>
+<p>对于一个大消息，常用近似式仍然是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">T(message) ≈ T_startup + message_size / B_bottleneck</span><br></pre></td></tr></table></figure>
+
+<p>其中 <code>B_bottleneck</code> 不是只看网络线速，而是 GPU HBM、GPU↔NIC PCIe、RNIC、<br>交换机端口、接收端写入能力等整条路径的最小有效带宽。</p>
+<h3 id="2-5-吞吐：系统实际完成多少工作"><a href="#2-5-吞吐：系统实际完成多少工作" class="headerlink" title="2.5 吞吐：系统实际完成多少工作"></a>2.5 吞吐：系统实际完成多少工作</h3><p>吞吐可以是 GB/s，也可以是 requests/s、tokens/s。高链路带宽不保证高业务吞吐：<br>GPU kernel、锁、队列深度、负载不均衡都可能成为瓶颈。</p>
 <hr>
 <h2 id="3-PCIe-是什么"><a href="#3-PCIe-是什么" class="headerlink" title="3. PCIe 是什么"></a>3. PCIe 是什么</h2><p>PCI Express（PCIe）是一种高速、串行、点到点互连。GPU、网卡、NVMe SSD<br>常通过 PCIe 接入 CPU 与系统。</p>
 <p>“点到点”不表示整台机器只能连接两个设备，而是每条 link 的两端是明确的。<br>更多设备通过 Root Port 和 PCIe Switch 组成树。</p>
@@ -181,6 +446,15 @@ mjx-container[display="true"] + br {
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">设备 A ──TX────────&gt; RX── 设备 B</span><br><span class="line">设备 A ──RX&lt;────────TX── 设备 B</span><br></pre></td></tr></table></figure>
 
 <p>两个方向可同时工作，叫 full-duplex（全双工）。</p>
+<p>这里：</p>
+<ul>
+<li><strong>TX = Transmit</strong>，发送；</li>
+<li><strong>RX = Receive</strong>，接收。</li>
+</ul>
+<p>TX/RX 总是相对于当前设备说的。A 的 TX 连接 B 的 RX，B 的 TX 连接 A 的 RX：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">A.TX ─────────────&gt; B.RX</span><br><span class="line">A.RX &lt;───────────── B.TX</span><br></pre></td></tr></table></figure>
+
+<p>所以“看 TX counter”之前要先问“哪一块网卡、哪一个端口的 TX”。在网卡语境里<br><code>TX queue</code> 是发送队列，<code>RX queue</code> 是接收队列。少数其他语境可能把 <code>Tx</code> 当作<br>transaction 的简写，但在网卡/链路图中通常就是 transmit。</p>
 <h3 id="3-2-x1、x4、x8、x16-中的-x-是什么"><a href="#3-2-x1、x4、x8、x16-中的-x-是什么" class="headerlink" title="3.2 x1、x4、x8、x16 中的 x 是什么"></a>3.2 x1、x4、x8、x16 中的 x 是什么</h3><p><code>xN</code> 表示一条 link 聚合了 N 条 lanes：</p>
 <table>
 <thead>
@@ -291,18 +565,79 @@ mjx-container[display="true"] + br {
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">CPU:</span><br><span class="line">  ① 准备源地址、目标地址、长度</span><br><span class="line">  ② 通知设备</span><br><span class="line"></span><br><span class="line">DMA engine:</span><br><span class="line">  ③ 真正搬运数据</span><br><span class="line"></span><br><span class="line">CPU:</span><br><span class="line">  ④ 通过中断或轮询得知完成</span><br></pre></td></tr></table></figure>
 
 <p>“不经过 CPU”通常是指 payload 不由 CPU 一字节一字节复制；CPU 仍参与初始化、<br>提交、连接管理与错误处理。</p>
-<h3 id="6-1-为什么内存常要-pin"><a href="#6-1-为什么内存常要-pin" class="headerlink" title="6.1 为什么内存常要 pin"></a>6.1 为什么内存常要 pin</h3><p>操作系统可以换出或移动普通用户页。DMA 期间若物理页突然变化，设备就会写错<br>地方。pin memory 会让相关页在操作期间保持稳定，并建立设备可用的映射。</p>
-<h3 id="6-2-CPU-bounce-buffer"><a href="#6-2-CPU-bounce-buffer" class="headerlink" title="6.2 CPU bounce buffer"></a>6.2 CPU bounce buffer</h3><p>如果 NIC 不能直接访问 GPU memory：</p>
+<h3 id="6-1-“CPU-一字节一字节复制”不是字面上的-for-i"><a href="#6-1-“CPU-一字节一字节复制”不是字面上的-for-i" class="headerlink" title="6.1 “CPU 一字节一字节复制”不是字面上的 for (i++)"></a>6.1 “CPU 一字节一字节复制”不是字面上的 <code>for (i++)</code></h3><p>这句话是在强调 <strong>CPU 位于 payload data path</strong>，并不是说现代 CPU 一定执行下面<br>这种最低效代码：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> (<span class="type">size_t</span> i = <span class="number">0</span>; i &lt; n; ++i) {</span><br><span class="line">    dst[i] = src[i];</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+
+<p>真实的 <code>memcpy</code>/内核 copy routine 通常会使用机器字、SIMD 向量、cache line、<br>prefetch 等方式一次处理很多字节。但无论一次 load/store 处理 8 Byte、16 Byte<br>还是 64 Byte，只要这些指令由 CPU core 执行，payload 就会消耗：</p>
+<ul>
+<li>CPU execution cycles，因此会反映为 CPU utilization；</li>
+<li>L1/L2/L3 cache 容量与 cache bandwidth；</li>
+<li>host DRAM read/write bandwidth；</li>
+<li>NUMA interconnect bandwidth（若源、目标或执行 core 跨 NUMA）。</li>
+</ul>
+<h4 id="普通-TCP-send-大致发生什么"><a href="#普通-TCP-send-大致发生什么" class="headerlink" title="普通 TCP send() 大致发生什么"></a>普通 TCP <code>send()</code> 大致发生什么</h4><p>最常见、未使用 zerocopy 的 Linux TCP 发送路径可先理解为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">应用 user buffer</span><br><span class="line">  → send()/sendmsg()</span><br><span class="line">  → CPU 把 payload 复制/引用到 kernel socket/skb 所管理的 buffer</span><br><span class="line">  → CPU 执行 TCP/IP 协议处理</span><br><span class="line">  → NIC DMA 读取 host memory</span><br><span class="line">  → NIC 发到网络</span><br></pre></td></tr></table></figure>
+
+<p>接收方向通常是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">网络</span><br><span class="line">  → NIC DMA 写 host receive buffer</span><br><span class="line">  → CPU 执行 TCP/IP 协议处理</span><br><span class="line">  → recv() 把数据复制到应用 user buffer</span><br></pre></td></tr></table></figure>
+
+<p>TSO/GSO、checksum offload、GRO/LRO 等机制可以把分段、校验或合并工作部分下放给<br>NIC/内核批处理；<code>MSG_ZEROCOPY</code>、<code>sendfile</code>、<code>splice</code> 等接口还可以避免某些<br>user→kernel payload copy。但 zerocopy 会引入 page pinning、引用计数和 completion<br>通知开销，Linux 文档也指出它通常只在较大的 write 上有收益，而且“zerocopy<br>completion”并不等于数据已经完成网络发送。</p>
+<h4 id="CPU-copy-会不会占-PCIe"><a href="#CPU-copy-会不会占-PCIe" class="headerlink" title="CPU copy 会不会占 PCIe"></a>CPU copy 会不会占 PCIe</h4><p>要分动作看，不能把整条 TCP 路径回答成一个“会”或“不会”：</p>
+<table>
+<thead>
+<tr>
+<th>动作</th>
+<th align="right">消耗 CPU</th>
+<th align="right">消耗 host DRAM</th>
+<th align="right">消耗 PCIe/设备互连</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>CPU 把 user buffer <code>memcpy</code> 到另一个 host buffer</td>
+<td align="right">是</td>
+<td align="right">是</td>
+<td align="right">通常否</td>
+</tr>
+<tr>
+<td>PCIe NIC DMA 读取 host buffer 并发送</td>
+<td align="right">少量控制面</td>
+<td align="right">是</td>
+<td align="right">是，NIC 的 PCIe link</td>
+</tr>
+<tr>
+<td>GPU HBM 拷到 host pinned buffer</td>
+<td align="right">可能由 GPU SM/copy engine 执行</td>
+<td align="right">是</td>
+<td align="right">传统机器走 PCIe；GB200 CPU-GPU 可走 NVLink-C2C</td>
+</tr>
+<tr>
+<td>RNIC 直接 DMA 读取 GPU HBM</td>
+<td align="right">少量控制面</td>
+<td align="right">不经过 bounce buffer</td>
+<td align="right">是，典型 GPUDirect RDMA P2P 路径</td>
+</tr>
+</tbody></table>
+<p>因此，典型的 GPU→staged TCP 发送可能同时消耗：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">GPU HBM</span><br><span class="line">  → CPU-GPU interconnect</span><br><span class="line">  → pinned host buffer</span><br><span class="line">  → CPU/TCP 网络栈与 host memory bandwidth</span><br><span class="line">  → NIC PCIe</span><br><span class="line">  → 网络</span><br></pre></td></tr></table></figure>
+
+<p>注意 CPU 执行一次 host-to-host <code>memcpy</code> 本身不会神奇地生成 PCIe packet；真正<br>占用 PCIe 的是 GPU/NIC 等 PCIe device 与 host/device memory 之间的 transaction。</p>
+<h3 id="6-2-为什么内存常要-pin"><a href="#6-2-为什么内存常要-pin" class="headerlink" title="6.2 为什么内存常要 pin"></a>6.2 为什么内存常要 pin</h3><p>操作系统可以换出或移动普通用户页。DMA 期间若物理页突然变化，设备就会写错<br>地方。pin memory 会让相关页在操作期间保持稳定，并建立设备可用的映射。</p>
+<p>pin memory 不等于“数据一定不复制”，也不等于“GPU 访问它与访问 HBM 一样快”。<br>它主要解决物理页面稳定和设备映射问题；实际数据仍要跨 CPU-GPU interconnect，<br>并最终由 host memory controller 访问系统 DRAM。</p>
+<h3 id="6-3-CPU-bounce-buffer"><a href="#6-3-CPU-bounce-buffer" class="headerlink" title="6.3 CPU bounce buffer"></a>6.3 CPU bounce buffer</h3><p>如果 NIC 不能直接访问 GPU memory：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">GPU HBM → pinned host memory → NIC → 网络</span><br></pre></td></tr></table></figure>
 
 <p>回程：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">网络 → NIC → pinned host memory → GPU HBM</span><br></pre></td></tr></table></figure>
 
 <p>中间的 host buffer 就像“中转仓库”，多一次 D2H/H2D 拷贝并占用 PCIe 带宽。</p>
-<h3 id="6-3-GPUDirect-RDMA"><a href="#6-3-GPUDirect-RDMA" class="headerlink" title="6.3 GPUDirect RDMA"></a>6.3 GPUDirect RDMA</h3><p>若平台、GPU、NIC、驱动和拓扑都支持，RNIC 可以直接 DMA GPU memory：</p>
+<p>在 <code>blade-kvt</code> 的 TCP/RDMA staged 路径中，<code>copy_h2d_direct_kernel()</code> /<br><code>copy_d2h_direct_kernel()</code> 用 GPU SM 直接访问 <code>cudaMallocHost()</code> 的 pinned<br>buffer，并负责 HBM 与 host staging buffer 之间的 gather/scatter。随后 TCP 或<br>staged RDMA 再处理 host buffer 到网络的一段。这里“kernel direct access host<br>memory”与“RNIC direct access GPU HBM”是两种不同的 direct，不能混为一谈。</p>
+<h3 id="6-4-GPUDirect-RDMA"><a href="#6-4-GPUDirect-RDMA" class="headerlink" title="6.4 GPUDirect RDMA"></a>6.4 GPUDirect RDMA</h3><p>若平台、GPU、NIC、驱动和拓扑都支持，RNIC 可以直接 DMA GPU memory：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">GPU HBM ↔ RNIC ↔ 网络</span><br></pre></td></tr></table></figure>
 
 <p>“direct”不等于数据不走 PCIe；恰恰是 RNIC 通过 PCIe peer-to-peer 能力直接<br>访问 GPU memory，省掉 host bounce buffer。</p>
+<p>一个容易记忆的判断方式是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">绕过 CPU core          ≠ 绕过 CPU memory</span><br><span class="line">绕过 CPU host memory   ≠ 绕过 PCIe</span><br><span class="line">使用 RDMA              ≠ buffer 一定在 GPU</span><br><span class="line">使用 GPU buffer        ≠ 一定启用了 GPUDirect RDMA</span><br></pre></td></tr></table></figure>
+
 <hr>
 <h2 id="7-网络最小知识"><a href="#7-网络最小知识" class="headerlink" title="7. 网络最小知识"></a>7. 网络最小知识</h2><h3 id="7-1-NIC、switch、packet"><a href="#7-1-NIC、switch、packet" class="headerlink" title="7.1 NIC、switch、packet"></a>7.1 NIC、switch、packet</h3><ul>
 <li>NIC：服务器的网卡。</li>
@@ -329,6 +664,16 @@ mjx-container[display="true"] + br {
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">应用写任务单 WR</span><br><span class="line">   ↓</span><br><span class="line">发送队列 SQ</span><br><span class="line">   ↓</span><br><span class="line">RNIC 执行网络与 DMA</span><br><span class="line">   ↓</span><br><span class="line">完成通知 CQE</span><br><span class="line">   ↓</span><br><span class="line">应用 poll CQ</span><br></pre></td></tr></table></figure>
 
 <p>RDMA fast path 常能绕过每次系统调用，但建立 QP、注册 MR 等 slow path 仍需要<br>内核和驱动。</p>
+<h3 id="8-1-描述符、doorbell-和-completion-的具体对应"><a href="#8-1-描述符、doorbell-和-completion-的具体对应" class="headerlink" title="8.1 描述符、doorbell 和 completion 的具体对应"></a>8.1 描述符、doorbell 和 completion 的具体对应</h3><p>在 verbs 风格接口中，应用往往先构造 <code>ibv_send_wr</code>，其中的 SGE 描述本地<br><code>addr/length/lkey</code>；若是 RDMA READ/WRITE，还要带远端 <code>remote_addr/rkey</code>。<br><code>ibv_post_send()</code> 把一个或一串 WR 提交到 QP 的 Send Queue。底层 provider<br>通常把 WQE 写入用户态映射的队列，并通过 doorbell 通知 RNIC，所以 fast path<br>不需要每个 WR 都陷入内核。</p>
+<p>完成后，RNIC 在 Completion Queue 中写入 CQE。应用可以 busy-poll CQ，也可以让<br>completion channel/中断唤醒线程。busy-poll 延迟通常更低，但会持续占用 CPU core；<br>中断更省 CPU，但会增加调度和唤醒延迟。</p>
+<h3 id="8-2-为什么发送端和接收端都可能有-completion"><a href="#8-2-为什么发送端和接收端都可能有-completion" class="headerlink" title="8.2 为什么发送端和接收端都可能有 completion"></a>8.2 为什么发送端和接收端都可能有 completion</h3><p>completion 的含义取决于操作：</p>
+<ul>
+<li><strong>SEND/RECV</strong>：发送端有 send completion，接收端收到匹配的 RECV 后有 receive<br>completion。</li>
+<li><strong>RDMA WRITE</strong>：数据被写进远端注册内存；是否通知远端取决于额外机制，例如<br>WRITE_WITH_IMM、另发 SEND，或者应用层协议。</li>
+<li><strong>RDMA READ</strong>：本地 RNIC 从远端读数据，本地 completion 表示读结果已经返回到<br>本地目标 buffer。</li>
+<li><strong>unsignaled WR</strong>：为了减少 CQE 压力，并非每个 WR 都要求一个 CQE；程序会每隔<br>若干个 WR 设置 signaled。</li>
+</ul>
+<p>所以画链路时最好把“发送端本地 CQE”“远端内存可见”“接收端收到通知”画成不同<br>事件，不要用一个模糊的 <code>completion</code> 方框代替全部语义。</p>
 <hr>
 <h2 id="9-NCCL、DeepEP、Barex、blade-kvt-分别解决什么"><a href="#9-NCCL、DeepEP、Barex、blade-kvt-分别解决什么" class="headerlink" title="9. NCCL、DeepEP、Barex、blade-kvt 分别解决什么"></a>9. NCCL、DeepEP、Barex、blade-kvt 分别解决什么</h2><table>
 <thead>
@@ -367,7 +712,7 @@ mjx-container[display="true"] + br {
 <p>它们可以使用相似的底层资源，但 API 与语义不同。不能因为都使用 RDMA/NVLink，<br>就认为 Barex 是 NCCL 的一个函数。</p>
 <hr>
 <h2 id="10-一次跨机-GPU-数据传输的全路径"><a href="#10-一次跨机-GPU-数据传输的全路径" class="headerlink" title="10. 一次跨机 GPU 数据传输的全路径"></a>10. 一次跨机 GPU 数据传输的全路径</h2><p>以 direct RDMA 为例：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line">发送端应用</span><br><span class="line">  ① 得到 GPU tensor 的地址和长度</span><br><span class="line">  ② 注册/查询 GPU MR，得到本地设备可用映射</span><br><span class="line">  ③ 从控制面获得远端 raddr/rkey</span><br><span class="line">  ④ 构造 WR/SGE，写入 SQ，敲 doorbell</span><br><span class="line"></span><br><span class="line">发送端 RNIC</span><br><span class="line">  ⑤ 通过 PCIe 从 GPU HBM 读取 payload</span><br><span class="line">  ⑥ 切成网络 packet 并发往交换机</span><br><span class="line"></span><br><span class="line">网络</span><br><span class="line">  ⑦ 交换机排队、转发；拥塞时 ECN/PFC/重传可能介入</span><br><span class="line"></span><br><span class="line">接收端 RNIC</span><br><span class="line">  ⑧ 校验 rkey/地址</span><br><span class="line">  ⑨ 通过 PCIe 把数据 DMA 到接收端 GPU HBM</span><br><span class="line">  ⑩ 生成 completion 或通知</span><br><span class="line"></span><br><span class="line">应用</span><br><span class="line">  ⑪ 等待 CQ/future/event</span><br><span class="line">  ⑫ 确认完成后才复用源 buffer 或消费目标 buffer</span><br></pre></td></tr></table></figure>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line">发送端应用</span><br><span class="line">  ① 得到 GPU tensor 的地址和长度</span><br><span class="line">  ② 注册/查询 GPU MR，得到本地设备可用映射</span><br><span class="line">  ③ 从控制面获得远端 raddr/rkey</span><br><span class="line">  ④ 构造 WR/SGE，写入 SQ，敲 doorbell</span><br><span class="line"></span><br><span class="line">发送端 RNIC</span><br><span class="line">  ⑤ 通过 PCIe 从 GPU HBM 读取 payload</span><br><span class="line">  ⑥ 切成网络 packet 并发往交换机</span><br><span class="line"></span><br><span class="line">网络</span><br><span class="line">  ⑦ 交换机排队、转发；拥塞时 ECN/PFC/重传可能介入</span><br><span class="line"></span><br><span class="line">接收端 RNIC</span><br><span class="line">  ⑧ 校验 rkey/地址</span><br><span class="line">  ⑨ 通过本机 I/O 路径把数据 DMA 到接收端 GPU HBM</span><br><span class="line">  ⑩ 生成 completion 或通知</span><br><span class="line"></span><br><span class="line">应用</span><br><span class="line">  ⑪ 等待 CQ/future/event</span><br><span class="line">  ⑫ 确认完成后才复用源 buffer 或消费目标 buffer</span><br></pre></td></tr></table></figure>
 
 <p>遇到性能问题时，应逐层问：</p>
 <ol>
@@ -379,6 +724,90 @@ mjx-container[display="true"] + br {
 <li>CQ 是否被及时 poll？</li>
 <li>业务是否等待了比“本地完成”更强的远端完成？</li>
 </ol>
+<h3 id="10-1-“RDMA-为什么还通过-PCIe”——RDMA-与-PCIe-不是竞争关系"><a href="#10-1-“RDMA-为什么还通过-PCIe”——RDMA-与-PCIe-不是竞争关系" class="headerlink" title="10.1 “RDMA 为什么还通过 PCIe”——RDMA 与 PCIe 不是竞争关系"></a>10.1 “RDMA 为什么还通过 PCIe”——RDMA 与 PCIe 不是竞争关系</h3><p>RDMA 描述的是<strong>跨机器的远端内存访问语义和网络 transport</strong>；PCIe 描述的是<br><strong>一台机器内部 CPU、GPU、RNIC 等设备如何互连</strong>。一次传统 GPU Direct RDMA<br>跨机写入本来就同时使用二者：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">机器 A：</span><br><span class="line">GPU HBM</span><br><span class="line">  → GPU PCIe endpoint/BAR</span><br><span class="line">  → 本机 PCIe P2P path</span><br><span class="line">  → RNIC DMA engine</span><br><span class="line"></span><br><span class="line">跨机：</span><br><span class="line">RNIC → RoCE/InfiniBand 网络 → RNIC</span><br><span class="line"></span><br><span class="line">机器 B：</span><br><span class="line">RNIC DMA engine</span><br><span class="line">  → 本机 PCIe P2P path</span><br><span class="line">  → GPU PCIe endpoint/BAR</span><br><span class="line">  → GPU HBM</span><br></pre></td></tr></table></figure>
+
+<p>可以把它类比成“货物先走园区内部道路到机场，再坐飞机跨城，再走对端园区道路”。<br>飞机没有让园区道路消失；RDMA 网络也没有让 GPU↔RNIC 的本机互连消失。</p>
+<p>NVIDIA 对 GPUDirect RDMA 的官方定义就是：GPU 与第三方 peer device 通过 PCIe<br>标准能力建立直接数据路径，并特别强调两者的 PCIe Root Complex/拓扑会影响支持<br>与性能。</p>
+<p>在新平台上，第 ⑨ 步不应脱离拓扑武断地永远写成 PCIe。例如：</p>
+<ul>
+<li>Grace CPU ↔ Blackwell GPU 的 mapped system-memory access 可以走 NVLink-C2C；</li>
+<li>同一 NVLink domain 内 GPU↔GPU 数据可以走 NVLink；</li>
+<li>但典型 ConnectX RNIC ↔ GPU 的 GPUDirect RDMA 仍可能是 PCIe P2P；</li>
+<li>未来/特定平台可能存在不同的数据直连设计，因此最终要看该机器的拓扑和厂商<br>文档。</li>
+</ul>
+<h3 id="10-2-target-p-GB200-实测：RNIC↔GPU-仍显示-PCIe-路径"><a href="#10-2-target-p-GB200-实测：RNIC↔GPU-仍显示-PCIe-路径" class="headerlink" title="10.2 target_p GB200 实测：RNIC↔GPU 仍显示 PCIe 路径"></a>10.2 <code>target_p</code> GB200 实测：RNIC↔GPU 仍显示 PCIe 路径</h3><p>2026-07-27 在 <code>target_p</code> 上做了只读拓扑检查和小规模 Barex 跨机测试。机器信息：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">target_p: 4 × NVIDIA GB200</span><br><span class="line">RNIC:     4 × mlx5_bond_*，底层为 ConnectX-7，RoCE/Ethernet</span><br><span class="line">peer:     target_d（同样为 4 × NVIDIA GB200）</span><br><span class="line">Barex:    ACCL 1.5.3, commit 372e9383f12</span><br></pre></td></tr></table></figure>
+
+<p><code>nvidia-smi topo -m</code> 的关键部分是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">GPU0/1 ↔ NIC0/1: NODE</span><br><span class="line">GPU2/3 ↔ NIC2/3: NODE</span><br><span class="line">GPU0/1 ↔ NIC2/3: SYS</span><br><span class="line">GPU2/3 ↔ NIC0/1: SYS</span><br><span class="line">GPU0 ↔ GPU1/2/3: NV18</span><br></pre></td></tr></table></figure>
+
+<p>工具自己的 legend 写得很明确：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">NODE = Connection traversing PCIe and PCIe Host Bridges within a NUMA node</span><br><span class="line">SYS  = Connection traversing PCIe plus the interconnect between NUMA nodes</span><br><span class="line">NV#  = Connection traversing a bonded set of # NVLinks</span><br></pre></td></tr></table></figure>
+
+<p>这份输出同时证明了两件事：</p>
+<ol>
+<li>GB200 GPU 之间存在 NVLink 路径，显示为 <code>NV18</code>；</li>
+<li>GPU 与 ConnectX-7 RNIC 之间没有显示为 <code>NV#</code>，而显示为包含 PCIe 的<br><code>NODE/SYS</code>。</li>
+</ol>
+<p>因此，对这台具体机器，第 ⑨ 步写“RNIC 通过本机 PCIe 路径 DMA 到 GPU HBM”是<br>合理的。GB200 拥有 NVLink-C2C/NVLink，不代表所有外设访问 GPU 都自动改走 NVLink。</p>
+<h3 id="10-3-Barex-实测：原命令与-GDR-命令测的不是同一条-buffer-路径"><a href="#10-3-Barex-实测：原命令与-GDR-命令测的不是同一条-buffer-路径" class="headerlink" title="10.3 Barex 实测：原命令与 GDR 命令测的不是同一条 buffer 路径"></a>10.3 Barex 实测：原命令与 GDR 命令测的不是同一条 buffer 路径</h3><p>先运行 server（端口用独立测试端口，实际 RDMA IP 不写入公开笔记）：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># target_p</span></span><br><span class="line">barex_benchmark -p &lt;test-port&gt;</span><br></pre></td></tr></table></figure>
+
+<p>用户给出的 client 形态补上 server 地址和显式 <code>-t 100</code>：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># target_d</span></span><br><span class="line">barex_benchmark -c -s &lt;target_p-rdma-ip&gt; -p &lt;test-port&gt; \</span><br><span class="line">  -b 128 -r 8388608 -n 10 -t 100</span><br></pre></td></tr></table></figure>
+
+<p>参数必须按该版本源码理解：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>实际含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>-b 128</code></td>
+<td>request payload 是 128 Byte</td>
+</tr>
+<tr>
+<td><code>-r 8388608</code></td>
+<td>response payload 是 8 MiB</td>
+</tr>
+<tr>
+<td><code>-n 10</code></td>
+<td>10 条并发 client connection，不是 10 次</td>
+</tr>
+<tr>
+<td><code>-t 100</code></td>
+<td>总请求计数；不写时默认也是 100</td>
+</tr>
+<tr>
+<td>没有 <code>-S/-R/-G/-Q</code></td>
+<td>默认 Send/Recv，buffer 在 CPU memory</td>
+</tr>
+</tbody></table>
+<p>原命令的跨机结果为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">conns=10, tx=128 B, rx=8 MiB, iters=100</span><br><span class="line">avg=631.83 us, P50=563 us, P99=833 us</span><br><span class="line">rx_BW=370644 Mb/s, tps=5523.03</span><br></pre></td></tr></table></figure>
+
+<p>日志确认 <code>dtype=XDT_RDMA</code>、创建了 mlx5 QP，但 CPU mempool 有 MR，GPU mempool 的<br>MR 计数为 0。因此这个结果验证的是 <strong>Barex RDMA + CPU registered memory</strong>，不能<br>单独用来证明 RNIC 正在 DMA GPU HBM。</p>
+<p>为了验证 GPU Direct RDMA，另外使用：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># -S: RDMA WRITE single</span></span><br><span class="line"><span class="comment"># -Q: server 源 tensor 在 GPU</span></span><br><span class="line"><span class="comment"># -G: client 目标 tensor 在 GPU</span></span><br><span class="line"><span class="comment"># 不使用 -e/-w，避免显式 GPU↔CPU staging</span></span><br><span class="line">barex_benchmark -c -s &lt;target_p-rdma-ip&gt; -p &lt;test-port&gt; \</span><br><span class="line">  -b 128 -r 8388608 -n 10 -t 100 -S -Q -G</span><br></pre></td></tr></table></figure>
+
+<p>结果为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">conns=10, tx=128 B, rx=8 MiB, iters=100</span><br><span class="line">avg=605.78 us, P50=545 us, P99=810 us</span><br><span class="line">rx_BW=377546 Mb/s, tps=5625.88</span><br></pre></td></tr></table></figure>
+
+<p>client 日志同时显示：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">is_client_tensor_on_gpu=1</span><br><span class="line">is_server_tensor_on_gpu=1</span><br><span class="line">is_client_copy_data_cpu_to_gpu=0</span><br><span class="line">XGpuMempool ... free_bytes=83886080, mr_count=40</span><br></pre></td></tr></table></figure>
+
+<p><code>83,886,080 Byte = 10 × 8 MiB</code>，与 10 个 GPU response buffer 一致；GPU<br>mempool 中存在注册 MR，而 gpu-host staging mempool 为 0。结合 <code>-S/-Q/-G</code> 的<br>源码语义，这次测试验证了 server GPU buffer 到 client GPU buffer 的 RDMA WRITE<br>路径。</p>
+<p>但要谨慎解释数字：</p>
+<ul>
+<li><code>rx_BW</code> 是 benchmark 按 <code>response_size × TPS</code> 计算的应用有效吞吐，不是直接<br>读取交换机端口得到的线速；</li>
+<li>10 条连接在流水线中并发，所以不能用 <code>1 / avg_latency</code> 当总 TPS；</li>
+<li>一次短测只能证明路径可工作并给出当时的样本，不能证明长期稳定极限；</li>
+<li>CPU-buffer 与 GPU-buffer 两组结果接近，不能据此说 PCIe“不存在”；它只说明<br>在本次 8 MiB、10 并发配置下，整条路径达到了约 371～378 Gb/s goodput；</li>
+<li>若要分析单 NIC、单 GPU 的上限，应绑定 GPU/NIC/NUMA，并分别跑 size sweep、<br>connection-count sweep、长稳态测试和硬件 counter。</li>
+</ul>
 <hr>
 <h2 id="11-初学者实验"><a href="#11-初学者实验" class="headerlink" title="11. 初学者实验"></a>11. 初学者实验</h2><h3 id="11-1-查看-PCIe-设备树"><a href="#11-1-查看-PCIe-设备树" class="headerlink" title="11.1 查看 PCIe 设备树"></a>11.1 查看 PCIe 设备树</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">lspci -t</span><br><span class="line">lspci -nn</span><br></pre></td></tr></table></figure>
 
@@ -390,6 +819,20 @@ mjx-container[display="true"] + br {
 
 <h3 id="11-5-查看-RDMA-对象"><a href="#11-5-查看-RDMA-对象" class="headerlink" title="11.5 查看 RDMA 对象"></a>11.5 查看 RDMA 对象</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">rdma <span class="built_in">link</span></span><br><span class="line">ibv_devinfo</span><br></pre></td></tr></table></figure>
 
+<h3 id="11-6-做-Barex-GPU-Direct-RDMA-测试前先确认语义"><a href="#11-6-做-Barex-GPU-Direct-RDMA-测试前先确认语义" class="headerlink" title="11.6 做 Barex GPU Direct RDMA 测试前先确认语义"></a>11.6 做 Barex GPU Direct RDMA 测试前先确认语义</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 1. 确认编译版本和网卡类型</span></span><br><span class="line">barex_benchmark -V</span><br><span class="line"></span><br><span class="line"><span class="comment"># 2. 阅读本机这个版本的参数，不要凭名字猜</span></span><br><span class="line">barex_benchmark --<span class="built_in">help</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 3. 两端确认 GPU/NIC 拓扑</span></span><br><span class="line">nvidia-smi topo -m</span><br><span class="line">ibv_devices</span><br><span class="line"></span><br><span class="line"><span class="comment"># 4. server</span></span><br><span class="line"><span class="built_in">timeout</span> 120s barex_benchmark -p &lt;unused-port&gt;</span><br><span class="line"></span><br><span class="line"><span class="comment"># 5. 另一台机器上的 client：GPU source → RDMA WRITE → GPU destination</span></span><br><span class="line"><span class="built_in">timeout</span> 100s barex_benchmark \</span><br><span class="line">  -c -s &lt;server-rdma-ip&gt; -p &lt;unused-port&gt; \</span><br><span class="line">  -b 128 -r 8388608 -n 10 -t 100 -S -Q -G</span><br></pre></td></tr></table></figure>
+
+<p>实验记录至少要包含：</p>
+<ul>
+<li>日期、两端 hostname、GPU/NIC 型号、Barex commit；</li>
+<li><code>nvidia-smi topo -m</code>；</li>
+<li>RDMA device、GID/link layer、MTU；</li>
+<li>command line 和所有影响 transport 的环境变量；</li>
+<li>request/response size、并发数、迭代数；</li>
+<li>latency percentile、goodput、错误与重传 counter；</li>
+<li>buffer 位于 CPU、GPU，还是显式 staging buffer；</li>
+<li>completion 的测量边界。</li>
+</ul>
+<p>不要在同一台机器起 server/client 后就把结果称为“跨机 RDMA 带宽”。本机 loopback<br>可能采用特殊路径，甚至完全不经过物理网络端口。</p>
 <p>先记录输出，不要一上来修改 BIOS、IOMMU、ACS、PFC 或网卡参数。</p>
 <hr>
 <h2 id="12-自检"><a href="#12-自检" class="headerlink" title="12. 自检"></a>12. 自检</h2><ol>
@@ -403,6 +846,16 @@ mjx-container[display="true"] + br {
 <li><code>400 Gb/s</code> 为什么约等于 <code>50 GB/s</code>？</li>
 <li>WR、SQ、CQ 分别像什么？</li>
 <li>NCCL、Barex 与 blade-kvt 为什么不能画等号？</li>
+<li>CPU memory controller、GPU HBM controller、DMA engine 各自负责什么？</li>
+<li>为什么 copy kernel 的执行者是 GPU SM，而 host DRAM 访问仍会经过 CPU/SoC<br>memory controller？</li>
+<li>TX/RX 分别是什么缩写？A 的 TX 连到 B 的哪一端？</li>
+<li>为什么流水线的首包延迟近似是各阶段之和，而稳态吞吐由最慢阶段决定？</li>
+<li>“local completion”“remote memory visibility”“远端应用消费完成”有什么区别？</li>
+<li>为什么 CPU 执行 host-to-host <code>memcpy</code> 不直接占 PCIe，而 PCIe NIC DMA 会占？</li>
+<li>为什么普通 TCP 仍会消耗 CPU，使用 TSO/GRO 后又减少了哪些 CPU 工作？</li>
+<li>在当前 Barex 版本中，<code>-n 10</code> 和 <code>-t 10</code> 有什么区别？</li>
+<li>为什么没有 <code>-G/-Q</code> 的 Barex RDMA 测试不能证明 GPU Direct RDMA？</li>
+<li>为什么 GB200 的 CPU↔GPU 可走 NVLink-C2C，但 ConnectX RNIC↔GPU 仍可能走<br>PCIe？</li>
 </ol>
 <p>下一章：<a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01_pcie_fundamentals.md</a></p>
 <h2 id="一手资料"><a href="#一手资料" class="headerlink" title="一手资料"></a>一手资料</h2><ul>
@@ -410,9 +863,13 @@ mjx-container[display="true"] + br {
 <li><a target="_blank" rel="noopener" href="https://pcisig.com/blog/pci-express-delivering-needed-bandwidth-open-compute-project">PCI-SIG：PCIe 4.0/5.0 每 lane 与 x16 带宽表</a></li>
 <li><a target="_blank" rel="noopener" href="https://docs.kernel.org/driver-api/pci/pci.html">Linux PCI Support Library</a></li>
 <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/gpudirect-rdma/">NVIDIA GPUDirect RDMA</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html#page-locked-host-memory">NVIDIA CUDA Programming Guide：Page-Locked 与 Mapped Host Memory</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.nvidia.com/en-us/data-center/gb200-nvl72/">NVIDIA GB200 NVL72：Grace CPU、Blackwell GPU 与 NVLink-C2C</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/multi-node-nvlink-systems/multi-node-tuning-guide/overview.html">NVIDIA GB200 Multi-Node Tuning Guide</a></li>
 <li><a target="_blank" rel="noopener" href="https://docs.kernel.org/infiniband/user_verbs.html">Linux Userspace Verbs Access</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.kernel.org/networking/msg_zerocopy.html">Linux MSG_ZEROCOPY</a></li>
 </ul>
-</div><div class="article-licensing box"><div class="licensing-title"><p>00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/"><span class="level-item">01. PCIe 基础：从 Lane 到 TLP</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">57</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/">02b. RDMA 操作、WR/CQ 完成与可靠性</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">29</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">26</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+</div><div class="article-licensing box"><div class="licensing-title"><p>00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/"><span class="level-item">01. PCIe 基础：从 Lane 到 TLP</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">58</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">30</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
             article: {
                 highlight: {
                     clipboard: true,
