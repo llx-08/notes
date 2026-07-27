@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>08. blade-kvt 调用 Barex 的完整发送逻辑 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="08. blade-kvt 调用 Barex 的完整发送逻辑 1. 总体路径 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 Python KvTransfer.submit_req_send2 &amp;#x2F; start_send_step ↓ pybind KvTransferClient ↓ StepTasks 按目标分组 TargetMgr::do_submit ↓ ta"><meta property="og:type" content="blog"><meta property="og:title" content="08. blade-kvt 调用 Barex 的完整发送逻辑"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-08-blade-kvt-barex-send-path/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="08. blade-kvt 调用 Barex 的完整发送逻辑 1. 总体路径 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 Python KvTransfer.submit_req_send2 &amp;#x2F; start_send_step ↓ pybind KvTransferClient ↓ StepTasks 按目标分组 TargetMgr::do_submit ↓ ta"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/blade_kvt_send_path.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/blade_kvt_direct_rdma_sequence.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/blade_kvt_send_modes.svg"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-27T03:05:09.630Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/blade_kvt_send_path.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-08-blade-kvt-barex-send-path/"},"headline":"08. blade-kvt 调用 Barex 的完整发送逻辑","image":[],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-27T03:05:09.630Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"08. blade-kvt 调用 Barex 的完整发送逻辑 1. 总体路径 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 Python KvTransfer.submit_req_send2 &#x2F; start_send_step ↓ pybind KvTransferClient ↓ StepTasks 按目标分组 TargetMgr::do_submit ↓ ta"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-08-blade-kvt-barex-send-path/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-27T03:05:09.630Z" title="7/27/2026, 3:05:09 AM">2026-07-27</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">12 分钟读完 (大约1802个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">08. blade-kvt 调用 Barex 的完整发送逻辑</h1><div class="content"><h1 id="08-blade-kvt-调用-Barex-的完整发送逻辑"><a href="#08-blade-kvt-调用-Barex-的完整发送逻辑" class="headerlink" title="08. blade-kvt 调用 Barex 的完整发送逻辑"></a>08. blade-kvt 调用 Barex 的完整发送逻辑</h1><h2 id="1-总体路径"><a href="#1-总体路径" class="headerlink" title="1. 总体路径"></a>1. 总体路径</h2><p><img src="/notes/imgs/blade_kvt_send_path.svg" alt="blade-kvt 从 Python 到 Barex 的发送路径"></p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">Python</span><br><span class="line">  KvTransfer.submit_req_send2 / start_send_step</span><br><span class="line">    ↓ pybind</span><br><span class="line">  KvTransferClient</span><br><span class="line">    ↓ StepTasks 按目标分组</span><br><span class="line">  TargetMgr::do_submit</span><br><span class="line">    ↓ target thread pool</span><br><span class="line">  KvSendStub::send_batch</span><br><span class="line">    ↓ parse_block</span><br><span class="line">  IChannel::register_data</span><br><span class="line">    ↓ layer ready</span><br><span class="line">  IChannel::send_data(layer)</span><br><span class="line">    ↓</span><br><span class="line">  Barex Send / WriteBatch / WriteSingle</span><br><span class="line">    ↓</span><br><span class="line">  WR → NIC → CQ → callback/future</span><br></pre></td></tr></table></figure>
+
+<h2 id="2-Python-与-pybind"><a href="#2-Python-与-pybind" class="headerlink" title="2. Python 与 pybind"></a>2. Python 与 pybind</h2><p>Python <code>blade_kvt/kv_transfer_impl.py</code> 导入：</p>
+<ul>
+<li><code>submit_req_send2</code></li>
+<li><code>submit_delta_send</code></li>
+<li><code>start_send</code></li>
+<li><code>start_send_substep</code></li>
+<li><code>flush_send</code></li>
+</ul>
+<p>pybind 对应：</p>
+<ul>
+<li><code>kvtransfer_pybind.cpp:218-254</code>：提交 request；</li>
+<li><code>:259-270</code>：开始 step/substep；</li>
+<li><code>:281-284</code>：flush；</li>
+<li><code>:487-493</code>：模块导出。</li>
+</ul>
+<p><code>submit</code> 阶段只积累任务，不发送数据。</p>
+<h2 id="3-StepTasks：按目标聚合"><a href="#3-StepTasks：按目标聚合" class="headerlink" title="3. StepTasks：按目标聚合"></a>3. StepTasks：按目标聚合</h2><p><code>KvTransferClient::submit_req_send</code>：</p>
+<ol>
+<li>创建 <code>RequestInfo</code>；</li>
+<li><code>add_send_task</code>；</li>
+<li>放入 <code>targets_tasks_buf_</code>；</li>
+<li>未到 last token 的 request 还保存在 <code>reqs_</code>，供 delta send 复用。</li>
+</ol>
+<p><code>start_send</code>：</p>
+<ol>
+<li>创建 <code>Step</code> 与 <code>StepGuard</code>；</li>
+<li>交换出 <code>targets_tasks_buf_</code>；</li>
+<li>交给 <code>TargetMgr::submit</code>；</li>
+<li>单独线程等待每层 CUDA event/barrier，然后 <code>notify_layer_ready</code>。</li>
+</ol>
+<p>源码：<code>kvtransfer/src/client.cpp:256-410</code>、<code>:463-513</code>。</p>
+<h2 id="4-TargetMgr：并发与同目标串行"><a href="#4-TargetMgr：并发与同目标串行" class="headerlink" title="4. TargetMgr：并发与同目标串行"></a>4. TargetMgr：并发与同目标串行</h2><p><code>TargetMgr::do_submit</code> 按：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">InstanceId → WorkerId → BatchSendTask</span><br></pre></td></tr></table></figure>
+
+<p>遍历任务，为每个目标取得或创建一个 <code>KvSendStub</code>，再投递到 Barex <code>XThreadpool</code>。</p>
+<p>同一个 target 使用稳定 <code>thread_hint</code>，目的是让发送批次落到一致 worker，降低同目标状态并发风险。见 <code>client.cpp:72-108</code>。</p>
+<h2 id="5-KvSendStub：数据布局决策"><a href="#5-KvSendStub：数据布局决策" class="headerlink" title="5. KvSendStub：数据布局决策"></a>5. KvSendStub：数据布局决策</h2><p><code>KvSendStub::TaskContext::do_task</code>：</p>
+<ol>
+<li>过滤失败/空 delta request；</li>
+<li>获取目标 <code>WorkerInfo</code>；</li>
+<li>计算有效发送 rank；</li>
+<li>按 P/D TP 大小与 cache shape 选择 <code>parse_block_*</code>；</li>
+<li>生成 <code>vector&lt;vector&lt;IpcBlock&gt;&gt; send_blocks</code>；</li>
+<li>创建/复用 channel；</li>
+<li>调用 <code>do_send</code>。</li>
+</ol>
+<p><code>IpcBlock</code> 的关键字段：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">src_offset, dst_offset, length</span><br></pre></td></tr></table></figure>
+
+<p>它是后续 direct/staged/TCP 三条路径共同的逻辑数据描述。</p>
+<p>源码：<code>kvtransfer/src/tx_stub.cpp:128-263</code>、<code>:416-604</code>。</p>
+<h2 id="6-与模型-forward-的逐层-overlap"><a href="#6-与模型-forward-的逐层-overlap" class="headerlink" title="6. 与模型 forward 的逐层 overlap"></a>6. 与模型 forward 的逐层 overlap</h2><p><code>TaskContext::do_send</code>：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">ch-&gt;<span class="built_in">register_data</span>(send_blocks, tpkind);</span><br><span class="line"><span class="keyword">for</span> (layer = start_layer; layer &lt; num_layers; ++layer) {</span><br><span class="line">  step-&gt;<span class="built_in">wait_layer_ready</span>(layer);</span><br><span class="line">  ch-&gt;<span class="built_in">send_data</span>(layer);   <span class="comment">// 异步提交</span></span><br><span class="line">}</span><br><span class="line">ch-&gt;<span class="built_in">flush</span>(metrics);       <span class="comment">// channel 级完成等待</span></span><br></pre></td></tr></table></figure>
+
+<p>见 <code>tx_stub.cpp:395-413</code>。</p>
+<p>因此 overlap 关系是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">GPU forward layer i 完成并 record event</span><br><span class="line">  → StepGuard 等 CUDA barrier</span><br><span class="line">  → release layer i</span><br><span class="line">  → send stub 提交 layer i KV</span><br><span class="line">  → GPU 继续算后续 layer</span><br></pre></td></tr></table></figure>
+
+<h2 id="7-Barex-context-与-GPU-MR-初始化"><a href="#7-Barex-context-与-GPU-MR-初始化" class="headerlink" title="7. Barex context 与 GPU MR 初始化"></a>7. Barex context 与 GPU MR 初始化</h2><p><code>BarexCtx</code> 构造时：</p>
+<ol>
+<li>按 protocol 取得 NIC device 与共享 mempool；</li>
+<li>遍历每层、每个 cache tensor；</li>
+<li><code>RDMA_DIRECT</code> 调用 <code>RegUserMr(... GPU ...)</code>；</li>
+<li>创建 Barex thread pool；</li>
+<li><code>XContext::NewInstance</code>；</li>
+<li><code>context-&gt;Start()</code>。</li>
+</ol>
+<p>见 <code>barex_protocol.cpp:405-502</code>。</p>
+<p>服务器随后把每层 tensor 的 GPU base 与 rkey 放入 <code>RDMAMemHandle</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">handle.ptrs[tensor]  = GPU cache base</span><br><span class="line">handle.rkeys[tensor] = GPU MR rkey</span><br></pre></td></tr></table></figure>
+
+<p>见 <code>rdma_channel.cpp:345-385</code>。</p>
+<h2 id="8-连接与-MR-handle-控制面"><a href="#8-连接与-MR-handle-控制面" class="headerlink" title="8. 连接与 MR handle 控制面"></a>8. 连接与 MR handle 控制面</h2><p>client <code>RDMAChannel::do_init</code>：</p>
+<ol>
+<li>建立 <code>BLLM_KVTRANS_SEND_PARALLEL</code> 个 Barex channel；</li>
+<li>通过第一个 channel 调用 <code>get_mem_handles</code>；</li>
+<li>client 发送 <code>MEM_HANDLES_REQ_MAGIC + reqid</code>；</li>
+<li>server <code>OnRecvCall</code> 返回全部 <code>RDMAMemHandle</code>；</li>
+<li>client <code>CliBarexCtx</code> 用 reqid 匹配 promise。</li>
+</ol>
+<p><img src="/notes/imgs/blade_kvt_direct_rdma_sequence.svg" alt="blade-kvt direct RDMA 控制面与数据面时序"></p>
+<p>控制面调用的是 <code>Send</code>，因为它需要远端 callback/响应；payload 数据面不需要每层回调，直接 Write。</p>
+<h2 id="9-Direct-RDMA：真正的-KV-数据发送"><a href="#9-Direct-RDMA：真正的-KV-数据发送" class="headerlink" title="9. Direct RDMA：真正的 KV 数据发送"></a>9. Direct RDMA：真正的 KV 数据发送</h2><h3 id="9-1-register-data"><a href="#9-1-register-data" class="headerlink" title="9.1 register_data"></a>9.1 <code>register_data</code></h3><p><code>RDMAChannel::register_data</code>：</p>
+<ul>
+<li>保存 <code>IpcBlock</code> 引用；</li>
+<li>建立/验证 channel；</li>
+<li>对 <code>PEQD</code> 合并连续 interval；</li>
+<li>统计 block 数、大小；</li>
+<li>根据 channel 数计算每 channel 分配量 <code>dataperch_</code>。</li>
+</ul>
+<p>见 <code>rdma_channel.cpp:612-678</code>。</p>
+<h3 id="9-2-send-data-layer"><a href="#9-2-send-data-layer" class="headerlink" title="9.2 send_data(layer)"></a>9.2 <code>send_data(layer)</code></h3><p>对每个 tensor/block 构造：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">rwmemp.r_addr   = remote_gpu_base + dst_offset;</span><br><span class="line">rwmemp.r_key    = remote_rkey;</span><br><span class="line">rwmemp.sg.addr  = local_gpu_base + src_offset;</span><br><span class="line">rwmemp.sg.length = len;</span><br><span class="line">rwmemp.sg.lkey  = local_gpu_mr-&gt;lkey;</span><br></pre></td></tr></table></figure>
+
+<p>积累到 <code>dataperch_</code> 后：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">ch-&gt;<span class="built_in">WriteBatch</span>(datas, callback)</span><br></pre></td></tr></table></figure>
+
+<p>每批通过 <code>RDMAChannel::ch()</code> round-robin 选择多个 Barex channel。future 保存到 <code>write_futs_</code>。</p>
+<p>见 <code>rdma_channel.cpp:696-760</code>。</p>
+<h3 id="9-3-Barex-内部"><a href="#9-3-Barex-内部" class="headerlink" title="9.3 Barex 内部"></a>9.3 Barex 内部</h3><p><code>XChannelImpl::WriteBatch</code>：</p>
+<ol>
+<li>校验/切换本地 MR；</li>
+<li>构造一个或多个 <code>ibv_send_wr</code>，opcode 为 RDMA WRITE；</li>
+<li>受 <code>tx_depth</code> semaphore 控制；</li>
+<li><code>ibv_post_send</code>；</li>
+<li>CQ 返回 <code>IBV_WC_RDMA_WRITE</code>；</li>
+<li><code>HandleWriteComplete</code> 调 callback；</li>
+<li>promise 完成。</li>
+</ol>
+<h3 id="9-4-RDMAChannel-flush"><a href="#9-4-RDMAChannel-flush" class="headerlink" title="9.4 RDMAChannel::flush"></a>9.4 <code>RDMAChannel::flush</code></h3><p>遍历 <code>write_futs_</code> 调 <code>future.get()</code>：</p>
+<ul>
+<li>任一 CQ 异步错误会以 exception 抛出；</li>
+<li>全部完成后清空 futures；</li>
+<li>可选地请求接收端计算 CRC；</li>
+<li>输出 send latency/block metrics。</li>
+</ul>
+<p>见 <code>rdma_channel.cpp:809-854</code>。</p>
+<h2 id="10-两层不同的-flush"><a href="#10-两层不同的-flush" class="headerlink" title="10. 两层不同的 flush"></a>10. 两层不同的 flush</h2><p>必须区分：</p>
+<h3 id="10-1-IChannel-flush"><a href="#10-1-IChannel-flush" class="headerlink" title="10.1 IChannel::flush"></a>10.1 <code>IChannel::flush</code></h3><p>由 <code>KvSendStub::do_send</code> 调用。Direct RDMA 实现会等待本 batch 的所有 Barex Write completion。这是真正的数据面完成等待。</p>
+<h3 id="10-2-KvTransferClient-flush-send"><a href="#10-2-KvTransferClient-flush-send" class="headerlink" title="10.2 KvTransferClient::flush_send"></a>10.2 <code>KvTransferClient::flush_send</code></h3><p>当前版本 <code>client.cpp:524-541</code> 只做：</p>
+<ol>
+<li><code>layer_ready_all()</code>，解除所有 layer wait；</li>
+<li>记录时间；</li>
+<li>reset <code>last_step_guard_</code>。</li>
+</ol>
+<p>它没有显式 join <code>TargetMgr</code> thread pool，也没有等待所有 <code>KvSendStub</code> 结束。实际每个 target task 会在自己的 <code>IChannel::flush</code> 中等待完成，但公共 <code>flush_send()</code> 本身从代码上看不保证在这些 task 结束后才返回。</p>
+<p>因此当前版本应谨慎理解 Python 注释中的“check whether progress is finished”。若上层依赖严格同步完成，应进一步验证调用方时序或增加 step completion barrier。</p>
+<h2 id="11-Staged-RDMA"><a href="#11-Staged-RDMA" class="headerlink" title="11. Staged RDMA"></a>11. Staged RDMA</h2><p>适用于需要 host staging 的路径：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">source GPU blocks</span><br><span class="line">  → CUDA gather kernel</span><br><span class="line">  → local CUDA_HOST buffer</span><br><span class="line">  → Barex WriteSingle(signal_peer=true)</span><br><span class="line">  → remote CUDA_HOST preallocated buffer</span><br><span class="line">  → remote OnImmRecvCall</span><br><span class="line">  → H2D scatter</span><br><span class="line">  → Barex response</span><br></pre></td></tr></table></figure>
+
+<p>特点：</p>
+<ul>
+<li>先 RPC 请求每层 remote staging buffer；</li>
+<li>payload 用 <code>RDMA_WRITE_WITH_IMM</code>；</li>
+<li>immediate data 编码 buffer id；</li>
+<li>local CQ completion 只说明 RDMA write 完成；</li>
+<li><code>staged_write_futs_</code> 等待远端 H2D 后的 response，才是端到端完成。</li>
+</ul>
+<p>见 <code>rdma_staged_channel.cpp:81-130</code>、<code>:144-300</code>、<code>:302-409</code>。</p>
+<h2 id="12-TCP-路径"><a href="#12-TCP-路径" class="headerlink" title="12. TCP 路径"></a>12. TCP 路径</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">GPU blocks</span><br><span class="line">  → CUDA D2H gather（可选 BF16→FP8）</span><br><span class="line">  → CUDA_HOST wire buffer</span><br><span class="line">  → Barex XChannel::Send</span><br><span class="line">  → TCP backend</span><br><span class="line">  → server parse</span><br><span class="line">  → H2D scatter</span><br><span class="line">  → response</span><br></pre></td></tr></table></figure>
+
+<p>与 staged RDMA 相同点：</p>
+<ul>
+<li>payload 都先 gather 到 host buffer；</li>
+<li>都用 reqid/future 等远端完成；</li>
+<li><code>flush</code> 统计 D2H、network、H2D、recv queue。</li>
+</ul>
+<p>不同点：</p>
+<ul>
+<li>staged RDMA 数据使用 one-sided WriteWithImm；</li>
+<li>TCP 使用 Barex message <code>Send</code>；</li>
+<li>staged 远端 buffer 需提前注册和交换 rkey。</li>
+</ul>
+<p>见 <code>tcp_channel.cpp:348-587</code>、<code>:674</code> 起。</p>
+<p><img src="/notes/imgs/blade_kvt_send_modes.svg" alt="blade-kvt 三种发送模式"></p>
+<h2 id="13-send-done-是第四条独立路径"><a href="#13-send-done-是第四条独立路径" class="headerlink" title="13. send-done 是第四条独立路径"></a>13. send-done 是第四条独立路径</h2><p>KV payload 完成后，<code>KvSendStub::send_done</code> 经普通 TCP 长连接发送业务完成通知：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">SEND_DONE_REQ / SAVE_DONE2_REQ</span><br><span class="line">  + worker_tp_rank</span><br><span class="line">  + req count</span><br><span class="line">  + plen/code/reqid</span><br></pre></td></tr></table></figure>
+
+<p>它不是 Barex CQ completion，也不是 NCCL。失败时关闭 socket 并重建一次。见 <code>tx_stub.cpp:274-393</code>。</p>
+<p>所以系统中同时存在：</p>
+<ol>
+<li>Barex 建联/control RPC；</li>
+<li>Barex KV payload；</li>
+<li>staged/TCP 远端完成响应；</li>
+<li>业务 send-done TCP RPC。</li>
+</ol>
+<h2 id="14-错误传播"><a href="#14-错误传播" class="headerlink" title="14. 错误传播"></a>14. 错误传播</h2><table>
+<thead>
+<tr>
+<th>层</th>
+<th>机制</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Barex 同步提交</td>
+<td><code>BarexResult != BAREX_SUCCESS</code></td>
+</tr>
+<tr>
+<td>Barex 异步 WR</td>
+<td><code>DoneCallback(Status)</code></td>
+</tr>
+<tr>
+<td>blade wrapper</td>
+<td>callback 设置 promise value/exception</td>
+</tr>
+<tr>
+<td>channel flush</td>
+<td><code>future.get()</code> 抛异常</td>
+</tr>
+<tr>
+<td>send stub</td>
+<td>catch，reset channel，标记 request FAILED</td>
+</tr>
+<tr>
+<td>业务完成</td>
+<td>send-done code 500</td>
+</tr>
+</tbody></table>
+<p>channel reset 后下次 batch 会通过 naming 刷新地址并重建连接。</p>
+<h2 id="15-最短代码阅读顺序"><a href="#15-最短代码阅读顺序" class="headerlink" title="15. 最短代码阅读顺序"></a>15. 最短代码阅读顺序</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">blade_kvt/kv_transfer_impl.py</span><br><span class="line">→ kvtransfer/kvtransfer_pybind.cpp</span><br><span class="line">→ kvtransfer/src/client.cpp</span><br><span class="line">→ kvtransfer/src/tx_stub.cpp</span><br><span class="line">→ kvtransfer/include/channel.h</span><br><span class="line">→ kvtransfer/src/rdma_channel.cpp</span><br><span class="line">→ kvtransfer/src/barex_protocol.cpp</span><br><span class="line">→ Barex include/accl/barex/xchannel.h</span><br><span class="line">→ Barex src/barex/impl/rdma/xchannel_impl.cc</span><br><span class="line">→ Barex src/barex/impl/rdma/xcontext_impl.cc</span><br></pre></td></tr></table></figure>
+
+<h2 id="16-自检"><a href="#16-自检" class="headerlink" title="16. 自检"></a>16. 自检</h2><ol>
+<li>为什么取 MR handle 用 <code>Send</code>，KV payload 用 <code>WriteBatch</code>？</li>
+<li><code>send_data()</code> 返回后为什么不能立即复用源 KV block？</li>
+<li>direct RDMA 与 staged RDMA 的完成边界分别是什么？</li>
+<li><code>flush_send</code> 与 <code>RDMAChannel::flush</code> 为什么不能混为一谈？</li>
+<li>send-done 为什么不等于网络 CQ completion？</li>
+</ol>
+</div><div class="article-licensing box"><div class="licensing-title"><p>08. blade-kvt 调用 Barex 的完整发送逻辑</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-08-blade-kvt-barex-send-path/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-08-blade-kvt-barex-send-path/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-07-barex-and-nccl-relationship/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">07. Barex 如何与 NCCL 结合：证据与结论</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-09-debugging-and-performance-playbook/"><span class="level-item">09. 调试与性能分析手册</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">55</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">14</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/">02b. RDMA 操作、WR/CQ 完成与可靠性</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/">03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">27</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>07. Barex 如何与 NCCL 结合：证据与结论 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="07. Barex 如何与 NCCL 结合：证据与结论 1. 结论先行 对当前 accl-barex-v1.5.3-1 与 blade-kvt 版本： 没有发现 Barex 作为 NCCL transport&amp;#x2F;plugin、被 NCCL 调用、或在 blade-kvt 数据路径中调用 NCCL 的证据。 更准确的关系是： 1 2 3 4 5 6 7 8 9 CUDA &amp;#x2F; GPU memory │"><meta property="og:type" content="blog"><meta property="og:title" content="07. Barex 如何与 NCCL 结合：证据与结论"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-07-barex-and-nccl-relationship/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="07. Barex 如何与 NCCL 结合：证据与结论 1. 结论先行 对当前 accl-barex-v1.5.3-1 与 blade-kvt 版本： 没有发现 Barex 作为 NCCL transport&amp;#x2F;plugin、被 NCCL 调用、或在 blade-kvt 数据路径中调用 NCCL 的证据。 更准确的关系是： 1 2 3 4 5 6 7 8 9 CUDA &amp;#x2F; GPU memory │"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-27T03:05:09.629Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-07-barex-and-nccl-relationship/"},"headline":"07. Barex 如何与 NCCL 结合：证据与结论","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-27T03:05:09.629Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"07. Barex 如何与 NCCL 结合：证据与结论 1. 结论先行 对当前 accl-barex-v1.5.3-1 与 blade-kvt 版本： 没有发现 Barex 作为 NCCL transport&#x2F;plugin、被 NCCL 调用、或在 blade-kvt 数据路径中调用 NCCL 的证据。 更准确的关系是： 1 2 3 4 5 6 7 8 9 CUDA &#x2F; GPU memory │"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-07-barex-and-nccl-relationship/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-27T03:05:09.629Z" title="7/27/2026, 3:05:09 AM">2026-07-27</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">9 分钟读完 (大约1382个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">07. Barex 如何与 NCCL 结合：证据与结论</h1><div class="content"><h1 id="07-Barex-如何与-NCCL-结合：证据与结论"><a href="#07-Barex-如何与-NCCL-结合：证据与结论" class="headerlink" title="07. Barex 如何与 NCCL 结合：证据与结论"></a>07. Barex 如何与 NCCL 结合：证据与结论</h1><h2 id="1-结论先行"><a href="#1-结论先行" class="headerlink" title="1. 结论先行"></a>1. 结论先行</h2><p>对当前 <code>accl-barex-v1.5.3-1</code> 与 blade-kvt 版本：</p>
+<blockquote>
+<p><strong>没有发现 Barex 作为 NCCL transport/plugin、被 NCCL 调用、或在 blade-kvt 数据路径中调用 NCCL 的证据。</strong></p>
+</blockquote>
+<p>更准确的关系是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">          CUDA / GPU memory</span><br><span class="line">               │</span><br><span class="line">      PCIe / NVLink / NIC</span><br><span class="line">        ┌──────┴──────┐</span><br><span class="line">        │             │</span><br><span class="line">      NCCL          Barex</span><br><span class="line">collective/P2P     async RPC/RDMA</span><br><span class="line">        │             │</span><br><span class="line">training/inference  blade-kvt KV transfer</span><br></pre></td></tr></table></figure>
+
+<p>它们共享硬件与部分配置习惯，但当前代码中是并列通信栈。</p>
+<h2 id="2-什么才叫-NCCL-Net-Plugin"><a href="#2-什么才叫-NCCL-Net-Plugin" class="headerlink" title="2. 什么才叫 NCCL Net Plugin"></a>2. 什么才叫 NCCL Net Plugin</h2><p>NCCL Net Plugin 需要实现并导出 NCCL ABI，例如版本化的：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">ncclNet_v*</span><br><span class="line">  devices</span><br><span class="line">  getProperties</span><br><span class="line">  listen/connect/accept</span><br><span class="line">  regMr/deregMr</span><br><span class="line">  isend/irecv/iflush</span><br><span class="line">  test</span><br></pre></td></tr></table></figure>
+
+<p>NCCL 动态加载插件后，通过这些函数推进连接、注册与网络 request。</p>
+<p>Barex 公共 API 则是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">XDeviceManager / XContext / XConnector / XListener / XChannel</span><br><span class="line">Send / WriteSingle / WriteBatch / ReadBatch / WriteBySgList</span><br></pre></td></tr></table></figure>
+
+<p>接口形状和生命周期都不相同。</p>
+<h2 id="3-代码证据矩阵"><a href="#3-代码证据矩阵" class="headerlink" title="3. 代码证据矩阵"></a>3. 代码证据矩阵</h2><table>
+<thead>
+<tr>
+<th>检查</th>
+<th>结果</th>
+<th>结论</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>搜索 <code>ncclNet</code>/<code>ncclCollNet</code>/<code>ncclPlugin</code></td>
+<td>0 命中</td>
+<td>未实现 plugin ABI</td>
+</tr>
+<tr>
+<td>搜索全部 <code>nccl</code></td>
+<td>仅 socket env、logger/error enum</td>
+<td>没有数据路径调用</td>
+</tr>
+<tr>
+<td>CMake link libraries</td>
+<td><code>ibverbs/mlx5/cuda/cudart/...</code>，无 NCCL</td>
+<td>不依赖 NCCL library</td>
+</tr>
+<tr>
+<td>blade-kvt <code>CMakeLists.txt</code></td>
+<td>链接 <code>accl_barex</code></td>
+<td>blade-kvt 直接消费 Barex</td>
+</tr>
+<tr>
+<td>blade-kvt 数据面</td>
+<td><code>XChannel::WriteBatch</code></td>
+<td>不经 NCCL communicator</td>
+</tr>
+<tr>
+<td>collective/rank graph</td>
+<td>Barex 中不存在</td>
+<td>不是 collective runtime</td>
+</tr>
+</tbody></table>
+<p>复现：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">rg -n -i <span class="string">'ncclNet|ncclCollNet|ncclPlugin'</span> <span class="string">"<span class="variable">$BAREX_ROOT</span>"</span></span><br><span class="line">rg -n -i <span class="string">'nccl'</span> <span class="string">"<span class="variable">$BAREX_ROOT</span>"</span></span><br><span class="line">rg -n -i <span class="string">'nccl|target_link_libraries'</span> <span class="string">"<span class="variable">$BAREX_ROOT</span>/CMakeLists.txt"</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="4-为什么-Barex-有-NCCL-SOCKET"><a href="#4-为什么-Barex-有-NCCL-SOCKET" class="headerlink" title="4. 为什么 Barex 有 NCCL_SOCKET_*"></a>4. 为什么 Barex 有 <code>NCCL_SOCKET_*</code></h2><p><code>src/barex/common.h:605-638</code>：</p>
+<ul>
+<li><code>envSocketFamily()</code> 读取 <code>NCCL_SOCKET_FAMILY</code>；</li>
+<li><code>pfFindInterfaces()</code> 读取 <code>NCCL_SOCKET_IFNAME</code>；</li>
+<li>默认优先 <code>ib*</code>，再排除 <code>docker/lo</code>。</li>
+</ul>
+<p>这段逻辑用于 Barex 自己的 socket/带外网卡选择。</p>
+<p>能确认：</p>
+<ul>
+<li>Barex 尊重这两个 NCCL 风格变量；</li>
+<li>用户可用统一变量控制 NCCL 与 Barex 的 socket interface。</li>
+</ul>
+<p>不能确认：</p>
+<ul>
+<li>Barex 调用了 NCCL；</li>
+<li>Barex payload 一定走 socket；</li>
+<li>两者一定选择同一 RDMA HCA；</li>
+<li>这段代码的历史来源。</li>
+</ul>
+<p>“实现模式与 NCCL socket 选择相似/兼容”是合理推断；“Barex 是 NCCL 的一部分”是错误推断。</p>
+<h2 id="5-为什么-logger-有-NCCL"><a href="#5-为什么-logger-有-NCCL" class="headerlink" title="5. 为什么 logger 有 NCCL"></a>5. 为什么 logger 有 NCCL</h2><p><code>src/common/logger.h:35-40</code> 的 <code>LibType</code> 包含 <code>ACCL/CUDA/MPI/NCCL</code>。</p>
+<p>但 <code>src/common/accl_logger.cc:133-147</code> 中 MPI/NCCL 分支位于 <code>BUILD_ACCL_LIB</code> 条件编译内。Barex 子库保留了更大 ACCL 项目的通用 logger/error 类型，不等于 Barex 数据路径链接 NCCL。</p>
+<p>这是典型的“代码历史/公共组件残留”，需要结合 build target 判断，不能只看枚举名。</p>
+<h2 id="6-二者的共同点"><a href="#6-二者的共同点" class="headerlink" title="6. 二者的共同点"></a>6. 二者的共同点</h2><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>NCCL</th>
+<th>Barex</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GPU memory</td>
+<td>支持</td>
+<td>支持</td>
+</tr>
+<tr>
+<td>GPUDirect RDMA</td>
+<td>NET transport 可使用</td>
+<td>GPU MR + verbs 可使用</td>
+</tr>
+<tr>
+<td>PCIe topology 重要</td>
+<td>是，自动建图</td>
+<td>是，应用/device 选择决定</td>
+</tr>
+<tr>
+<td>MR registration</td>
+<td>NCCL/NET plugin 管理</td>
+<td><code>XSimpleMempool/RegUserMr</code></td>
+</tr>
+<tr>
+<td>异步完成</td>
+<td>CUDA stream + proxy</td>
+<td>callback + CQ</td>
+</tr>
+<tr>
+<td>多连接并行</td>
+<td>NCCL channel</td>
+<td>应用创建多个 <code>XChannel</code></td>
+</tr>
+<tr>
+<td>网络流控</td>
+<td>protocol/proxy/plugin</td>
+<td>tx depth、queue、WR/CQ</td>
+</tr>
+</tbody></table>
+<p>共同点来自同一硬件问题，而非直接依赖。</p>
+<h2 id="7-根本差异"><a href="#7-根本差异" class="headerlink" title="7. 根本差异"></a>7. 根本差异</h2><h3 id="7-1-通信模型"><a href="#7-1-通信模型" class="headerlink" title="7.1 通信模型"></a>7.1 通信模型</h3><ul>
+<li>NCCL：已知 rank 集合上的规则 collective/P2P。</li>
+<li>Barex：动态 peer 间 message 与 one-sided read/write。</li>
+</ul>
+<h3 id="7-2-调度中心"><a href="#7-2-调度中心" class="headerlink" title="7.2 调度中心"></a>7.2 调度中心</h3><ul>
+<li>NCCL：communicator 内统一选择 algorithm/protocol/channel。</li>
+<li>Barex：单 channel 执行应用提交；应用自己决定目标和数据布局。</li>
+</ul>
+<h3 id="7-3-完成语义"><a href="#7-3-完成语义" class="headerlink" title="7.3 完成语义"></a>7.3 完成语义</h3><ul>
+<li>NCCL：CUDA stream ordering。</li>
+<li>Barex：host callback，在 CQ completion 或 message response 时触发。</li>
+</ul>
+<h3 id="7-4-地址模型"><a href="#7-4-地址模型" class="headerlink" title="7.4 地址模型"></a>7.4 地址模型</h3><ul>
+<li>NCCL：用户给本地 send/recv buffer，NCCL 内部建立连接。</li>
+<li>Barex Write：应用可显式给 <code>raddr/rkey</code>。</li>
+</ul>
+<h2 id="8-blade-kvt-为什么更适合-Barex"><a href="#8-blade-kvt-为什么更适合-Barex" class="headerlink" title="8. blade-kvt 为什么更适合 Barex"></a>8. blade-kvt 为什么更适合 Barex</h2><p>blade-kvt 的负载不是固定 collective：</p>
+<ul>
+<li>每个 request 的目标 instance/worker 动态；</li>
+<li>P/D tensor parallel degree 可能不同；</li>
+<li>每次只发若干 KV block；</li>
+<li>远端 block ID 决定写入地址；</li>
+<li>layer 逐层 ready，需要与 forward overlap；</li>
+<li>request 完成走业务协议。</li>
+</ul>
+<p>用 Barex：</p>
+<ol>
+<li>一次注册整层 KV cache；</li>
+<li>控制面交换远端 base/rkey；</li>
+<li>每次只构造 block offset；</li>
+<li>RDMA Write 直接落到目标 GPU block；</li>
+<li>不要求所有 rank 同时进入 collective。</li>
+</ol>
+<p>若用 NCCL <code>send/recv</code>，仍需额外解决：</p>
+<ul>
+<li>动态 peer matching；</li>
+<li>block packing/unpacking；</li>
+<li>远端 offset；</li>
+<li>request 生命周期与完成通知；</li>
+<li>communicator/rank 管理。</li>
+</ul>
+<h2 id="9-可以怎样真正“结合”"><a href="#9-可以怎样真正“结合”" class="headerlink" title="9. 可以怎样真正“结合”"></a>9. 可以怎样真正“结合”</h2><p>虽然当前代码没有直接集成，系统层可以同时使用：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">模型 TP/DP/EP collective → NCCL</span><br><span class="line">P→D KV cache transfer    → blade-kvt + Barex</span><br></pre></td></tr></table></figure>
+
+<p>需要协调：</p>
+<ul>
+<li>NCCL 与 Barex NIC 选择；</li>
+<li>GPU/NIC PCIe locality；</li>
+<li>IB traffic class/QoS；</li>
+<li>MR/pinned memory 占用；</li>
+<li>两套 progress thread 的 CPU affinity；</li>
+<li>同时通信时的 PCIe/NIC 带宽竞争。</li>
+</ul>
+<p>这叫系统级共存/协同，不是 API 级调用。</p>
+<h2 id="10-结论分级"><a href="#10-结论分级" class="headerlink" title="10. 结论分级"></a>10. 结论分级</h2><h3 id="已证实"><a href="#已证实" class="headerlink" title="已证实"></a>已证实</h3><ul>
+<li>Barex 没有 NCCL Net Plugin ABI。</li>
+<li>Barex build 不链接 NCCL。</li>
+<li>blade-kvt 直接链接并调用 <code>accl_barex</code>。</li>
+<li>direct KV payload 走 Barex <code>WriteBatch</code>。</li>
+</ul>
+<h3 id="合理推断"><a href="#合理推断" class="headerlink" title="合理推断"></a>合理推断</h3><ul>
+<li><code>NCCL_SOCKET_*</code> 是为了兼容既有部署配置或复用相似接口选择逻辑。</li>
+<li>Barex logger 来源于更大的 ACCL 公共组件。</li>
+</ul>
+<h3 id="当前源码无法证明"><a href="#当前源码无法证明" class="headerlink" title="当前源码无法证明"></a>当前源码无法证明</h3><ul>
+<li>更大内部 ACCL 项目是否曾有 NCCL adapter。</li>
+<li>其他未提供仓库是否将 Barex 包装成 NCCL plugin。</li>
+<li>线上部署是否同时用 NCCL 和 Barex，并由外部组件协调。</li>
+</ul>
+<h2 id="11-自检"><a href="#11-自检" class="headerlink" title="11. 自检"></a>11. 自检</h2><ol>
+<li>为什么出现 <code>NCCL_SOCKET_IFNAME</code> 不能证明库依赖 NCCL？</li>
+<li>如何从符号、构建依赖、运行时调用三层验证 plugin 关系？</li>
+<li>blade-kvt 的动态 block write 为什么不是典型 collective？</li>
+</ol>
+</div><div class="article-licensing box"><div class="licensing-title"><p>07. Barex 如何与 NCCL 结合：证据与结论</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-07-barex-and-nccl-relationship/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-07-barex-and-nccl-relationship/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-06-barex-architecture/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">06. Barex 1.5.3-1 架构与发送实现</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-08-blade-kvt-barex-send-path/"><span class="level-item">08. blade-kvt 调用 Barex 的完整发送逻辑</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">55</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">14</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/">02b. RDMA 操作、WR/CQ 完成与可靠性</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/">03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">27</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

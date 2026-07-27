@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity=".12"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="700" rx="18" fill="#f8fafc"/>
+  <text x="32" y="42" font-family="Arial, PingFang SC, sans-serif" font-size="24" font-weight="700" fill="#172033">从业务通信到底层硬件的分层</text>
+<rect x="70" y="90" width="1060" height="70" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="130" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="19" fill="#172033">业务：训练 collective / 推理 KV Cache 迁移</text>
+<line x1="600" y1="160" x2="600" y2="205" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<rect x="90" y="205" width="480" height="95" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+  <text x="330" y="248" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">NCCL</text>
+  <text x="330" y="267" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">communicator · collective · CUDA stream</text>
+<rect x="630" y="205" width="480" height="95" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
+  <text x="870" y="248" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">blade-kvt + Barex</text>
+  <text x="870" y="267" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">动态 block · RPC · one-sided RDMA</text>
+<line x1="330" y1="300" x2="330" y2="350" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<line x1="870" y1="300" x2="870" y2="350" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<rect x="90" y="350" width="480" height="90" rx="12" fill="#ffffff" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+  <text x="330" y="390.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">P2P / SHM / NET</text>
+  <text x="330" y="409.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Ring · Tree · Simple/LL</text>
+<rect x="630" y="350" width="480" height="90" rx="12" fill="#ffffff" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
+  <text x="870" y="390.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">XContext / XChannel / MR</text>
+  <text x="870" y="409.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Send · WriteBatch · CQ callback</text>
+<line x1="330" y1="440" x2="330" y2="490" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<line x1="870" y1="440" x2="870" y2="490" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<rect x="70" y="490" width="1060" height="75" rx="12" fill="#fff7ed" stroke="#d97706" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="532.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="18" fill="#172033">CUDA / GPU Memory · GPUDirect RDMA · libibverbs</text>
+<line x1="600" y1="565" x2="600" y2="610" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<rect x="70" y="610" width="1060" height="55" rx="12" fill="#f1f5f9" stroke="#172033" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="642.5" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="17" fill="#172033">PCIe / NVLink / NVSwitch / RNIC / RoCE or InfiniBand fabric</text>
+<text x="1178" y="686" text-anchor="end" font-family="Arial, sans-serif" font-size="11" fill="#526078">NCCL · PCIe · RDMA · Barex learning notes</text></svg>

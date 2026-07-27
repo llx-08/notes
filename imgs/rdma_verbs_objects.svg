@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity=".12"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="720" rx="18" fill="#f8fafc"/>
+  <text x="32" y="42" font-family="Arial, PingFang SC, sans-serif" font-size="24" font-weight="700" fill="#172033">RDMA Verbs 核心对象</text>
+<rect x="470" y="75" width="260" height="60" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="110" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">ibv_device / RNIC</text>
+<line x1="600" y1="135" x2="600" y2="180" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<rect x="470" y="180" width="260" height="60" rx="12" fill="#ffffff" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="215" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">ibv_context</text>
+<rect x="110" y="285" width="230" height="65" rx="12" fill="#fff7ed" stroke="#d97706" stroke-width="2" filter="url(#shadow)"/>
+  <text x="225" y="313" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Protection Domain</text>
+  <text x="225" y="332" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">PD</text>
+<rect x="485" y="285" width="230" height="65" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="313" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Completion Queue</text>
+  <text x="600" y="332" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">CQ</text>
+<rect x="860" y="285" width="230" height="65" rx="12" fill="#f1f5f9" stroke="#0891b2" stroke-width="2" filter="url(#shadow)"/>
+  <text x="975" y="313" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Completion Channel</text>
+  <text x="975" y="332" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">event/epoll</text>
+<line x1="540" y1="240" x2="260" y2="285" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<line x1="600" y1="240" x2="600" y2="285" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<line x1="660" y1="240" x2="975" y2="285" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<rect x="70" y="450" width="280" height="85" rx="12" fill="#eef2ff" stroke="#7c3aed" stroke-width="2" filter="url(#shadow)"/>
+  <text x="210" y="488" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Memory Region</text>
+  <text x="210" y="507" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">addr · len · lkey · rkey</text>
+<rect x="420" y="450" width="360" height="85" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="488" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Queue Pair</text>
+  <text x="600" y="507" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Send Queue + Receive Queue</text>
+<line x1="225" y1="350" x2="210" y2="450" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<line x1="270" y1="350" x2="520" y2="450" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<line x1="600" y1="450" x2="600" y2="350" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="600" y="392" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">CQE</text>
+<line x1="975" y1="350" x2="700" y2="450" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="837.5" y="392" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">notify</text>
+<rect x="850" y="450" width="280" height="85" rx="12" fill="#ffffff" stroke="#dc2626" stroke-width="2" filter="url(#shadow)"/>
+  <text x="990" y="488" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">Peer QP metadata</text>
+  <text x="990" y="507" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" fill="#172033">QPN · GID · PSN</text>
+<line x1="780" y1="490" x2="850" y2="490" stroke="#94a3b8" stroke-width="2.5"  marker-end="url(#arrow)"/>
+<text x="815" y="482" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="13" font-weight="400" fill="#526078">RC connection</text>
+<text x="600" y="615" text-anchor="middle" font-family="Arial, PingFang SC, sans-serif" font-size="16" font-weight="400" fill="#172033">Barex 映射：IbvDevice · XSimpleMempool/memp_t · XChannelImpl/QP · XContextImpl/CQ</text>
+<text x="1178" y="706" text-anchor="end" font-family="Arial, sans-serif" font-size="11" fill="#526078">NCCL · PCIe · RDMA · Barex learning notes</text></svg>

@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>06. Barex 1.5.3-1 架构与发送实现 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="06. Barex 1.5.3-1 架构与发送实现 1. 定位 Barex 是异步 point-to-point 传输库，向应用提供： RDMA、Solar、TCP backend； connection&amp;#x2F;listener&amp;#x2F;channel； CPU、CUDA host、GPU memory pool 与 MR； Send&amp;#x2F;Read&amp;#x2F;Write&amp;#x2F;Batch&amp;#x2F;SG list； callback、thr"><meta property="og:type" content="blog"><meta property="og:title" content="06. Barex 1.5.3-1 架构与发送实现"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-06-barex-architecture/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="06. Barex 1.5.3-1 架构与发送实现 1. 定位 Barex 是异步 point-to-point 传输库，向应用提供： RDMA、Solar、TCP backend； connection&amp;#x2F;listener&amp;#x2F;channel； CPU、CUDA host、GPU memory pool 与 MR； Send&amp;#x2F;Read&amp;#x2F;Write&amp;#x2F;Batch&amp;#x2F;SG list； callback、thr"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/barex_architecture.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/barex_large_message.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/barex_completion_path.svg"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-27T03:05:09.628Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/barex_architecture.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-06-barex-architecture/"},"headline":"06. Barex 1.5.3-1 架构与发送实现","image":[],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-27T03:05:09.628Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"06. Barex 1.5.3-1 架构与发送实现 1. 定位 Barex 是异步 point-to-point 传输库，向应用提供： RDMA、Solar、TCP backend； connection&#x2F;listener&#x2F;channel； CPU、CUDA host、GPU memory pool 与 MR； Send&#x2F;Read&#x2F;Write&#x2F;Batch&#x2F;SG list； callback、thr"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-06-barex-architecture/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-27T03:05:09.628Z" title="7/27/2026, 3:05:09 AM">2026-07-27</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">11 分钟读完 (大约1581个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">06. Barex 1.5.3-1 架构与发送实现</h1><div class="content"><h1 id="06-Barex-1-5-3-1-架构与发送实现"><a href="#06-Barex-1-5-3-1-架构与发送实现" class="headerlink" title="06. Barex 1.5.3-1 架构与发送实现"></a>06. Barex 1.5.3-1 架构与发送实现</h1><h2 id="1-定位"><a href="#1-定位" class="headerlink" title="1. 定位"></a>1. 定位</h2><p>Barex 是异步 point-to-point 传输库，向应用提供：</p>
+<ul>
+<li>RDMA、Solar、TCP backend；</li>
+<li>connection/listener/channel；</li>
+<li>CPU、CUDA host、GPU memory pool 与 MR；</li>
+<li>Send/Read/Write/Batch/SG list；</li>
+<li>callback、thread pool、timer、statistics。</li>
+</ul>
+<p>它不实现 collective graph，不管理 communicator/rank，也不是 NCCL plugin。</p>
+<h2 id="2-对象关系"><a href="#2-对象关系" class="headerlink" title="2. 对象关系"></a>2. 对象关系</h2><p><img src="/notes/imgs/barex_architecture.svg" alt="Barex 对象、线程与数据面"></p>
+<table>
+<thead>
+<tr>
+<th>对象</th>
+<th>所有权/职责</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>XDeviceManager</code></td>
+<td>枚举并选择 RDMA/Solar/TCP device</td>
+</tr>
+<tr>
+<td><code>XSimpleMempool</code></td>
+<td>分配、注册、查询、释放 CPU/GPU MR</td>
+</tr>
+<tr>
+<td><code>XContext</code></td>
+<td>CQ/epoll/timer、channel 生命周期、callback dispatch</td>
+</tr>
+<tr>
+<td><code>XConnector</code></td>
+<td>client 侧带外建联</td>
+</tr>
+<tr>
+<td><code>XListener</code></td>
+<td>server 侧监听并交换 QP metadata</td>
+</tr>
+<tr>
+<td><code>XChannel</code></td>
+<td>一条 peer 连接；发送、读写、流控、心跳</td>
+</tr>
+<tr>
+<td><code>XThreadpool</code></td>
+<td>将回调或应用工作移出 IO thread</td>
+</tr>
+</tbody></table>
+<p>源码入口：</p>
+<ul>
+<li><code>include/accl/barex/xcontext.h</code></li>
+<li><code>include/accl/barex/xchannel.h</code></li>
+<li><code>include/accl/barex/xsimple_mempool.h</code></li>
+<li><code>src/barex/impl/xstatic_instance.cc</code></li>
+</ul>
+<h2 id="3-Backend-工厂"><a href="#3-Backend-工厂" class="headerlink" title="3. Backend 工厂"></a>3. Backend 工厂</h2><p><code>XContext::NewInstance</code> 根据 <code>XDevice</code> 的动态类型选择实现：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">IbvDevice   → XContextImpl       (RDMA verbs)</span><br><span class="line">SolarDevice → XContextSolarImpl</span><br><span class="line">TcpDevice   → XContextTcpImpl</span><br></pre></td></tr></table></figure>
+
+<p>证据：<code>src/barex/impl/xstatic_instance.cc:89-131</code>。</p>
+<p><code>XDeviceManager::Singleton</code> 同样按 <code>XDT_RDMA/XDT_SOLAR/XDT_TCP</code> 返回 singleton，见 <code>xstatic_instance.cc:134-186</code>。</p>
+<h2 id="4-Context-初始化"><a href="#4-Context-初始化" class="headerlink" title="4. Context 初始化"></a>4. Context 初始化</h2><p>应用通常按以下顺序：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">XDeviceManager::Singleton</span><br><span class="line">  → device</span><br><span class="line">  → XSimpleMempool::NewInstance</span><br><span class="line">  → RegUserMr / Reserve</span><br><span class="line">  → XThreadpool::NewInstance</span><br><span class="line">  → XContext::NewInstance</span><br><span class="line">  → context-&gt;Start()</span><br><span class="line">  → XConnector 或 XListener</span><br></pre></td></tr></table></figure>
+
+<p><code>XContext</code> 的 IO 模型：</p>
+<ol>
+<li>CQ event fd 与 timer fd 加入 epoll；</li>
+<li><code>ProgressEvents()</code> 非阻塞 <code>epoll_wait</code>；</li>
+<li>CQ 有事件时 <code>ProcessIoEvents()</code> 调用 <code>ibv_poll_cq</code>；</li>
+<li>每个 WC 进入 <code>ProcessOneIoEvent()</code>；</li>
+<li>根据 <code>wc.opcode</code> 分发到 send/write/read/recv handler；</li>
+<li>callback 可 inline 执行，也可投递到用户 thread pool。</li>
+</ol>
+<p>证据：</p>
+<ul>
+<li><code>src/barex/impl/rdma/xcontext_impl.cc:780-883</code></li>
+<li><code>xcontext_impl.cc:1009-1073</code></li>
+<li><code>xcontext_impl.cc:1319-1354</code></li>
+</ul>
+<h2 id="5-Channel-建立与状态"><a href="#5-Channel-建立与状态" class="headerlink" title="5. Channel 建立与状态"></a>5. Channel 建立与状态</h2><p>RDMA <code>XChannelImpl::Incubate</code>：</p>
+<ul>
+<li>校验 config；</li>
+<li>绑定 context、device、CQ、mempool；</li>
+<li>准备 heartbeat MR；</li>
+<li>创建 RC QP；</li>
+<li>设置 <code>max_send_wr/max_recv_wr/max_sge</code>；</li>
+<li>初始化 <code>send_semaphore_ = tx_depth</code>。</li>
+</ul>
+<p>见 <code>src/barex/impl/rdma/xchannel_impl.cc:71-230</code>。</p>
+<p>带外 TCP/connector 交换 <code>ChannelInitMeta</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">qp_num, psn, lid, gid</span><br><span class="line">heartbeat_addr/rkey</span><br><span class="line">context/channel identity</span><br><span class="line">nic_id</span><br></pre></td></tr></table></figure>
+
+<p>随后双方把 QP 推进到可通信状态。Channel 生命周期大致是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">CONSTRUCTED</span><br><span class="line">  → INCUBATE_SUCCESS</span><br><span class="line">  → INIT_SUCCESS</span><br><span class="line">  → CLOSED</span><br><span class="line">  → DESTROYED</span><br><span class="line">  → DELETED</span><br></pre></td></tr></table></figure>
+
+<p><code>Close</code>、<code>Destroy</code>、<code>CloseAndDeleteChannel</code> 是不同阶段；blade-kvt 的 <code>BarexChannel::destroy()</code> 依次执行三者。</p>
+<h2 id="6-Memory-与-MR"><a href="#6-Memory-与-MR" class="headerlink" title="6. Memory 与 MR"></a>6. Memory 与 MR</h2><p><code>memp_t</code> 包含：</p>
+<ul>
+<li><code>base/buf/buf_len</code>；</li>
+<li>device type 与 device id；</li>
+<li>底层 MR，包含 lkey/rkey；</li>
+<li>allocator 与释放状态。</li>
+</ul>
+<p>常用 API：</p>
+<table>
+<thead>
+<tr>
+<th>API</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>AllocBuffer</code></td>
+<td>从 mempool 分配并取得可传输 buffer</td>
+</tr>
+<tr>
+<td><code>RegUserMr</code></td>
+<td>注册应用已有的 CPU/GPU buffer</td>
+</tr>
+<tr>
+<td><code>FindBufferMr</code></td>
+<td>根据地址查 MR，可切换到当前 NIC 对应 MR</td>
+</tr>
+<tr>
+<td><code>DeregUserMr</code></td>
+<td>注销用户 MR</td>
+</tr>
+<tr>
+<td><code>ReleaseBuffer</code></td>
+<td>释放 pool buffer</td>
+</tr>
+<tr>
+<td><code>ReleaseAndDeregBuffer</code></td>
+<td>同时释放和注销</td>
+</tr>
+</tbody></table>
+<p>多 NIC 场景中同一虚拟地址可能需要不同 PD/MR；<code>XChannelImpl::TryToChangeMr</code> 会切换到本 channel 对应 NIC 的 MR。</p>
+<h2 id="7-Send：消息语义"><a href="#7-Send：消息语义" class="headerlink" title="7. Send：消息语义"></a>7. <code>Send</code>：消息语义</h2><p><code>XChannel::Send</code> 让远端触发 <code>XChannelCallback::OnRecvCall</code>。它不是裸 RDMA Write API。</p>
+<h3 id="7-1-小消息"><a href="#7-1-小消息" class="headerlink" title="7.1 小消息"></a>7.1 小消息</h3><p>当 <code>sizeof(x_msg_header) + payload &lt;= small_msg_size</code>：</p>
+<ol>
+<li>构造两段 SGE：payload + header；</li>
+<li>opcode 为 <code>IBV_WR_SEND_WITH_IMM</code>；</li>
+<li>immediate 标记 <code>SMALL_MSG</code>；</li>
+<li>WR 使用 <code>IBV_SEND_SIGNALED</code>；</li>
+<li>远端 RECV WC 解析并调用 <code>OnRecvCall</code>。</li>
+</ol>
+<p>证据：<code>xchannel_impl.cc:925-1005</code>。</p>
+<h3 id="7-2-大消息三阶段"><a href="#7-2-大消息三阶段" class="headerlink" title="7.2 大消息三阶段"></a>7.2 大消息三阶段</h3><p><img src="/notes/imgs/barex_large_message.svg" alt="Barex 大消息 Send 三阶段"></p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">A: Send LARGE_MSG_META(len, opaque ptr)</span><br><span class="line">                         → B</span><br><span class="line">B: 分配接收 buffer</span><br><span class="line">B: Send LARGE_MSG_WRITE_BUF_META(addr/key/index)</span><br><span class="line">                         → A</span><br><span class="line">A: RDMA_WRITE_WITH_IMM(payload + header)</span><br><span class="line">                         → B</span><br><span class="line">B: 按 imm index 找到 buffer，调用 OnRecvCall</span><br></pre></td></tr></table></figure>
+
+<p>关键代码：</p>
+<ul>
+<li>phase 1：<code>xchannel_impl.cc:1068-1140</code></li>
+<li>phase 2：<code>xchannel_impl.cc:1142-1203</code></li>
+<li>phase 3：<code>xchannel_impl.cc:1205</code> 起</li>
+<li>接收分发：<code>xcontext_impl.cc:1121-1296</code></li>
+</ul>
+<p>这是一种 two-sided message abstraction：应用不必预先知道远端地址，Barex 内部协商 buffer。</p>
+<h2 id="8-WriteSingle-WriteBatch：one-sided-数据面"><a href="#8-WriteSingle-WriteBatch：one-sided-数据面" class="headerlink" title="8. WriteSingle/WriteBatch：one-sided 数据面"></a>8. <code>WriteSingle/WriteBatch</code>：one-sided 数据面</h2><p>与 <code>Send</code> 不同，Write 需要调用者提供：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">local addr + lkey + length</span><br><span class="line">remote addr + rkey</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>WriteSingle</code>：一个本地段写一个远端范围。</li>
+<li><code>WriteBatch</code>：多个 <code>rw_memp_t</code>，每项可有独立远端地址。</li>
+<li><code>WriteBySgList</code>：多个本地段聚合写入连续远端范围。</li>
+<li><code>signal_peer=true</code> 时使用 WRITE_WITH_IMM，让远端得到通知。</li>
+</ul>
+<p>blade-kvt direct RDMA 使用 <code>WriteBatch</code> 且不通知对端，因为 KV cache 已直接写入最终 GPU 地址，上层通过独立 send-done RPC 表达 request 完成。</p>
+<h2 id="9-TX-depth-与软件队列"><a href="#9-TX-depth-与软件队列" class="headerlink" title="9. TX depth 与软件队列"></a>9. TX depth 与软件队列</h2><p>Barex 用 <code>send_semaphore_</code> 限制 inflight WR：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">PostSendOrEnqueue(permits)</span><br><span class="line">  ├─ semaphore 足够 → 扣减并 post</span><br><span class="line">  ├─ 软件队列未满 → 入 send_queue_</span><br><span class="line">  └─ soft_tx_depth 也满 → callback QUEUE_FULL</span><br></pre></td></tr></table></figure>
+
+<p>CQ completion 后：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">IoEventOccur</span><br><span class="line">  → ReleaseAndPostSend(permits)</span><br><span class="line">  → 恢复 semaphore</span><br><span class="line">  → 从队头提交所有当前能容纳的任务</span><br></pre></td></tr></table></figure>
+
+<p>证据：<code>xchannel_impl.cc:871-923</code>。</p>
+<p>重要不变量：</p>
+<ul>
+<li>queue 中的 send task 没有独立取消/超时；</li>
+<li>channel 关闭时必须让 queued/inflight task 进入错误完成或清理；</li>
+<li><code>ACCL_TX_DEPTH</code> 控制硬件 inflight，<code>ACCL_SOFT_TX_DEPTH</code> 控制软件排队上限；</li>
+<li>depth 太小不能覆盖 RTT，太大会增加资源和错误清理压力。</li>
+</ul>
+<h2 id="10-ibv-post-send-到-callback"><a href="#10-ibv-post-send-到-callback" class="headerlink" title="10. ibv_post_send 到 callback"></a>10. <code>ibv_post_send</code> 到 callback</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">XChannel Write/Send</span><br><span class="line">  → 构造 SGE、WR、x_wr_id</span><br><span class="line">  → PostSendOrEnqueue</span><br><span class="line">  → ibv_post_send</span><br><span class="line">  → NIC 执行</span><br><span class="line">  → CQE</span><br><span class="line">  → XContextImpl::ProcessIoEvents</span><br><span class="line">  → ProcessOneIoEvent</span><br><span class="line">  → HandleSendComplete / HandleWriteComplete</span><br><span class="line">  → DoneCallback</span><br><span class="line">  → ReleaseAndPostSend</span><br></pre></td></tr></table></figure>
+
+<p><img src="/notes/imgs/barex_completion_path.svg" alt="Barex WR、CQ 与 callback 完成链"></p>
+<p><code>x_wr_id</code> 保存 channel、buffer、auto-release、callback、opcode 和 message type，用于完成与错误清理，定义在 <code>src/barex/common.h:652</code> 起。</p>
+<h2 id="11-完成错误"><a href="#11-完成错误" class="headerlink" title="11. 完成错误"></a>11. 完成错误</h2><p><code>HandleWcStatusError</code>：</p>
+<ol>
+<li>把 WC status 转成可读错误；</li>
+<li>调用失败 callback；</li>
+<li>接收 WR 释放内部 recv buffer；</li>
+<li>发送 WR 只释放 Barex header，不擅自释放用户 payload；</li>
+<li>销毁 channel。</li>
+</ol>
+<p>见 <code>xcontext_impl.cc:913-1006</code>。</p>
+<p>这是为什么应用 callback 必须正确管理 buffer 生命周期：同步提交错误和异步 WC 错误都可能发生。</p>
+<h2 id="12-关键环境变量"><a href="#12-关键环境变量" class="headerlink" title="12. 关键环境变量"></a>12. 关键环境变量</h2><table>
+<thead>
+<tr>
+<th>变量</th>
+<th>影响</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ACCL_USE_NICS</code></td>
+<td>可用 NIC</td>
+</tr>
+<tr>
+<td><code>ACCL_TX_DEPTH</code></td>
+<td>channel 发送 WR depth</td>
+</tr>
+<tr>
+<td><code>ACCL_TX_CONN_DEPTH</code></td>
+<td>连接相关 depth</td>
+</tr>
+<tr>
+<td><code>ACCL_SOFT_TX_DEPTH</code></td>
+<td>软件发送队列</td>
+</tr>
+<tr>
+<td><code>ACCL_MAX_SGE</code></td>
+<td>单 WR SGE 上限</td>
+</tr>
+<tr>
+<td><code>ACCL_WRITEBATCH_OPT</code></td>
+<td>WriteBatch 提交/完成优化</td>
+</tr>
+<tr>
+<td><code>ACCL_MAX_USER_MR_GB</code></td>
+<td>用户 MR 大小限制</td>
+</tr>
+<tr>
+<td><code>ACCL_IBV_MTU</code></td>
+<td>RC MTU</td>
+</tr>
+<tr>
+<td><code>ACCL_RETRANSMIT_TIMEOUT</code></td>
+<td>QP timeout</td>
+</tr>
+<tr>
+<td><code>ACCL_RETRY_CNT</code></td>
+<td>transport retry</td>
+</tr>
+<tr>
+<td><code>ACCL_RNR_RETRY</code></td>
+<td>receiver-not-ready retry</td>
+</tr>
+<tr>
+<td><code>ACCL_HEARTBEAT_INTERVAL</code></td>
+<td>channel 活性检测</td>
+</tr>
+</tbody></table>
+<h2 id="13-自检"><a href="#13-自检" class="headerlink" title="13. 自检"></a>13. 自检</h2><ol>
+<li><code>Send</code> 大消息为什么要先协商远端 buffer，而 <code>WriteBatch</code> 不需要？</li>
+<li>Barex API 返回成功与 CQ completion 有什么区别？</li>
+<li>为什么 <code>tx_depth</code> completion 后才能归还？</li>
+<li>callback 为什么既可能在 IO thread，也可能在线程池？</li>
+</ol>
+</div><div class="article-licensing box"><div class="licensing-title"><p>06. Barex 1.5.3-1 架构与发送实现</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-06-barex-architecture/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-06-barex-architecture/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-05-nccl-algorithms-protocols-and-performance/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">05. NCCL 算法、协议与性能模型</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-07-barex-and-nccl-relationship/"><span class="level-item">07. Barex 如何与 NCCL 结合：证据与结论</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">55</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">14</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/">02b. RDMA 操作、WR/CQ 完成与可靠性</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/">03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">27</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy 1. NCCL 解决什么问题 NCCL 提供 GPU collective 与 point-to-point primitive： AllReduce、AllGather、ReduceScatter、Broadcast、Reduce； AllToAll； ncclSend &amp;#x2F; ncclRecv 。 它不是通用 RPC 框"><meta property="og:type" content="blog"><meta property="og:title" content="03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy 1. NCCL 解决什么问题 NCCL 提供 GPU collective 与 point-to-point primitive： AllReduce、AllGather、ReduceScatter、Broadcast、Reduce； AllToAll； ncclSend &amp;#x2F; ncclRecv 。 它不是通用 RPC 框"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/nccl_architecture.svg"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-27T03:05:09.627Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/nccl_architecture.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/"},"headline":"03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy","image":[],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-27T03:05:09.627Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy 1. NCCL 解决什么问题 NCCL 提供 GPU collective 与 point-to-point primitive： AllReduce、AllGather、ReduceScatter、Broadcast、Reduce； AllToAll； ncclSend &#x2F; ncclRecv 。 它不是通用 RPC 框"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-27T03:05:09.627Z" title="7/27/2026, 3:05:09 AM">2026-07-27</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">9 分钟读完 (大约1416个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</h1><div class="content"><h1 id="03-NCCL-架构：从-API-到-GPU-Kernel-与-Proxy"><a href="#03-NCCL-架构：从-API-到-GPU-Kernel-与-Proxy" class="headerlink" title="03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy"></a>03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</h1><h2 id="1-NCCL-解决什么问题"><a href="#1-NCCL-解决什么问题" class="headerlink" title="1. NCCL 解决什么问题"></a>1. NCCL 解决什么问题</h2><p>NCCL 提供 GPU collective 与 point-to-point primitive：</p>
+<ul>
+<li>AllReduce、AllGather、ReduceScatter、Broadcast、Reduce；</li>
+<li>AllToAll；</li>
+<li><code>ncclSend</code> / <code>ncclRecv</code>。</li>
+</ul>
+<p>它不是通用 RPC 框架，也不负责应用层 request/response、远端 KV block 地址协议或对象存储。NCCL 的核心价值是：<strong>根据通信参与者和硬件拓扑，为 GPU 通信选择算法、传输与协议，并把操作排入 CUDA stream。</strong></p>
+<h2 id="2-五个关键对象"><a href="#2-五个关键对象" class="headerlink" title="2. 五个关键对象"></a>2. 五个关键对象</h2><table>
+<thead>
+<tr>
+<th>对象</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>communicator</td>
+<td>一组 rank、拓扑、channel、连接和调优模型</td>
+</tr>
+<tr>
+<td>rank</td>
+<td>communicator 内的逻辑参与者，通常一 rank 对应一 GPU</td>
+</tr>
+<tr>
+<td>channel</td>
+<td>并行通信流水线；不是物理 NIC channel</td>
+</tr>
+<tr>
+<td>connector/transport</td>
+<td>rank 邻接关系上的具体传输资源</td>
+</tr>
+<tr>
+<td>kernel plan</td>
+<td>一批将被 launch 的 device work 与 proxy work</td>
+</tr>
+</tbody></table>
+<p><img src="/notes/imgs/nccl_architecture.svg" alt="NCCL 从 API 到数据面的架构"></p>
+<h2 id="3-初始化路径"><a href="#3-初始化路径" class="headerlink" title="3. 初始化路径"></a>3. 初始化路径</h2><p>典型 API：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">ncclGetUniqueId</span>(&amp;id);</span><br><span class="line"><span class="built_in">ncclCommInitRank</span>(&amp;comm, nranks, id, rank);</span><br></pre></td></tr></table></figure>
+
+<p>当前参考源码主线：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">ncclCommInitRank</span><br><span class="line">  → ncclCommInitRankDev</span><br><span class="line">  → ncclCommInitRankFunc</span><br><span class="line">  → initTransportsRank</span><br><span class="line">      ├─ bootstrap 交换 peer 信息</span><br><span class="line">      ├─ 构建 topology graph</span><br><span class="line">      ├─ ncclTopoComputePaths</span><br><span class="line">      ├─ 搜索 Ring/Tree/NVLS/CollNet graph</span><br><span class="line">      ├─ 建立 channel 与 peer connector</span><br><span class="line">      └─ 创建 proxy 资源</span><br></pre></td></tr></table></figure>
+
+<p>参考：</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/5067397c2676d5aed50042fc39e5c8ee96eb0027/src/init.cc#L965"><code>src/init.cc:965</code> <code>initTransportsRank</code></a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/5067397c2676d5aed50042fc39e5c8ee96eb0027/src/init.cc#L1831"><code>src/init.cc:1831</code> <code>ncclCommInitRankFunc</code></a></li>
+</ul>
+<h3 id="3-1-bootstrap-不等于数据面"><a href="#3-1-bootstrap-不等于数据面" class="headerlink" title="3.1 bootstrap 不等于数据面"></a>3.1 bootstrap 不等于数据面</h3><p>初始化时 rank 需要交换 host hash、bus ID、网络地址、graph 信息等。bootstrap socket 用来发现和交换元数据，不代表 collective payload 最终一定走 socket。</p>
+<p>这与 blade-kvt 很相似：先通过 Barex <code>Send</code> 交换 MR handle，再走 RDMA Write；但二者协议和调度完全独立。</p>
+<h2 id="4-调用一个-collective-后发生什么"><a href="#4-调用一个-collective-后发生什么" class="headerlink" title="4. 调用一个 collective 后发生什么"></a>4. 调用一个 collective 后发生什么</h2><p>以 <code>ncclAllReduce</code> 为例，API 并不是同步执行完数据交换再返回。大致路径：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">Host API</span><br><span class="line">  → 参数检查、构造 task</span><br><span class="line">  → communicator planner</span><br><span class="line">  → 选择 algorithm/protocol/channel/chunk</span><br><span class="line">  → 生成 kernel plan</span><br><span class="line">  → 上传 device work</span><br><span class="line">  → 在用户 CUDA stream 上 launch NCCL kernel</span><br><span class="line">  → 如需 NET/host 辅助，同时激活 proxy op</span><br></pre></td></tr></table></figure>
+
+<p>完成语义由 CUDA stream 表达：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">ncclAllReduce</span>(send, recv, count, dtype, ncclSum, comm, stream);</span><br><span class="line"><span class="built_in">cudaEventRecord</span>(done, stream);</span><br></pre></td></tr></table></figure>
+
+<p>只有 event 完成，才能认为该 stream 之前的 NCCL 工作完成。API 返回通常只表示 enqueue 成功。</p>
+<p>这与 Barex 的异步 API 很像，但 Barex 用 callback/future 表达完成，NCCL 首先用 CUDA stream/event 表达完成。</p>
+<h2 id="5-GPU-Kernel-为什么参与通信"><a href="#5-GPU-Kernel-为什么参与通信" class="headerlink" title="5. GPU Kernel 为什么参与通信"></a>5. GPU Kernel 为什么参与通信</h2><p>NCCL 不只是 host 上调用 verbs。GPU kernel 负责：</p>
+<ul>
+<li>从源 buffer 读数据；</li>
+<li>执行 reduce/copy；</li>
+<li>通过连接 buffer、FIFO/head/tail 与 peer 或 proxy 协作；</li>
+<li>在 ring/tree 的每一步推进 chunk；</li>
+<li>将结果写到目标 buffer。</li>
+</ul>
+<p>同机 P2P/NVLink 路径可能主要由 GPU load/store/copy 完成；跨机时 GPU kernel 与 host proxy 通过共享的 step buffer/FIFO 协调。</p>
+<h2 id="6-Proxy-的职责"><a href="#6-Proxy-的职责" class="headerlink" title="6. Proxy 的职责"></a>6. Proxy 的职责</h2><p>Proxy 是 host 侧进度引擎，常用于 GPU 无法独立推进的传输：</p>
+<ul>
+<li>NET plugin 的 <code>isend/irecv/test</code>；</li>
+<li>某些跨进程 IPC 或 Copy Engine 路径；</li>
+<li>注册、连接、共享资源管理；</li>
+<li>将网络进度与 GPU buffer step 对齐。</li>
+</ul>
+<p>简化模型：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">GPU NCCL kernel              Host proxy                 NIC/plugin</span><br><span class="line">      │                          │                          │</span><br><span class="line">      ├─ 写 ready step ─────────►│                          │</span><br><span class="line">      │                          ├─ isend/irecv ──────────►│</span><br><span class="line">      │                          ├─ test request            │</span><br><span class="line">      │                          │◄──────── completion ─────┤</span><br><span class="line">      │◄─ 更新 tail/head ────────┤                          │</span><br><span class="line">      └─ 消费/产生下一 chunk      │                          │</span><br></pre></td></tr></table></figure>
+
+<p>参考：</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/5067397c2676d5aed50042fc39e5c8ee96eb0027/src/proxy.cc"><code>src/proxy.cc</code></a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/5067397c2676d5aed50042fc39e5c8ee96eb0027/src/transport/net.cc"><code>src/transport/net.cc</code></a></li>
+</ul>
+<h2 id="7-Channel-是并行度，不是连接数的同义词"><a href="#7-Channel-是并行度，不是连接数的同义词" class="headerlink" title="7. Channel 是并行度，不是连接数的同义词"></a>7. Channel 是并行度，不是连接数的同义词</h2><p>NCCL 把一个 collective 切到多个 channel：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">message</span><br><span class="line">  ├─ channel 0: chunk 0, 4, 8...</span><br><span class="line">  ├─ channel 1: chunk 1, 5, 9...</span><br><span class="line">  ├─ channel 2: chunk 2, 6, 10...</span><br><span class="line">  └─ channel 3: chunk 3, 7, 11...</span><br></pre></td></tr></table></figure>
+
+<p>更多 channel 可以：</p>
+<ul>
+<li>增加链路并行度；</li>
+<li>同时使用多条 NIC rail；</li>
+<li>提高大消息吞吐。</li>
+</ul>
+<p>但会增加：</p>
+<ul>
+<li>GPU block/SM 占用；</li>
+<li>connector buffer；</li>
+<li>proxy 与队列开销；</li>
+<li>小消息固定成本。</li>
+</ul>
+<p>因此 NCCL 会基于 topology 和 message size 调优，而不是无条件把 channel 数开到最大。</p>
+<h2 id="8-Group-语义"><a href="#8-Group-语义" class="headerlink" title="8. Group 语义"></a>8. Group 语义</h2><p><code>ncclGroupStart/End</code> 有两个常见用途：</p>
+<ol>
+<li>把多 GPU、多 communicator 操作成组提交，避免单线程初始化/调用死锁；</li>
+<li>让 send/recv pattern 被整体规划。</li>
+</ol>
+<p>它不是事务：不能理解为全部成功或全部回滚。</p>
+<h2 id="9-NCCL-与-CUDA-stream"><a href="#9-NCCL-与-CUDA-stream" class="headerlink" title="9. NCCL 与 CUDA stream"></a>9. NCCL 与 CUDA stream</h2><p>关键规则：</p>
+<ul>
+<li>NCCL 操作与同一 stream 上前序 CUDA work 有序；</li>
+<li>不同 stream 之间需要 event 依赖；</li>
+<li>host API 返回不代表 GPU 已完成；</li>
+<li>销毁/复用 buffer 前必须建立正确 stream ordering；</li>
+<li>多 communicator 共享 GPU 时还要关注 launch 顺序一致性。</li>
+</ul>
+<p>官方文档说明，操作状态可通过标准 CUDA stream/event 语义查询。</p>
+<h2 id="10-读源码的最短路径"><a href="#10-读源码的最短路径" class="headerlink" title="10. 读源码的最短路径"></a>10. 读源码的最短路径</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">src/init.cc</span><br><span class="line">  → src/graph/topo.cc / paths.cc / search.cc</span><br><span class="line">  → src/transport.cc</span><br><span class="line">  → src/transport/{p2p,shm,net}.cc</span><br><span class="line">  → src/enqueue.cc</span><br><span class="line">  → src/device/</span><br><span class="line">  → src/proxy.cc</span><br></pre></td></tr></table></figure>
+
+<p>先掌握 host orchestration，再看 device primitive；直接从 CUDA 模板进入容易迷失在协议细节。</p>
+<h2 id="11-自检"><a href="#11-自检" class="headerlink" title="11. 自检"></a>11. 自检</h2><ol>
+<li>bootstrap socket 与 NET transport 有什么区别？</li>
+<li>为什么 NCCL API 返回不能作为 buffer 可复用的证明？</li>
+<li>channel 数增大为什么可能降低小消息性能？</li>
+<li>跨机 collective 中 GPU kernel 和 proxy 分别推进什么状态？</li>
+</ol>
+<h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/index.html">NCCL User Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl">NCCL 官方源码</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">02b. RDMA 操作、WR/CQ 完成与可靠性</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"><span class="level-item">02c. RoCE、拥塞控制、PFC/ECN 与重传</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">55</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">14</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/">02b. RDMA 操作、WR/CQ 完成与可靠性</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/">03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">27</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

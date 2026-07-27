@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>02c. RoCE、拥塞控制、PFC/ECN 与重传 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="02c. RoCE、拥塞控制、PFC&amp;#x2F;ECN 与重传 1. InfiniBand、RoCE 与 iWARP 技术 链路&amp;#x2F;网络 常见 transport InfiniBand 专用 IB fabric IB RC&amp;#x2F;UD 等 RoCEv1 Ethernet L2，不可跨 L3 路由 IB transport over Ethernet RoCEv2 UDP&amp;#x2F;IP，可路由 IB transport ov"><meta property="og:type" content="blog"><meta property="og:title" content="02c. RoCE、拥塞控制、PFC/ECN 与重传"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="02c. RoCE、拥塞控制、PFC&amp;#x2F;ECN 与重传 1. InfiniBand、RoCE 与 iWARP 技术 链路&amp;#x2F;网络 常见 transport InfiniBand 专用 IB fabric IB RC&amp;#x2F;UD 等 RoCEv1 Ethernet L2，不可跨 L3 路由 IB transport over Ethernet RoCEv2 UDP&amp;#x2F;IP，可路由 IB transport ov"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-27T03:05:09.626Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"},"headline":"02c. RoCE、拥塞控制、PFC/ECN 与重传","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-27T03:05:09.626Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"02c. RoCE、拥塞控制、PFC&#x2F;ECN 与重传 1. InfiniBand、RoCE 与 iWARP 技术 链路&#x2F;网络 常见 transport InfiniBand 专用 IB fabric IB RC&#x2F;UD 等 RoCEv1 Ethernet L2，不可跨 L3 路由 IB transport over Ethernet RoCEv2 UDP&#x2F;IP，可路由 IB transport ov"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-27T03:05:09.626Z" title="7/27/2026, 3:05:09 AM">2026-07-27</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">10 分钟读完 (大约1466个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">02c. RoCE、拥塞控制、PFC/ECN 与重传</h1><div class="content"><h1 id="02c-RoCE、拥塞控制、PFC-ECN-与重传"><a href="#02c-RoCE、拥塞控制、PFC-ECN-与重传" class="headerlink" title="02c. RoCE、拥塞控制、PFC/ECN 与重传"></a>02c. RoCE、拥塞控制、PFC/ECN 与重传</h1><h2 id="1-InfiniBand、RoCE-与-iWARP"><a href="#1-InfiniBand、RoCE-与-iWARP" class="headerlink" title="1. InfiniBand、RoCE 与 iWARP"></a>1. InfiniBand、RoCE 与 iWARP</h2><table>
+<thead>
+<tr>
+<th>技术</th>
+<th>链路/网络</th>
+<th>常见 transport</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>InfiniBand</td>
+<td>专用 IB fabric</td>
+<td>IB RC/UD 等</td>
+</tr>
+<tr>
+<td>RoCEv1</td>
+<td>Ethernet L2，不可跨 L3 路由</td>
+<td>IB transport over Ethernet</td>
+</tr>
+<tr>
+<td>RoCEv2</td>
+<td>UDP/IP，可路由</td>
+<td>IB transport over UDP/IP/Ethernet</td>
+</tr>
+<tr>
+<td>iWARP</td>
+<td>TCP/IP</td>
+<td>RDMA over TCP</td>
+</tr>
+</tbody></table>
+<p>Verbs API 可以相似，但 packet、拥塞和运维模型不同。</p>
+<h2 id="2-RoCEv2-packet-直觉"><a href="#2-RoCEv2-packet-直觉" class="headerlink" title="2. RoCEv2 packet 直觉"></a>2. RoCEv2 packet 直觉</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">Ethernet</span><br><span class="line">  → VLAN/PCP（可选）</span><br><span class="line">  → IP/DSCP/ECN</span><br><span class="line">  → UDP dst port 4791</span><br><span class="line">  → IB transport headers</span><br><span class="line">  → payload + invariant CRC</span><br></pre></td></tr></table></figure>
+
+<p>RoCE 数据常绕过普通 kernel network stack，因此普通 <code>netstat</code>/socket counters 未必能看到完整流量；应看 RDMA/NIC hardware counters。</p>
+<h2 id="3-为什么低丢包仍重要"><a href="#3-为什么低丢包仍重要" class="headerlink" title="3. 为什么低丢包仍重要"></a>3. 为什么低丢包仍重要</h2><p>RC 对丢包会 retry，但高带宽长 RTT 网络的 BDP 很大：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">BDP = bandwidth × RTT</span><br></pre></td></tr></table></figure>
+
+<p>例：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">400 Gbit/s × 10 ms</span><br><span class="line">= 4 Gbit</span><br><span class="line">= 500 MB</span><br></pre></td></tr></table></figure>
+
+<p>反馈回来前可能已有数百 MB 在途。拥塞点 buffer 远小于此值时，会产生 drop、retry、尾延迟和吞吐塌陷。</p>
+<h2 id="4-PFC：逐优先级暂停"><a href="#4-PFC：逐优先级暂停" class="headerlink" title="4. PFC：逐优先级暂停"></a>4. PFC：逐优先级暂停</h2><p>Priority Flow Control（802.1Qbb）按 priority 暂停上游发送：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">queue 达 XOFF</span><br><span class="line">  → 发 PFC pause</span><br><span class="line">  → 上游停止该 priority</span><br><span class="line">queue 降到 XON</span><br><span class="line">  → 恢复</span><br></pre></td></tr></table></figure>
+
+<p>优点：在 buffer 快耗尽时避免 drop。</p>
+<p>代价：</p>
+<ul>
+<li>Head-of-Line blocking；</li>
+<li>pause propagation；</li>
+<li>incast 时多端同时被停；</li>
+<li>错误配置可造成 PFC storm/deadlock；</li>
+<li>长距离下需要按 cable/RTT 预留更多 headroom。</li>
+</ul>
+<p>PFC 是 hop-by-hop，不是端到端 transport ACK。</p>
+<h2 id="5-ECN-与-DCQCN"><a href="#5-ECN-与-DCQCN" class="headerlink" title="5. ECN 与 DCQCN"></a>5. ECN 与 DCQCN</h2><p>ECN 在真正丢包前标记拥塞：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">Switch queue 超过 ECN threshold</span><br><span class="line">  → 标记 CE</span><br><span class="line">  → receiver 生成 CNP</span><br><span class="line">  → sender RNIC 降低 rate</span><br><span class="line">  → 无拥塞后逐步恢复</span><br></pre></td></tr></table></figure>
+
+<p>DCQCN 将 ECN/CNP 反馈与发送端 rate control 结合。</p>
+<p>分工：</p>
+<ul>
+<li>ECN/DCQCN：尽早减速，控制持续拥塞。</li>
+<li>PFC：最后的无损保护，吸收短时 microburst。</li>
+<li>RC retry：链路/网络仍丢包时的可靠性兜底。</li>
+</ul>
+<p>理想状态不是“大量 PFC pause 但 0 drop”，而是 ECN 把队列控制住，PFC 只偶尔触发。</p>
+<h2 id="6-Lossy-RoCE-不等于不能用"><a href="#6-Lossy-RoCE-不等于不能用" class="headerlink" title="6. Lossy RoCE 不等于不能用"></a>6. Lossy RoCE 不等于不能用</h2><p>现代 NIC/switch 可以在：</p>
+<ul>
+<li>ECN only；</li>
+<li>semi-lossless；</li>
+<li>PFC + ECN；</li>
+<li>支持 OOO/选择性重传的 lossy fabric</li>
+</ul>
+<p>等模式运行。可行性取决于硬件、固件和端到端配置。不能把“RoCE 必须绝对无损”写成永久定律；但对不支持现代恢复能力的 RC 路径，drop 代价仍可能很高。</p>
+<h2 id="7-Incast"><a href="#7-Incast" class="headerlink" title="7. Incast"></a>7. Incast</h2><p>多个发送端同时写一个接收端：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">P0 ─┐</span><br><span class="line">P1 ─┼──► D0/NIC/PCIe/GPU</span><br><span class="line">P2 ─┤</span><br><span class="line">P3 ─┘</span><br></pre></td></tr></table></figure>
+
+<p>瓶颈可能在：</p>
+<ul>
+<li>ToR egress；</li>
+<li>receiver NIC；</li>
+<li>PCIe uplink；</li>
+<li>CQ/poll CPU；</li>
+<li>GPU memory write path。</li>
+</ul>
+<p>Barex 提供 <code>ACCL_INCAST_AVOID/COUNT/THRESHOLD</code>，大消息 metadata 到达后可限制同时进入 phase 2/3 的数量。见：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">xcontext_impl.cc:1165-1168</span><br><span class="line">xcontext_impl.cc:1237-1249</span><br></pre></td></tr></table></figure>
+
+<p>它解决的是 endpoint/application admission，不替代 fabric ECN/PFC。</p>
+<h2 id="8-MTU"><a href="#8-MTU" class="headerlink" title="8. MTU"></a>8. MTU</h2><p>常见 RoCE MTU 需同时考虑：</p>
+<ul>
+<li>Ethernet interface MTU；</li>
+<li>RDMA port active MTU；</li>
+<li>路径中所有 switch；</li>
+<li>VLAN/tunnel overhead。</li>
+</ul>
+<p>MTU 不一致可能表现为：</p>
+<ul>
+<li>小消息可用，大消息失败；</li>
+<li>retry/timeout；</li>
+<li>fragment/路由异常；</li>
+<li>性能明显低于预期。</li>
+</ul>
+<p>Barex <code>ACCL_IBV_MTU</code> 最终用于 QP path MTU；不能只改应用变量而忽略 fabric。</p>
+<h2 id="9-Traffic-Class、PCP、DSCP"><a href="#9-Traffic-Class、PCP、DSCP" class="headerlink" title="9. Traffic Class、PCP、DSCP"></a>9. Traffic Class、PCP、DSCP</h2><p>RoCE QoS 映射链：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">application traffic class</span><br><span class="line">  → IP DSCP/ECN</span><br><span class="line">  → switch priority/traffic class</span><br><span class="line">  → ECN threshold + PFC priority + ETS bandwidth</span><br></pre></td></tr></table></figure>
+
+<p>每跳 trust mode 必须一致。常见事故：</p>
+<ul>
+<li>host 标 DSCP，但 switch trust PCP；</li>
+<li>RoCE data 与 CNP 进了同一拥塞队列；</li>
+<li>一侧开启 PFC priority 3，另一侧映射到 priority 4；</li>
+<li>Barex 与 NCCL 使用不同 traffic class，争抢或落入 lossy queue。</li>
+</ul>
+<h2 id="10-Barex-参数如何对应网络"><a href="#10-Barex-参数如何对应网络" class="headerlink" title="10. Barex 参数如何对应网络"></a>10. Barex 参数如何对应网络</h2><table>
+<thead>
+<tr>
+<th>参数</th>
+<th>作用</th>
+<th>误配表现</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ACCL_IBV_MTU</code></td>
+<td>QP path MTU</td>
+<td>建联/大包失败、低吞吐</td>
+</tr>
+<tr>
+<td><code>ACCL_BAREX_TRAFFIC_CLASS</code></td>
+<td>RoCE traffic class</td>
+<td>QoS/PFC/ECN 不匹配</td>
+</tr>
+<tr>
+<td><code>ACCL_RETRANSMIT_TIMEOUT</code></td>
+<td>RC ACK timeout</td>
+<td>过小误重传，过大故障恢复慢</td>
+</tr>
+<tr>
+<td><code>ACCL_RETRY_CNT</code></td>
+<td>transport retry</td>
+<td>过小易失败，过大卡很久</td>
+</tr>
+<tr>
+<td><code>ACCL_RNR_RETRY</code></td>
+<td>RNR retry</td>
+<td>recv starvation 时行为</td>
+</tr>
+<tr>
+<td><code>ACCL_HEARTBEAT_INTERVAL</code></td>
+<td>channel liveness</td>
+<td>故障发现速度/额外流量</td>
+</tr>
+<tr>
+<td><code>ACCL_INCAST_*</code></td>
+<td>endpoint admission</td>
+<td>接收端爆发拥塞</td>
+</tr>
+</tbody></table>
+<h2 id="11-NCCL-与-Barex-共网"><a href="#11-NCCL-与-Barex-共网" class="headerlink" title="11. NCCL 与 Barex 共网"></a>11. NCCL 与 Barex 共网</h2><p>若 NCCL collective 与 blade-kvt 同时使用 RoCE：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">NCCL NET flows + Barex KV Write flows</span><br><span class="line">  → 同一 NIC/QP set</span><br><span class="line">  → 同一 priority/ECN/PFC pool</span><br><span class="line">  → 同一 fabric bottleneck</span><br></pre></td></tr></table></figure>
+
+<p>需要确认：</p>
+<ul>
+<li>HCA 与 port 选择；</li>
+<li>DSCP/traffic class；</li>
+<li>NCCL channel/Barex parallel channel 数；</li>
+<li>是否同时 incast；</li>
+<li>PFC pause 与 ECN/CNP counters；</li>
+<li>NIC port 与 PCIe utilization。</li>
+</ul>
+<h2 id="12-交换机-RNIC-指标"><a href="#12-交换机-RNIC-指标" class="headerlink" title="12. 交换机/RNIC 指标"></a>12. 交换机/RNIC 指标</h2><p>至少采集：</p>
+<h3 id="Switch"><a href="#Switch" class="headerlink" title="Switch"></a>Switch</h3><ul>
+<li>ECN marked packets；</li>
+<li>PFC pause tx/rx 与 duration；</li>
+<li>queue current/max occupancy；</li>
+<li>ingress/egress discard；</li>
+<li>per-priority bytes；</li>
+<li>CNP traffic。</li>
+</ul>
+<h3 id="RNIC"><a href="#RNIC" class="headerlink" title="RNIC"></a>RNIC</h3><ul>
+<li>retry exceeded；</li>
+<li>RNR NAK/retry；</li>
+<li>packet sequence error；</li>
+<li>retransmitted packets；</li>
+<li>CNP sent/received；</li>
+<li>ECN marked receive；</li>
+<li>out-of-order/reorder counters；</li>
+<li>port xmit wait。</li>
+</ul>
+<p>不同 vendor counter 名称不同，先保存 <code>ethtool -S</code>、<code>perfquery</code>、<code>rdma statistic</code> 全量快照，再做 delta。</p>
+<h2 id="13-对现有-rdma-learning-2-md-的校正"><a href="#13-对现有-rdma-learning-2-md-的校正" class="headerlink" title="13. 对现有 rdma_learning_2.md 的校正"></a>13. 对现有 <code>rdma_learning_2.md</code> 的校正</h2><p>现有笔记中的“经典 RoCE go-back-N”适合作为丢包放大的直觉，但需补充：</p>
+<ol>
+<li>具体 retry/乱序恢复能力依 RNIC 与模式；</li>
+<li>新设备可能支持 OOO 或选择性重传；</li>
+<li>TCP 也不是永远只重传一个包，行为依 SACK/RACK、拥塞窗口等；</li>
+<li>PFC 不是跨机房端到端传播的控制协议，而是逐跳配置；</li>
+<li>跨机房风险来自 BDP、丢包、路由与能力不一致的组合。</li>
+</ol>
+<h2 id="14-自检"><a href="#14-自检" class="headerlink" title="14. 自检"></a>14. 自检</h2><ol>
+<li>PFC、ECN/DCQCN、RC retry 各在哪一层解决什么问题？</li>
+<li>为什么 400G×10ms 需要关注约 500MB BDP？</li>
+<li><code>RNR_RETRY_EXC_ERR</code> 为什么通常不是交换机丢包？</li>
+<li>Barex incast avoidance 与 DCQCN 为什么不能互相替代？</li>
+</ol>
+<h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/networking-ethernet-software/cumulus-linux/Layer-1-and-Switch-Ports/Quality-of-Service/RDMA-over-Converged-Ethernet-RoCE/">NVIDIA Cumulus Linux RoCE</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/networking/display/mlnxofedv24070610/rdma%2Bover%2Bconverged%2Bethernet%2B%28roce%29">NVIDIA RoCE documentation</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>02c. RoCE、拥塞控制、PFC/ECN 与重传</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-04-nccl-topology-and-transport/"><span class="level-item">04. NCCL 拓扑发现与 Transport 选择</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">55</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">14</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/">02b. RDMA 操作、WR/CQ 完成与可靠性</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/">03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">27</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">14</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
