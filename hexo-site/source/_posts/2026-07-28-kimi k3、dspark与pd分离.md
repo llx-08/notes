@@ -3,6 +3,7 @@ title: "Kimi K3、DSpark 与 PD 分离"
 date: 2026-07-28
 tags: []
 ---
+
 # Kimi K3、DSpark 与 PD 分离
 
 > 状态：设计分析与修改计划
@@ -13,26 +14,54 @@ tags: []
 
 基于以下代码版本的静态审查：
 
+- vLLM `origin/kimi-k3-dev`：`06dac4495eac41e88c3a1be7a74c822afdacba17`
+- vLLM `origin/dev/kimi-k3-dev-dspark`：`2fe6085f3d7b7b6676332ebf4af001bdef50dc32`
+- vLLM `origin/kimi-k3-dev-draft-support`：`51c73250a7d403f167491991d3eacf06aa62d6f5`
 - vLLM `origin/hmz/dspark_v3`：`3883053c0ff59fba6b0ad0c0f31ec48cbc834e5b`
-- vLLM `alex/kimi-k3-mla-zeroing-20260722`：`d28bf21877006ed90cbd0adb528d25b15ac01ea7`
 - blade-kvt `main`：`752697132e8b0409ad134724fec2882c9ca57380`
+
+其中 `kimi-k3-dev` 是本文采用的 Kimi K3 权威基线。旧的
+`alex/kimi-k3-mla-zeroing-20260722` 已经是它的祖先，不再作为最新结论的
+判断基准。两个相关后继分支的关系为：
+
+```text
+origin/kimi-k3-dev @ 06dac4495e
+├── origin/dev/kimi-k3-dev-dspark @ 2fe6085f3d
+│   └── 合入 DFlash/DSpark 运行时与 PD producer context-KV 修复
+└── origin/kimi-k3-dev-draft-support @ 51c73250a7
+    └── Kimi K3 Eagle3、异构 Eagle KV pages 等独立实验性支持
+```
 
 当前能力可以概括为：
 
 | 组合 | 当前状态 | 说明 |
 | --- | --- | --- |
 | Kimi K3 + 本地推理 | 支持 | KDA + MLA hybrid cache 已接入 vLLM |
-| Kimi K3 + PD 分离 | 支持基础链路 | K3 分支和 blade-kvt main 已实现专用 `cache_shape=8` |
-| DFlash/DSpark + 普通 target + PD | `hmz/dspark_v3` 已有适配 | P 节点 prefill 时会保留 drafter context KV |
-| Kimi K3 + DFlash/DSpark | 需要兼容的 drafter checkpoint 和集成验证 | 当前 DSpark port 只正式识别 Qwen3 DSpark checkpoint 架构 |
-| Kimi K3 + DFlash/DSpark + PD | **当前不支持开箱即用** | 分支未集成，且 K3 KVT block-group/layout contract 无法表示额外 drafter KV groups |
+| Kimi K3 + PD 分离 | 代码路径支持 | `kimi-k3-dev` 与 blade-kvt main 已实现专用 `cache_shape=8`；上线仍应做目标环境 E2E |
+| DFlash/DSpark + 普通 target + PD | 已有 producer 适配 | P 节点跳过 draft token 生成时仍会保留 drafter context KV |
+| Kimi K3 + Eagle3 | 独立后继分支已有支持 | `kimi-k3-dev-draft-support` 增加 KDA target state 与异构 Eagle KV pages；不等于 KVT PD 已支持 |
+| Kimi K3 + DFlash/DSpark | 运行时代码已共存，组合能力待验证 | `dev/kimi-k3-dev-dspark` 基于 K3 最新基线；仍依赖兼容的 drafter checkpoint，且没有 K3 组合测试 |
+| Kimi K3 + DFlash/DSpark + PD | **当前不支持开箱即用** | producer context KV 已修复，但 K3 KVT block-group/layout contract 仍无法表示额外 drafter KV groups |
 
-这里的“不支持”不是单纯缺少测试，而是存在确定的代码契约冲突：
+这里的“不支持”不是因为仍缺一个 branch merge，也不只是缺少测试，而是组合分支
+仍存在确定的传输协议契约冲突：
 
-1. K3 分支在 `skip_decode_drafting` 时过早返回，P 节点没有写入 DFlash/DSpark context KV。
-2. K3 的 Blade-KVT `cache_shape=8` 只接受“若干 KDA groups + 一个 replicated MLA group”。
-3. DFlash/DSpark 会增加自己的 FullAttention/SlidingWindow KV groups。
-4. vLLM K3 KVT 注册逻辑和 Blade-KVT K3 parser 都对 attention group 数量作了严格断言。
+1. 基础 `kimi-k3-dev` 的确会在 `skip_decode_drafting` 时过早返回；组合分支
+   `dev/kimi-k3-dev-dspark` 已经把 context KV precompute 移到 return 之前。
+2. 该组合提交只修改 spec decode/config/runner，没有修改 KVT cache 注册、group
+   分类或 Blade-KVT parser。
+3. K3 的 Blade-KVT `cache_shape=8` 仍只接受“若干 KDA groups + 一个 replicated
+   MLA group”。
+4. DFlash/DSpark 会增加自己的 FullAttention/SlidingWindow KV groups；vLLM
+   K3 KVT 注册逻辑与 Blade-KVT K3 parser 仍对 attention/group 数量作严格断言。
+
+因此准确结论是：
+
+```text
+K3 + DFlash/DSpark runtime integration：已有分支
+K3 + DFlash/DSpark producer context KV：已有修复
+K3 + DFlash/DSpark + Blade-KVT PD transfer domains：尚未实现
+```
 
 ![K3、DFlash/DSpark 与 PD 的数据流](/imgs/kimi-k3-dspark-pd-flow.svg)
 
@@ -201,6 +230,19 @@ dst.attn_pack_size == 1;
 
 因此 `cache_shape=8` 不是任意 hybrid cache 的通用编码，而是 K3 target cache 的专用协议。
 
+最新 `kimi-k3-dev` 还包含两项容易被旧分支分析遗漏的修复：
+
+- `908a34890d`：Kimi K3 无论初始选择哪种 MLA backend，都先按 128 token
+  对齐 hybrid MLA kernel block，避免 backend selection 后 TP4 KDA page 无法整除。
+- `d816d19be3`：KVT 的 `token_bytes` 按真实 MLA latent token
+  `((kv_lora_rank + qk_rope_head_dim) * element_size)` 计算，再断言
+  `token_bytes * manager_block_size == kda_page_stride`；不能再用 kernel
+  block 数从 storage 大小反推 manager-block token bytes。
+
+也就是说，K3 MLA 的逻辑 payload、kernel block、manager block 与 KDA-sized
+physical page 是四个不同层次。PD parser 必须通过显式的
+`hybrid_attn_token_size`、`attn_kernel_blk_ntpb` 和 `kda_page_stride` 做映射。
+
 ![K3 target 与 drafter KV cache layout](/imgs/kimi-k3-cache-layout.svg)
 
 ## 4. DFlash 与 DSpark 的 drafter cache
@@ -301,7 +343,7 @@ FlashInfer HND 的物理顺序：
 
 P 节点在 prompt batch 上不需要生成 draft token，但必须执行步骤 5。
 
-`hmz/dspark_v3` 中的提交：
+`hmz/dspark_v3` 中的原始提交：
 
 ```text
 9cc80052c6 Preserve DFlash context KV when skipping drafting
@@ -315,15 +357,49 @@ self.model.precompute_and_store_context_kv(...)
 
 之后。这是 DFlash/DSpark 与 PD 组合的必要条件。
 
-K3 分支中，`skip_decode_drafting` 仍在 context KV precompute 之前返回，因此尚未满足该条件。
+基础 `kimi-k3-dev` 中，`skip_decode_drafting` 仍在 context KV precompute
+之前返回；但后继组合分支 `dev/kimi-k3-dev-dspark` 的
+`2fe6085f3d` 已 cherry-pick 该修复，并明确注明 KVT producer 在 prompt batch
+上只跳过 query drafting，不能跳过 context KV 写入。
+
+因此 producer 侧步骤 5 在组合分支已具备代码路径。当前未完成的是步骤 6：
+KVT 仍没有把 K3 target cache 与 drafter attention cache 作为两个 layout
+domain 正确注册和传输。
 
 ## 6. 为什么 K3 + DFlash/DSpark + PD 当前冲突
 
-### 6.1 分支能力没有合并
+### 6.1 运行时能力已合并，传输能力没有合并
 
-`hmz/dspark_v3` 不包含 K3 model/K3 KVT 提交；K3 分支不包含 `dspark_v3` 最近的 context-KV、dummy run、async rejection 和长度处理修复。
+`origin/dev/kimi-k3-dev-dspark` 是 `origin/kimi-k3-dev` 的直接后继，
+增加一个聚合提交 `2fe6085f3d`。它包含：
 
-直接选择任一分支都得不到完整能力。
+- DFlash drafter max-length accounting；
+- P 节点跳过 drafting 时保留 context KV；
+- DFlash kernel context-position lookup guard；
+- dummy/profile path 的 `skip_decode_drafting`；
+- async rejection-count GPU-side 处理；
+- DP dummy 的实际 sequence length；
+- DFlash 的 `gamma + 1` query-token 预算。
+
+但该提交只改动：
+
+```text
+vllm/config/speculative.py
+vllm/v1/engine/core.py
+vllm/v1/spec_decode/{dflash,eagle,utils}.py
+vllm/v1/worker/gpu_model_runner.py
+```
+
+它没有改动：
+
+```text
+vllm/v1/hybrid_connector/kvtbackend.py
+vLLM KVT cache-domain/group serialization
+blade-kvt cache_shape=8 parser
+```
+
+所以问题已经从“两个分支没有合并”收敛为“runtime 已合并，但 transfer
+domain/layout 尚未集成”。
 
 ### 6.2 K3 parser 不接受额外 drafter groups
 
@@ -351,13 +427,17 @@ K3 分支中，`skip_decode_drafting` 仍在 context KV precompute 之前返回�
 
 K3 `_build_kvt_args()` 强制 `attn_pack_size == 1`，并要求每个 `KVCacheTensor.shared_by` 中只有一个 non-indexer attention entry。
 
-vLLM 统一 page size 并构造 shared physical tensor 时，K3 MLA layer 和少量 drafter attention layers 可能被放进同一个 `shared_by`。这会使 non-indexer attention 数量大于 1，在进入 Blade-KVT 之前就失败。
+`dev/kimi-k3-dev-dspark` 尚未包含 `kimi-k3-dev-draft-support` 的
+heterogeneous-page grouping。vLLM 统一 page size 并构造 shared physical tensor
+时，K3 MLA layer 和少量 drafter attention layers 可能被放进同一个
+`shared_by`。这会使 non-indexer attention 数量大于 1，在进入 Blade-KVT
+之前就失败。
 
 即使 cache grouping 恰好把它们分开，Blade-KVT 的 block-group 数量断言仍会失败。
 
-### 6.4 drafter context KV 缺失
+### 6.4 基础分支缺 drafter context KV，组合分支已修复
 
-K3 分支当前逻辑：
+基础 `kimi-k3-dev` 的逻辑：
 
 ```text
 skip_decode_drafting
@@ -365,7 +445,17 @@ skip_decode_drafting
   -> 没有 precompute_and_store_context_kv
 ```
 
-结果是 P 节点没有可供传输的 drafter prefix cache。D 节点若把对应 token 标记为已计算，将读取未初始化、旧数据或刚被 zero kernel 清空的 KV。
+结果是 P 节点没有可供传输的 drafter prefix cache。组合分支
+`dev/kimi-k3-dev-dspark` 已将逻辑改为：
+
+```text
+precompute_and_store_context_kv
+  -> if skip_decode_drafting: return
+```
+
+这消除了 producer 侧的确定性缺失，但还没有提供 drafter cache 的 KVT
+layout descriptor、block-group 过滤与完成语义。不能因为 cache 已经写入 GPU，
+就推断它已经被正确传到 D 节点。
 
 ### 6.5 load 与 zeroing 必须覆盖新增 group
 
@@ -384,7 +474,15 @@ SchedulerOutput.new_block_ids_to_zero
 
 ### 6.6 缺少组合测试
 
-在两个 vLLM 分支和 blade-kvt main 中均未找到 Kimi K3 与 DFlash/DSpark 组合 PD 的测试或显式支持声明。
+在 `dev/kimi-k3-dev-dspark` 与 blade-kvt main 中均未找到 Kimi K3 与
+DFlash/DSpark 组合 PD 的 cache parity/E2E 测试或显式支持声明。组合提交本身
+也没有新增 KVT 测试。
+
+作为对照，`kimi-k3-dev-draft-support` 确实新增了 Kimi K3 Eagle3 model/config
+支持，并为 target/draft page size 不同的场景增加
+`test_heterogeneous_full_attention_mamba_kv_cache`。但该分支没有修改 hybrid
+connector 或 Blade-KVT，因此它证明的是“本地 speculative cache 可以异构
+分配”，不能作为“K3 Eagle3 或 DFlash/DSpark 已支持 PD 传输”的证据。
 
 ![当前冲突与建议目标架构](/imgs/kimi-k3-pd-target-architecture.svg)
 
@@ -413,18 +511,25 @@ drafter-attn domain:
 
 ### 7.2 Phase 0：建立可合并基线
 
-目标：在一个集成分支中同时获得 K3 与最新 DSpark/DFlash 能力。
+目标：基于已经存在的 K3 + DSpark/DFlash 组合分支建立可复现基线，不重复做
+已经完成的 cherry-pick。
 
 工作项：
 
-1. 以 K3 分支为基线，合入 `hmz/dspark_v3` 的 DFlash/DSpark commits。
-2. 至少包含：
+1. 以 `origin/dev/kimi-k3-dev-dspark@2fe6085f3d` 为 runtime baseline，
+   核对它的父提交必须是目标 `kimi-k3-dev@06dac4495e` 或更新的 K3 基线。
+2. 验证聚合提交已经包含：
    - P 节点跳过 drafting 时仍写 context KV；
    - dummy/profile path 对 `skip_decode_drafting` 的处理；
    - rejection count 的 GPU-side 处理；
    - DFlash max length、DP dummy sequence length 和 CUDA graph 修复。
-3. 处理 `gpu_model_runner.py`、`speculative.py` 和 `dflash.py` 的冲突。
-4. 保留 K3 KDA/MLA、multimodal boundary 和 KVT zeroing 相关修改。
+3. 保留并回归 `kimi-k3-dev` 的最新 KVT 修复：
+   - Kimi K3 MLA 128-token 对齐；
+   - MLA token bytes 与 KDA page stride 校验；
+   - Mamba block-id 取得逻辑；
+   - KV block zeroer ID buffer race 修复。
+4. 从 `kimi-k3-dev-draft-support` 评估、按最小依赖移植“异构
+   FullAttention + Mamba page allocation”，不要直接合并整条 Eagle3 分支。
 5. 明确支持的 drafter checkpoint：
    - DFlash checkpoint architecture；
    - DSpark 当前 `Qwen3DSparkModel` 限制是否继续保留；
@@ -486,6 +591,10 @@ class CacheTransferDomain:
 - drafter groups 使用普通 attention pages；
 - scheduler 维护独立 block pools/block tables；
 - KVT 注册天然按 domain 分开。
+
+可从 `kimi-k3-dev-draft-support@0521f2813a` 的 page-size bucket、
+`_get_heterogeneous_kv_cache_config()` 和相应单元测试开始，而不是从零重写
+allocator；但需要补充 owner/domain 分类，不能只按 page size 猜测传输语义。
 
 优点：
 
@@ -773,3 +882,495 @@ Blade-KVT：
 10. 存在持续运行的组合回归测试，而不是只靠一次手工验证。
 
 在这些条件完成前，配置层应明确拒绝该组合或回退到 D 节点本地 prefill。
+
+## 11. DFlash/DSpark 与 MTP/Eagle3 的实现和 KV cache 对比
+
+### 11.1 核心区别
+
+四种方法都属于“先由 drafter 提议、再由 target model 验证”的 speculative decoding，但 drafter 内部的 token 依赖完全不同：
+
+```text
+MTP / Eagle3:
+  使用小型 transformer 逐 token 自回归
+
+DFlash:
+  先构造完整 context KV，再用一次 block-parallel transformer forward
+  同时计算整个 draft block
+
+DSpark:
+  DFlash-style block-parallel transformer
+  + 一个低秩 Markov head 顺序注入 token 依赖
+```
+
+因此 DFlash/DSpark 最重要的变化不是换了一种 KV tensor shape，而是把：
+
+```text
+γ 次有 transformer 依赖的串行 drafting
+```
+
+改成：
+
+```text
+一次 context-KV precompute
++ 一次并行 query-block transformer
++ 可选的轻量顺序采样
+```
+
+![MTP、Eagle3、DFlash 与 DSpark 的执行流程对比](/imgs/spec-drafter-execution-comparison.svg)
+
+### 11.2 总体对比
+
+| 维度 | MTP | Eagle3 | DFlash | DSpark |
+| --- | --- | --- | --- | --- |
+| Heavy drafter forward | 逐 token | 逐 token | 整个 block 一次 | 整个 block 一次 |
+| draft token 间依赖 | 完整 MTP transformer | 完整 Eagle transformer | 通常没有直接自回归依赖 | 低秩 Markov head 串行依赖 |
+| target 信息 | 通常最终 hidden；也可能是模型特有 multi-stream hidden | 多个 target 中间层 hidden 融合 | 一个或多个 target hidden，用来构造 context KV | 同 DFlash |
+| drafter 输入 token | 实际 token embedding | 实际 token embedding | bonus token + MASK queries | anchor token + MASK queries |
+| drafter query slots | `gamma` | `gamma` | `gamma + 1` | `gamma` |
+| attention 语义 | causal | causal | 默认可 non-causal，也支持 causal 配置 | 同 DFlash |
+| checkpoint 来源 | 通常是 target checkpoint 自带 MTP modules | 单独训练的 Eagle3 head/model | DFlash block-draft checkpoint | DSpark checkpoint + Markov weights |
+| draft indexer | 部分模型支持 | 部分模型支持 | 当前路径置空 | 继承 DFlash |
+| Pipeline Parallel | 依 MTP 模型实现 | drafter 放在最后 PP rank | 当前显式不支持 PP | 继承 DFlash 限制 |
+
+这里的 `gamma` 表示 `num_speculative_tokens`。
+
+### 11.3 MTP：原生 next-token prediction module
+
+MTP 通常由 target checkpoint 自带，是模型训练阶段就存在的 next-token prediction module。
+
+一个典型 MTP step 可以抽象为：
+
+```text
+当前实际 token embedding
+          +
+target/draft hidden state
+          ↓
+concat + norm + FC
+          ↓
+一个 MTP transformer layer
+          ↓
+next hidden + next-token logits
+```
+
+例如 Qwen3-Next MTP 会执行：
+
+```python
+inputs_embeds = pre_fc_norm_embedding(inputs_embeds)
+hidden_states = pre_fc_norm_hidden(hidden_states)
+hidden_states = torch.cat([inputs_embeds, hidden_states], dim=-1)
+hidden_states = self.fc(hidden_states)
+hidden_states = self.layers[current_step_idx](...)
+```
+
+如果 checkpoint 提供多个 MTP layers：
+
+```text
+current_step_idx = spec_step_idx % num_mtp_layers
+```
+
+不同 speculative step 可以使用不同 layer；只有一个 MTP layer 时则循环复用。
+
+在 vLLM V1 中，MTP 复用 `EagleProposer` 的主循环。生成 `gamma` 个 draft tokens 时，逻辑上仍然存在：
+
+```text
+第一次 draft forward
++ gamma-1 次逐 token draft forward
+```
+
+fused multi-step CUDA graph 可以减少 kernel launch 和 CPU 调度开销，但不会消除 token 间的数据依赖。
+
+### 11.4 Eagle3：融合 target 多层 hidden 的自回归小模型
+
+Eagle3 的主要特点是读取 target model 多个中间层的 hidden states：
+
+```text
+target layer a hidden ─┐
+target layer b hidden ─┼─ concat / norm / FC → Eagle hidden
+target layer c hidden ─┘
+```
+
+代码通过：
+
+```text
+eagle_aux_hidden_state_layer_ids
+```
+
+指定目标层。典型 Eagle3 model 会将多个 target hidden 拼接后投影到 drafter hidden size：
+
+```python
+fc_input_size = target_hidden_size * num_aux_hidden_states
+hidden_states = self.fc(hidden_states)
+```
+
+随后把：
+
+```text
+实际 token embedding + Eagle hidden
+```
+
+输入轻量 causal Eagle transformer。
+
+后续每个 draft step 使用：
+
+- 前一个实际 sampled draft token；
+- 前一个 Eagle step 返回的 hidden state；
+- 已经写入的 Eagle causal KV cache。
+
+因此第 `i+1` 个 draft token 经过完整 Eagle transformer 依赖第 `i` 个 token。
+
+针对 Kimi K3，`kimi-k3-dev-draft-support` 进一步做了两类专门适配：
+
+1. Kimi K3/Kimi Linear model 暴露 Eagle3 所需的 aux hidden states，并在
+   KDA forward 中保留正确的 target state；
+2. KV cache allocator 允许 target attention、draft Eagle attention 与
+   Mamba/KDA 使用不同 page size，按 page size bucket 分配异构 physical slots。
+
+第二点是 DFlash/DSpark 集成可复用的重要先例，但仍只解决本地 allocation。
+该分支没有扩展 KVT 的 K3 `cache_shape=8`，所以不能把“Eagle3 本地可运行”外推为
+“Eagle3 已可与 K3 同时开启 PD”。
+
+### 11.5 DFlash：context KV 预计算 + query block 并行
+
+DFlash 不对整个 prefix 运行普通 drafter causal backbone。它先将 target hidden states 转换为每个 DFlash attention layer 的 context K/V。
+
+流程是：
+
+```text
+target hidden states
+        ↓
+每个 DFlash layer 的 K/V projection
+        ↓
+K RMSNorm + RoPE
+        ↓
+按 drafter block table 写入 context KV cache
+```
+
+当前实现把多个 layer 的 projection 合并计算，产生：
+
+```text
+all_k:
+  [draft_layers, context_tokens, local_kv_heads, head_dim]
+
+all_v:
+  [draft_layers, context_tokens, local_kv_heads, head_dim]
+```
+
+完成 context cache 后，每个请求构造：
+
+```text
+[bonus token, MASK1, MASK2, ..., MASK-gamma]
+```
+
+即：
+
+```text
+num_query_per_req = gamma + 1
+```
+
+这些 query 在一次 DFlash transformer forward 中并行执行。DFlash 不从 bonus query 采样，而是从后面的 `gamma` 个 MASK query 输出中取得 draft logits。
+
+当前配置默认允许 DFlash 使用 non-causal query-block attention；checkpoint 也可以显式配置 causal 模式。无论是哪一种，都没有 Eagle3/MTP 那种“每生成一个 token 就重新运行一次 transformer”的执行链。
+
+### 11.6 DSpark：将串行依赖下沉到 Markov head
+
+DSpark 继承 DFlash backbone 和 cache 生成方式：
+
+```text
+DSparkProposer(DFlashProposer)
+Qwen3DSparkModel(DFlashQwen3Model)
+```
+
+它每个请求只运行：
+
+```text
+num_query_per_req = gamma
+```
+
+query block 类似：
+
+```text
+[anchor token, MASK1, ..., MASK-(gamma-1)]
+```
+
+backbone 一次性输出全部 base logits。然后 DSpark 顺序执行：
+
+```python
+prev = next_token_ids
+for step in range(gamma):
+    markov_embed = markov_w1(prev)
+    logits = base_logits[step] + markov_w2(markov_embed)
+    token = argmax(logits)
+    prev = token
+```
+
+所以 DSpark 的依赖结构是：
+
+```text
+Transformer backbone：并行
+Markov sampling head：串行
+```
+
+与 Eagle3/MTP 相比，串行部分不再重新运行 attention、MLP 和 drafter KV 读写，只运行一个低秩 token transition head。
+
+### 11.7 target hidden states 的使用方式
+
+Eagle3、DFlash 和 DSpark 都可能请求 target 的多个中间层 hidden states，但用途不同。
+
+#### Eagle3
+
+```text
+multi-layer target hidden
+        ↓ fusion
+作为 Eagle transformer 的 hidden input
+        ↓
+每个自回归 step 继续传播 Eagle hidden
+```
+
+#### DFlash/DSpark
+
+```text
+multi-layer target hidden
+        ↓ fusion
+作为 context K/V projection 的输入
+        ↓
+构造每个 draft layer 的整段 context cache
+```
+
+query-block backbone 的 token 输入主要是 bonus/anchor 与 MASK embeddings；它通过 attention 读取由 target hidden 投影得到的 context KV。
+
+#### MTP
+
+MTP 通常使用 target 最后一层 hidden，也可能使用模型特有的 multi-stream residual。例如当前分支对 MTP HC multi-stream 有独立路径：
+
+```text
+[tokens, hc_count * hidden_size]
+```
+
+这与 Eagle3 的通用 aux-hidden 拼接机制是分开的。
+
+### 11.8 KV cache 的物理 layout
+
+如果使用相同 attention backend、block size、dtype、KV heads 和 head dim，那么四种方法的 draft attention cache 可以拥有相同物理 tensor layout。
+
+FlashAttention view：
+
+```text
+[2, num_blocks, block_size, local_kv_heads, head_dim]
+```
+
+FlashInfer NHD：
+
+```text
+[num_blocks, 2, block_size, local_kv_heads, head_dim]
+```
+
+FlashInfer HND physical order：
+
+```text
+[num_blocks, 2, local_kv_heads, block_size, head_dim]
+```
+
+draft cache 总字节数近似：
+
+```text
+num_draft_layers
+× num_blocks
+× block_size
+× 2
+× local_kv_heads
+× head_dim
+× dtype_size
+```
+
+所以不能仅根据 “MTP/Eagle3/DFlash/DSpark” 这个算法名称推导显存大小。真正决定大小的是：
+
+- draft layer 数；
+- 每层 KV heads/head dim；
+- cache dtype；
+- block size；
+- attention backend；
+- NHD/HND；
+- FullAttention/SWA；
+- 是否存在额外 indexer cache。
+
+`kimi-k3-dev-draft-support` 的 heterogeneous-page 修改也验证了一个关键事实：
+K3 target MLA、Mamba/KDA 与 Eagle drafter 的 page size 不必相同。它把相同
+page size 的 layers 放入同一 bucket，再为每个异构 physical-page slot 分配
+独立 tensor。对 DFlash/DSpark 来说，这比强制把 draft page padding 到 KDA
+page stride 更合理；但 KVT 还需要同样的 domain/page-size 描述才能正确传输。
+
+### 11.9 KV cache 的内容语义
+
+物理 shape 相同不代表 cache 内容可以互换。
+
+#### MTP/Eagle3：drafter causal hidden KV
+
+MTP/Eagle3 的每个 cache slot 来自正常 causal drafter forward：
+
+```text
+实际 token embedding
++ 上一个 drafter hidden
+        ↓
+drafter transformer layer
+        ↓
+当前 token 的 K/V
+```
+
+它具有以下特点：
+
+- 按实际 token 顺序逐步产生；
+- 每个 draft step 追加一个或少量实际 token slots；
+- 后续 K/V 依赖前面已采样的 draft tokens；
+- cache 表示 drafter 自己的 causal hidden-state 历史。
+
+对于 tree speculative decoding，如果接受的 tree nodes 不连续，vLLM 还需要通过 `copy_kv_cache_slots()` 把接受节点的 KV 压缩到连续位置。
+
+#### DFlash/DSpark：target-projected context KV
+
+DFlash/DSpark 的 context slot 来自：
+
+```text
+KV_projection(target_hidden_at_position_t)
+```
+
+而不是：
+
+```text
+KV_projection(drafter_causal_hidden_at_position_t)
+```
+
+query slots 则来自 bonus/anchor/MASK query representations。它们是本次并行 query block 的 attention K/V，不等同于 Eagle3/MTP 中由实际 sampled token 自回归产生的历史 KV。
+
+target model 完成 verify 后，后续 DFlash/DSpark propose 会利用新的 target hidden states 再次填充相应 context positions，使被接受部分转化为新的 target-projected context KV。
+
+![MTP/Eagle3 与 DFlash/DSpark 的 KV cache 语义对比](/imgs/spec-drafter-kv-cache-comparison.svg)
+
+### 11.10 lookahead slots 和 block allocation
+
+当前 scheduler 对四类方法的预留不同：
+
+```text
+MTP:
+  num_lookahead_tokens = gamma
+
+Eagle3:
+  num_lookahead_tokens = gamma
+
+DFlash:
+  num_lookahead_tokens = gamma + 1
+
+DSpark:
+  num_lookahead_tokens = gamma
+```
+
+DFlash 多出的一个 slot 用于 bonus/anchor query。它本身不是 DFlash 输出的 draft token，但必须参加 query-block attention 并拥有对应 slot。
+
+DSpark 从 anchor query 的输出开始采样，因此 `gamma` 个 query slots 就可以产生 `gamma` 个 draft outputs。
+
+MTP/Eagle3 虽然也是 `gamma` 个 lookahead slots，但它们是按自回归 step 顺序写入，而不是一次建立整个 anchor/MASK query block。
+
+### 11.11 cache group 和 metadata 的差异
+
+MTP/Eagle3 当前支持：
+
+```python
+self.attn_layer_names
+self.indexer_layer_names
+```
+
+部分 Qwen3-Next/DeepSeek 类模型的 MTP/Eagle drafter 可以额外拥有 QSA/sparse indexer group，并使用独立：
+
+- block table；
+- block size；
+- attention metadata builder；
+- slot mapping。
+
+DFlash 当前在加载模型后显式：
+
+```python
+self.indexer_layer_names = []
+```
+
+主要管理 DFlash/DSpark attention layers。根据 checkpoint，DFlash layers 可以是 FullAttention、SWA 或二者混合，但不会自动沿用 MTP/Eagle 的 draft indexer 路径。
+
+### 11.12 PD 分离中的差异
+
+MTP/Eagle3 在 P 节点运行普通 draft prefill forward 时，会自然执行 attention layer 并写入 drafter causal KV。
+
+DFlash/DSpark 的 P 节点 prompt path 可以跳过 draft token 生成，但不能跳过 context KV precompute：
+
+```python
+self.model.precompute_and_store_context_kv(
+    context_hidden_states,
+    context_positions,
+    context_slot_mapping,
+)
+
+if skip_decode_drafting:
+    return None
+```
+
+这就是 `hmz/dspark_v3` 中以下原始提交的作用：
+
+```text
+9cc80052c6 Preserve DFlash context KV when skipping drafting
+```
+
+该修复已经通过聚合提交 `2fe6085f3d` 进入
+`dev/kimi-k3-dev-dspark`。所以最新分析不再把 producer context KV 缺失列为
+组合分支的 blocker；剩余 blocker 是它没有进入 KVT registration/parser/
+completion domain。
+
+如果返回发生在 `precompute_and_store_context_kv()` 之前：
+
+- P 只有 target cache；
+- drafter context cache 没有生成；
+- D 即使加载 target KV，也无法直接开始 DFlash/DSpark decode；
+- 如果错误地把对应 token 标记为 computed，drafter 会读取未初始化、旧数据或 zeroed KV。
+
+所以在 PD 中必须分别证明：
+
+```text
+target cache ready
+AND drafter context cache ready
+```
+
+### 11.13 对 Kimi K3 集成的直接影响
+
+Kimi K3 的 `cache_shape=8` 只定义：
+
+```text
+[KDA groups...][one replicated K3 MLA group]
+```
+
+它不知道 drafter cache 的算法语义。
+
+即使 DFlash/DSpark、MTP 或 Eagle3 的物理 KV tensor 都表现为普通五维 K/V cache，它们也必须作为独立 drafter groups 传输，原因包括：
+
+1. 它们不属于 K3 target MLA；
+2. K3 MLA 是 rank-replicated latent cache；
+3. drafter cache 通常是 TP-sharded K/V heads；
+4. DFlash/DSpark context KV 来自 target-hidden projection；
+5. MTP/Eagle3 cache 来自 causal drafter hidden；
+6. 各方法的 lookahead slots 和 query 生命周期不同。
+
+因此正确设计应当区分：
+
+```text
+K3 target domain:
+  KDA + K3 MLA
+
+drafter domain:
+  MTP / Eagle3 / DFlash / DSpark attention cache
+```
+
+不能因为物理 shape 看起来相同，就把 drafter groups 追加到 K3 MLA group 后交给同一个 K3 parser 解释。
+
+结合三个最新分支，可以把可复用工作与仍缺失工作明确划开：
+
+| 来源 | 已提供 | 对 K3 + DFlash/DSpark + PD 仍缺什么 |
+| --- | --- | --- |
+| `kimi-k3-dev` | K3 KDA/MLA、128 对齐、真实 MLA token bytes、`cache_shape=8`、zeroing 修复 | drafter domain |
+| `dev/kimi-k3-dev-dspark` | DFlash/DSpark runtime、producer context KV、dummy/async/length 修复 | KVT group 分类、注册、parser、完成语义 |
+| `kimi-k3-dev-draft-support` | K3 Eagle3 与 heterogeneous target/draft pages | Blade-KVT 多 layout domain 与 PD E2E |
+| blade-kvt `main` | K3 KDA remap + replicated MLA prefix copy | 同一请求中的额外普通 drafter KV parser/domain |

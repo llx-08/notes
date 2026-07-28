@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">MTP/Eagle3 与 DFlash/DSpark KV cache 语义对比</title>
+  <desc id="desc">展示不同 drafter 可以使用相同物理 paged KV layout，但 cache 的产生方式、slot 内容和生命周期不同。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#eef2ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#334155" flood-opacity="0.16"/>
+    </filter>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto">
+      <path d="M0,0 L11,5.5 L0,11 Z" fill="#475569"/>
+    </marker>
+    <style>
+      .title { font:700 34px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .section { font:700 23px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .label { font:700 17px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .body { font:400 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .mono { font:500 14px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#334155; }
+      .arrow { stroke:#475569; stroke-width:3; fill:none; marker-end:url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+  <text x="800" y="52" text-anchor="middle" class="title">物理 layout 可以相同，KV cache 语义不能互换</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="90" width="1460" height="230" rx="22" fill="#ffffff"/>
+  </g>
+  <text x="105" y="130" class="section">共同的 paged attention storage（取决于 backend/config，而不是算法名称）</text>
+  <rect x="105" y="160" width="420" height="105" rx="12" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="315" y="192" text-anchor="middle" class="label">FlashAttention view</text>
+  <text x="315" y="223" text-anchor="middle" class="mono">[2, Nblock, B, Hkv, D]</text>
+  <text x="315" y="248" text-anchor="middle" class="body">K/V × block × token × head</text>
+  <rect x="590" y="160" width="420" height="105" rx="12" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="800" y="192" text-anchor="middle" class="label">FlashInfer NHD</text>
+  <text x="800" y="223" text-anchor="middle" class="mono">[Nblock, 2, B, Hkv, D]</text>
+  <text x="800" y="248" text-anchor="middle" class="body">block-major token layout</text>
+  <rect x="1075" y="160" width="420" height="105" rx="12" fill="#f3e8ff" stroke="#c084fc"/>
+  <text x="1285" y="192" text-anchor="middle" class="label">FlashInfer HND</text>
+  <text x="1285" y="223" text-anchor="middle" class="mono">[Nblock, 2, Hkv, B, D]</text>
+  <text x="1285" y="248" text-anchor="middle" class="body">head-major physical order</text>
+  <rect x="545" y="280" width="510" height="28" rx="14" fill="#fee2e2" stroke="#f87171"/>
+  <text x="800" y="300" text-anchor="middle" class="body">相同 shape / dtype / block size 仍不表示 cache 内容兼容</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="350" width="700" height="570" rx="22" fill="#ffffff"/>
+    <rect x="830" y="350" width="700" height="570" rx="22" fill="#ffffff"/>
+  </g>
+  <rect x="70" y="350" width="700" height="58" rx="22" fill="#2563eb"/>
+  <rect x="830" y="350" width="700" height="58" rx="22" fill="#7c3aed"/>
+  <text x="420" y="388" text-anchor="middle" class="section" fill="white">MTP / Eagle3：causal drafter hidden KV</text>
+  <text x="1180" y="388" text-anchor="middle" class="section" fill="white">DFlash / DSpark：target-projected context KV</text>
+
+  <rect x="110" y="445" width="190" height="86" rx="10" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="205" y="475" text-anchor="middle" class="label">actual token 0</text>
+  <text x="205" y="502" text-anchor="middle" class="body">+ drafter hidden 0</text>
+  <path d="M300 488 L355 488" class="arrow"/>
+  <rect x="360" y="445" width="160" height="86" rx="10" fill="#bfdbfe" stroke="#3b82f6"/>
+  <text x="440" y="475" text-anchor="middle" class="label">causal layer</text>
+  <text x="440" y="502" text-anchor="middle" class="body">write K/V 0</text>
+  <path d="M520 488 L575 488" class="arrow"/>
+  <rect x="580" y="445" width="150" height="86" rx="10" fill="#93c5fd" stroke="#2563eb"/>
+  <text x="655" y="475" text-anchor="middle" class="label">sample token 1</text>
+  <text x="655" y="502" text-anchor="middle" class="body">becomes next input</text>
+
+  <path d="M655 531 C655 565, 285 565, 240 590" class="arrow"/>
+  <rect x="110" y="585" width="190" height="86" rx="10" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="205" y="615" text-anchor="middle" class="label">actual token 1</text>
+  <text x="205" y="642" text-anchor="middle" class="body">+ drafter hidden 1</text>
+  <path d="M300 628 L355 628" class="arrow"/>
+  <rect x="360" y="585" width="160" height="86" rx="10" fill="#bfdbfe" stroke="#3b82f6"/>
+  <text x="440" y="615" text-anchor="middle" class="label">causal layer</text>
+  <text x="440" y="642" text-anchor="middle" class="body">write K/V 1</text>
+  <path d="M520 628 L575 628" class="arrow"/>
+  <rect x="580" y="585" width="150" height="86" rx="10" fill="#93c5fd" stroke="#2563eb"/>
+  <text x="655" y="615" text-anchor="middle" class="label">sample token 2</text>
+  <text x="655" y="642" text-anchor="middle" class="body">继续串行…</text>
+
+  <text x="110" y="720" class="label">slot 语义</text>
+  <g>
+    <rect x="110" y="745" width="125" height="60" rx="8" fill="#dbeafe" stroke="#60a5fa"/>
+    <rect x="245" y="745" width="125" height="60" rx="8" fill="#bfdbfe" stroke="#3b82f6"/>
+    <rect x="380" y="745" width="125" height="60" rx="8" fill="#93c5fd" stroke="#2563eb"/>
+    <rect x="515" y="745" width="125" height="60" rx="8" fill="#60a5fa" stroke="#2563eb"/>
+    <text x="172" y="770" text-anchor="middle" class="body">actual 0 KV</text>
+    <text x="172" y="792" text-anchor="middle" class="mono">causal</text>
+    <text x="307" y="770" text-anchor="middle" class="body">actual 1 KV</text>
+    <text x="307" y="792" text-anchor="middle" class="mono">causal</text>
+    <text x="442" y="770" text-anchor="middle" class="body">actual 2 KV</text>
+    <text x="442" y="792" text-anchor="middle" class="mono">causal</text>
+    <text x="577" y="770" text-anchor="middle" class="body">actual 3 KV</text>
+    <text x="577" y="792" text-anchor="middle" class="mono">causal</text>
+  </g>
+  <rect x="110" y="835" width="620" height="54" rx="10" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="420" y="858" text-anchor="middle" class="body">每个 slot 来自 drafter 自己的 causal hidden；后一个 slot 依赖前一个 sampled token</text>
+  <text x="420" y="881" text-anchor="middle" class="mono">lookahead slots = gamma</text>
+
+  <rect x="870" y="445" width="205" height="86" rx="10" fill="#f3e8ff" stroke="#c084fc"/>
+  <text x="972" y="475" text-anchor="middle" class="label">target hidden[t]</text>
+  <text x="972" y="502" text-anchor="middle" class="body">all context tokens</text>
+  <path d="M1075 488 L1130 488" class="arrow"/>
+  <rect x="1135" y="445" width="205" height="86" rx="10" fill="#e9d5ff" stroke="#a855f7"/>
+  <text x="1237" y="475" text-anchor="middle" class="label">draft-layer K/V proj</text>
+  <text x="1237" y="502" text-anchor="middle" class="body">K norm + RoPE</text>
+  <path d="M1340 488 L1395 488" class="arrow"/>
+  <rect x="1400" y="445" width="90" height="86" rx="10" fill="#d8b4fe" stroke="#9333ea"/>
+  <text x="1445" y="475" text-anchor="middle" class="label">context</text>
+  <text x="1445" y="502" text-anchor="middle" class="body">K/V</text>
+
+  <rect x="870" y="585" width="205" height="86" rx="10" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="972" y="615" text-anchor="middle" class="label">anchor / MASK</text>
+  <text x="972" y="642" text-anchor="middle" class="body">parallel queries</text>
+  <path d="M1075 628 L1130 628" class="arrow"/>
+  <rect x="1135" y="585" width="205" height="86" rx="10" fill="#ddd6fe" stroke="#7c3aed"/>
+  <text x="1237" y="615" text-anchor="middle" class="label">one query backbone</text>
+  <text x="1237" y="642" text-anchor="middle" class="body">write block K/V</text>
+  <path d="M1340 628 L1395 628" class="arrow"/>
+  <rect x="1400" y="585" width="90" height="86" rx="10" fill="#c4b5fd" stroke="#6d28d9"/>
+  <text x="1445" y="615" text-anchor="middle" class="label">draft</text>
+  <text x="1445" y="642" text-anchor="middle" class="body">logits</text>
+
+  <text x="870" y="720" class="label">slot 语义（以 DFlash 为例）</text>
+  <g>
+    <rect x="870" y="745" width="125" height="60" rx="8" fill="#e9d5ff" stroke="#a855f7"/>
+    <rect x="1005" y="745" width="125" height="60" rx="8" fill="#ddd6fe" stroke="#8b5cf6"/>
+    <rect x="1140" y="745" width="125" height="60" rx="8" fill="#d8b4fe" stroke="#7c3aed"/>
+    <rect x="1275" y="745" width="125" height="60" rx="8" fill="#c4b5fd" stroke="#6d28d9"/>
+    <text x="932" y="770" text-anchor="middle" class="body">bonus KV</text>
+    <text x="932" y="792" text-anchor="middle" class="mono">anchor</text>
+    <text x="1067" y="770" text-anchor="middle" class="body">MASK 1 KV</text>
+    <text x="1067" y="792" text-anchor="middle" class="mono">query</text>
+    <text x="1202" y="770" text-anchor="middle" class="body">MASK 2 KV</text>
+    <text x="1202" y="792" text-anchor="middle" class="mono">query</text>
+    <text x="1337" y="770" text-anchor="middle" class="body">MASK 3 KV</text>
+    <text x="1337" y="792" text-anchor="middle" class="mono">query</text>
+  </g>
+  <rect x="870" y="835" width="620" height="54" rx="10" fill="#faf5ff" stroke="#d8b4fe"/>
+  <text x="1180" y="858" text-anchor="middle" class="body">context 来自 target-hidden projection；query slots 来自 anchor/MASK representations</text>
+  <text x="1180" y="881" text-anchor="middle" class="mono">DFlash lookahead = gamma+1；DSpark = gamma</text>
+
+  <rect x="415" y="945" width="770" height="34" rx="17" fill="#fee2e2" stroke="#f87171"/>
+  <text x="800" y="968" text-anchor="middle" class="body">PD 传输必须同时匹配物理 layout 与算法语义；不能把 DFlash cache 当作 Eagle cache 复用</text>
+</svg>
