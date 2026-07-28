@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="900" viewBox="0 0 1500 900" role="img" aria-labelledby="title desc">
+  <title id="title">Kimi K3、DFlash/DSpark 与 PD 分离数据流</title>
+  <desc id="desc">展示 Decode 节点分配 cache、Prefill 节点计算 target 和 drafter cache、KVT 传输以及 Decode 节点尾部重算的时序。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#eef2ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#334155" flood-opacity="0.18"/>
+    </filter>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto">
+      <path d="M0,0 L11,5.5 L0,11 Z" fill="#475569"/>
+    </marker>
+    <style>
+      .title { font: 700 34px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .subtitle { font: 400 18px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .lane-title { font: 700 24px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:white; }
+      .step-title { font: 700 18px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .body { font: 400 16px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .small { font: 500 14px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#475569; }
+      .arrow { stroke:#475569; stroke-width:3; fill:none; marker-end:url(#arrow); }
+      .dash { stroke:#94a3b8; stroke-width:2; stroke-dasharray:8 8; }
+    </style>
+  </defs>
+
+  <rect width="1500" height="900" fill="url(#bg)"/>
+  <text x="750" y="54" text-anchor="middle" class="title">Kimi K3 + DFlash/DSpark 的目标 PD 数据流</text>
+  <text x="750" y="84" text-anchor="middle" class="subtitle">target cache 与 drafter cache 必须分别正确生成、传输和确认完成</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="120" width="400" height="700" rx="22" fill="#ffffff"/>
+    <rect x="550" y="120" width="400" height="700" rx="22" fill="#ffffff"/>
+    <rect x="1030" y="120" width="400" height="700" rx="22" fill="#ffffff"/>
+  </g>
+  <rect x="70" y="120" width="400" height="62" rx="22" fill="#2563eb"/>
+  <rect x="550" y="120" width="400" height="62" rx="22" fill="#7c3aed"/>
+  <rect x="1030" y="120" width="400" height="62" rx="22" fill="#059669"/>
+  <text x="270" y="160" text-anchor="middle" class="lane-title">Decode 节点（D）</text>
+  <text x="750" y="160" text-anchor="middle" class="lane-title">Prefill 节点（P）</text>
+  <text x="1230" y="160" text-anchor="middle" class="lane-title">Blade-KVT</text>
+
+  <line x1="270" y1="195" x2="270" y2="790" class="dash"/>
+  <line x1="750" y1="195" x2="750" y2="790" class="dash"/>
+  <line x1="1230" y1="195" x2="1230" y2="790" class="dash"/>
+
+  <g>
+    <rect x="110" y="215" width="320" height="84" rx="14" fill="#dbeafe" stroke="#60a5fa"/>
+    <text x="130" y="244" class="step-title">1. 分配两类 cache blocks</text>
+    <text x="130" y="270" class="body">K3 target：KDA + MLA</text>
+    <text x="130" y="292" class="body">Drafter：FullAttention / SWA</text>
+  </g>
+
+  <path d="M430 312 C590 312, 590 312, 710 312" class="arrow"/>
+  <text x="570" y="300" text-anchor="middle" class="small">block ids + domain/layout metadata</text>
+
+  <g>
+    <rect x="590" y="330" width="320" height="100" rx="14" fill="#ede9fe" stroke="#a78bfa"/>
+    <text x="610" y="359" class="step-title">2. 远端 prefill</text>
+    <text x="610" y="385" class="body">计算前 n-(γ+1) 个 token</text>
+    <text x="610" y="409" class="small">γ = num_speculative_tokens</text>
+  </g>
+
+  <g>
+    <rect x="590" y="450" width="320" height="124" rx="14" fill="#f3e8ff" stroke="#c084fc"/>
+    <text x="610" y="480" class="step-title">3. 生成所有必需 cache</text>
+    <text x="610" y="506" class="body">K3 KDA recurrent state</text>
+    <text x="610" y="530" class="body">K3 MLA latent KV</text>
+    <text x="610" y="554" class="body">DFlash/DSpark context K/V</text>
+  </g>
+
+  <path d="M910 495 C1040 495, 1050 405, 1190 405" class="arrow"/>
+  <path d="M910 540 C1040 540, 1050 550, 1190 550" class="arrow"/>
+
+  <g>
+    <rect x="1070" y="350" width="320" height="110" rx="14" fill="#d1fae5" stroke="#34d399"/>
+    <text x="1090" y="380" class="step-title">4a. K3 专用解析</text>
+    <text x="1090" y="406" class="body">KDA TP shard remap</text>
+    <text x="1090" y="430" class="body">Replicated MLA prefix copy</text>
+  </g>
+  <g>
+    <rect x="1070" y="500" width="320" height="110" rx="14" fill="#dcfce7" stroke="#4ade80"/>
+    <text x="1090" y="530" class="step-title">4b. 普通 attention 解析</text>
+    <text x="1090" y="556" class="body">FlashAttention / FlashInfer</text>
+    <text x="1090" y="580" class="body">NHD / HND + TP remap</text>
+  </g>
+  <text x="1000" y="451" text-anchor="middle" class="small">target-k3</text>
+  <text x="1000" y="530" text-anchor="middle" class="small">drafter-attn</text>
+
+  <path d="M1190 630 C980 670, 620 670, 430 620" class="arrow"/>
+  <text x="820" y="655" text-anchor="middle" class="small">两个 domain 都完成后返回 load-complete</text>
+
+  <g>
+    <rect x="110" y="585" width="320" height="92" rx="14" fill="#dbeafe" stroke="#60a5fa"/>
+    <text x="130" y="615" class="step-title">5. 原子推进 loaded prefix</text>
+    <text x="130" y="642" class="body">只标记实际加载成功的 tokens</text>
+    <text x="130" y="664" class="body">排除同 step zeroing</text>
+  </g>
+
+  <g>
+    <rect x="110" y="700" width="320" height="84" rx="14" fill="#bfdbfe" stroke="#3b82f6"/>
+    <text x="130" y="730" class="step-title">6. 本地重算 γ+1</text>
+    <text x="130" y="756" class="body">进入 speculative draft + verify</text>
+  </g>
+  <path d="M270 677 L270 697" class="arrow"/>
+
+  <rect x="520" y="835" width="460" height="42" rx="21" fill="#fee2e2" stroke="#f87171"/>
+  <text x="750" y="862" text-anchor="middle" class="body" fill="#991b1b">任何一个 domain 缺失或失败，都不能把 prefix 标记为已计算</text>
+</svg>
