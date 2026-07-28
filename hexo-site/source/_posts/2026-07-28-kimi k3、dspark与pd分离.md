@@ -257,6 +257,82 @@ physical page 是四个不同层次。PD parser 必须通过显式的
 
 因此 DFlash 与 DSpark 的 cache layout 相同；差别主要在 query 数量和采样过程。
 
+#### 4.1.1 DSpark 的 KV cache 是否属于 GQA layout
+
+对本文审查的 Qwen3 DSpark 实现和公开的
+[`deepseek-ai/dspark_qwen3_4b_block7` 配置](https://huggingface.co/deepseek-ai/dspark_qwen3_4b_block7/blob/main/config.json)，
+可以回答：**是的，DSpark
+drafter 的 attention 采用 GQA，而且它保存的是普通的、显式分离的 K/V cache，
+不是 K3 target 前面那些 MLA 层的 latent cache。**
+
+该 checkpoint 的关键配置是：
+
+```text
+num_attention_heads = 32
+num_key_value_heads = 8
+head_dim = 128
+```
+
+因此：
+
+```text
+每组共享同一份 K/V 的 Query heads 数
+  = num_attention_heads / num_key_value_heads
+  = 32 / 8
+  = 4
+```
+
+也就是每 4 个 Query heads 共用 1 个 K head 和 1 个 V head。这正是 4:1 GQA。
+对一个 token，drafter 每层需要缓存：
+
+```text
+K: [8, 128]
+V: [8, 128]
+```
+
+而不是缓存 32 份 K 和 32 份 V。执行 attention 时，逻辑上可以理解成把每个 KV
+head 提供给对应的 4 个 Query heads：
+
+```text
+Q heads  0, 1, 2, 3  ──共享──> K/V head 0
+Q heads  4, 5, 6, 7  ──共享──> K/V head 1
+...
+Q heads 28,29,30,31  ──共享──> K/V head 7
+```
+
+这里必须区分两个容易混在一起的概念：
+
+| 概念 | 它回答的问题 | 当前 Qwen3 DSpark |
+| --- | --- | --- |
+| attention 语义 | Query heads 与 KV heads 如何对应 | 32 个 Q heads、8 个 KV heads，所以是 GQA |
+| cache 物理 layout | K/V、block、token、KV head、head dimension 在显存中按什么顺序排列 | 普通 paged K/V cache，可为 FlashAttention/FlashInfer 的 NHD 或 HND |
+
+普通 paged K/V layout 本身并不只属于 GQA。同样的五个逻辑维度也能表示：
+
+- MHA：`num_kv_heads == num_attention_heads`，每个 Query head 有自己的 K/V head；
+- MQA：`num_kv_heads == 1`，所有 Query heads 共用一份 K/V；
+- GQA：`1 < num_kv_heads < num_attention_heads`，若干 Query heads 共用一份 K/V。
+
+所以最准确的说法不是“看到 `[B, Hkv, D]` 就一定是 GQA”，而是：
+
+> DSpark 使用 MHA/MQA/GQA 这一族的普通显式 K/V paged-cache 格式；本文这个
+> Qwen3 DSpark checkpoint 的参数满足 GQA，而且是 4:1 GQA。
+
+它与 K3 target MLA cache 的根本区别如下：
+
+| DSpark drafter GQA cache | K3 target MLA cache |
+| --- | --- |
+| 每层分别保存 K 和 V | 每个 token 保存压缩 latent 与 RoPE 相关部分 |
+| 带有显式 `num_kv_heads` 和 `head_dim` 维度 | 形如 `[block, token, kv_lora_rank + qk_rope_head_dim]` |
+| 当前例子每 token、每层保存 `2 × 8 × 128` 个元素 | 当前 K3 例子每 token 保存 576 个有效元素 |
+| attention backend 按 NHD/HND 解释 K/V pages | K3 MLA kernel 按专用 latent 格式解释 |
+| 不能交给 K3 replicated MLA parser | 不能交给普通 GQA/MHA KV parser |
+
+还要注意，“K3 target 使用 MLA”并不意味着挂在它旁边的 drafter 也必须使用 MLA。
+DSpark 是一个独立的 draft model：它读取 target 提供的 hidden states，再用自己的
+K/V projection 生成自己的 GQA cache。target cache 与 drafter cache 同时存在，
+服务于不同的 attention 计算。
+
 ### 4.2 context KV 的产生
 
 DFlash/DSpark 不是直接复用 target 的 K/V。它们执行以下过程：

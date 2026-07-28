@@ -101,6 +101,89 @@ $BAREX_ROOT/src/barex/impl/rdma/xchannel_impl.cc:233-258
 
 PD 是访问隔离边界。MR 和 QP 必须属于兼容 PD；一个 QP 不能随意使用另一个 PD 的 lkey。
 
+### 4.0 先说清楚 PD 与 RNIC、应用的关系
+
+`ibv_context` 可以理解成“某个进程打开某个 verbs device 后获得的用户态设备句柄”，
+但不要把它理解成“这个进程独占了整张 RNIC”：
+
+```text
+                         同一块物理 RNIC
+                    ┌──────────┴──────────┐
+进程 A: ibv_context A                     进程 B: ibv_context B
+        ├─ PD A0                                  └─ PD B0
+        └─ PD A1
+```
+
+同一块 RNIC 可以被多个进程分别 `ibv_open_device()`；同一进程也可以打开设备并在
+context 下申请多个 PD。`ibv_alloc_pd(context)` 的意思是：
+
+> 请这个 RDMA device context 创建一个新的 protection domain，并返回它的
+> `ibv_pd*` 句柄。
+
+因此“PD 和 RNIC 类似硬件与 app 的关系”不够准确。更好的理解是：
+
+```text
+RNIC / device context：提供并执行 RDMA 能力
+应用：创建和管理 verbs 对象、提交 WR
+PD：应用在这个 RNIC context 内申请的访问控制 namespace / 门禁域
+```
+
+PD 不是应用本身，也不是一个发送线程：
+
+- 一个应用可以只有一个 PD，也可以为不同通信子系统创建多个 PD；
+- PD 不执行数据搬运，真正执行 WR 的是 QP 和 RNIC；
+- 应用不会调用 `post_send(pd, ...)`，而是调用 `ibv_post_send(qp, ...)`；
+- PD 的作用是在创建/注册阶段把 QP、MR 等对象关联起来，并让 provider/RNIC 在
+  fast path 校验它们是否属于同一保护域；
+- PD 通常也不是网络包中的字段，对端应用不需要知道本地 `ibv_pd*` 指针。
+
+可以把一块 RNIC 想成一栋有自动搬运机器人的仓库，把 PD 想成仓库内部相互隔离的
+门禁区。应用负责申请门禁区并登记货架；QP 是接收任务的机器人工作队列；MR 是已登记
+的货架。不是“PD 在操作 MR”，而是“机器人执行任务时，硬件检查它所在的门禁区是否
+允许访问这个货架”。
+
+### 4.0.1 “一个 PD 下的 MR 只能通过这个 PD 操作”该怎样准确表述
+
+这句话的方向是对的，但更严谨的版本是：
+
+> 一个 MR 产生的 `lkey/rkey` 只能用于与它 protection domain 兼容的 RNIC
+> 工作队列/QP；PD 本身不是拿来 post 操作的对象。
+
+例如：
+
+```text
+pd_A = ibv_alloc_pd(context)
+mr_A = ibv_reg_mr(pd_A, buffer, ...)
+qp_A = ibv_create_qp(pd_A, ...)
+
+pd_B = ibv_alloc_pd(context)
+qp_B = ibv_create_qp(pd_B, ...)
+
+QP-A 的 WQE 使用 mr_A->lkey  → PD 匹配，可以继续检查 range/access
+QP-B 的 WQE 使用 mr_A->lkey  → PD 不匹配，RNIC 拒绝
+```
+
+不过“只能操作”还需要分清三种视角：
+
+| 谁在访问这段内存 | 是否受 PD 匹配约束 |
+| --- | --- |
+| CPU 普通 load/store、程序 `memcpy` | 不通过 verbs QP，因此不是由 PD 决定；仍受进程虚拟内存权限约束 |
+| 本地 RNIC 从/向 MR 做 DMA | 发起 WR 的 QP 与 MR 必须处于兼容 PD，且 lkey、地址范围、access 都要合法 |
+| 远端发起 RDMA Read/Write | 远端只携带本端公布的 `raddr+rkey`；请求到达本端 QP 后，由本端 RNIC 按本端 PD/MR 权限检查 |
+
+所以把同一个 `buffer` 注册到 PD A，并不会让 CPU 失去对它的访问权；它只是给
+RNIC 增加了一条“PD A 中哪些 QP 可以用哪组 key 对这段内存 DMA”的授权记录。
+
+如果 QP-B 也必须访问相同的虚拟地址范围，常见做法是在 PD B 再注册一次：
+
+```text
+mr_A = ibv_reg_mr(pd_A, buffer, ...) → lkey_A / rkey_A
+mr_B = ibv_reg_mr(pd_B, buffer, ...) → lkey_B / rkey_B
+```
+
+两次注册指向相同的应用 buffer，但它们是两个 verbs MR 对象和两组 key。提交给
+QP-A 时必须使用 `mr_A->lkey`，提交给 QP-B 时必须使用 `mr_B->lkey`。
+
 直觉：
 
 ```text
