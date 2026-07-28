@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1560" height="940" viewBox="0 0 1560 940" role="img" aria-labelledby="title desc">
+  <title id="title">Kimi K3 与 DFlash/DSpark PD 当前冲突及目标架构</title>
+  <desc id="desc">左侧展示把所有 cache group 送入 K3 parser 时的冲突，右侧展示拆分 target-k3 与 drafter-attn transfer domain 的建议架构。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff7ed"/>
+      <stop offset="0.5" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#ecfdf5"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#334155" flood-opacity="0.18"/>
+    </filter>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto">
+      <path d="M0,0 L11,5.5 L0,11 Z" fill="#475569"/>
+    </marker>
+    <style>
+      .title { font:700 34px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .panel-title { font:700 25px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; }
+      .label { font:700 18px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .body { font:400 16px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .mono { font:500 14px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#334155; }
+      .arrow { stroke:#475569; stroke-width:3; fill:none; marker-end:url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1560" height="940" fill="url(#bg)"/>
+  <text x="780" y="54" text-anchor="middle" class="title">当前冲突与建议的多 cache-domain 架构</text>
+
+  <g filter="url(#shadow)">
+    <rect x="55" y="95" width="700" height="785" rx="22" fill="#ffffff"/>
+    <rect x="805" y="95" width="700" height="785" rx="22" fill="#ffffff"/>
+  </g>
+
+  <rect x="55" y="95" width="700" height="62" rx="22" fill="#dc2626"/>
+  <text x="405" y="136" text-anchor="middle" class="panel-title" fill="white">当前：所有 groups 强行进入 cache_shape=8</text>
+
+  <text x="100" y="205" class="label">Scheduler groups</text>
+  <g>
+    <rect x="100" y="230" width="185" height="55" rx="8" fill="#99f6e4" stroke="#14b8a6"/>
+    <text x="192" y="264" text-anchor="middle" class="body">KDA groups</text>
+    <rect x="300" y="230" width="175" height="55" rx="8" fill="#a7f3d0" stroke="#10b981"/>
+    <text x="387" y="264" text-anchor="middle" class="body">K3 MLA</text>
+    <rect x="490" y="230" width="220" height="55" rx="8" fill="#ddd6fe" stroke="#8b5cf6"/>
+    <text x="600" y="254" text-anchor="middle" class="body">DFlash/DSpark</text>
+    <text x="600" y="275" text-anchor="middle" class="mono">draft KV groups</text>
+  </g>
+  <path d="M405 300 L405 365" class="arrow"/>
+
+  <rect x="145" y="380" width="520" height="120" rx="14" fill="#fee2e2" stroke="#f87171"/>
+  <text x="405" y="415" text-anchor="middle" class="label">vLLM K3 `_build_kvt_args()`</text>
+  <text x="405" y="447" text-anchor="middle" class="mono">attn_pack_size == 1</text>
+  <text x="405" y="475" text-anchor="middle" class="mono">1 non-indexer attention / shared_by</text>
+  <path d="M405 500 L405 565" class="arrow"/>
+
+  <rect x="145" y="580" width="520" height="125" rx="14" fill="#fecaca" stroke="#ef4444"/>
+  <text x="405" y="616" text-anchor="middle" class="label">Blade-KVT K3 parser</text>
+  <text x="405" y="649" text-anchor="middle" class="mono">groups == num_gdn_layers + 1</text>
+  <text x="405" y="680" text-anchor="middle" class="body">额外 draft groups 无法被表示</text>
+
+  <rect x="145" y="745" width="520" height="85" rx="14" fill="#fff1f2" stroke="#fb7185"/>
+  <text x="405" y="780" text-anchor="middle" class="label" fill="#9f1239">结果：启动断言或错误 cache 解析</text>
+  <text x="405" y="808" text-anchor="middle" class="body">即使绕过断言，也会错误处理 TP/layout</text>
+
+  <rect x="805" y="95" width="700" height="62" rx="22" fill="#059669"/>
+  <text x="1155" y="136" text-anchor="middle" class="panel-title" fill="white">建议：按语义拆成两个 transfer domains</text>
+
+  <rect x="850" y="205" width="610" height="250" rx="16" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="880" y="240" class="label">Domain A：target-k3</text>
+  <rect x="885" y="270" width="240" height="60" rx="8" fill="#99f6e4" stroke="#14b8a6"/>
+  <text x="1005" y="307" text-anchor="middle" class="body">KDA groups</text>
+  <rect x="1180" y="270" width="240" height="60" rx="8" fill="#a7f3d0" stroke="#10b981"/>
+  <text x="1300" y="307" text-anchor="middle" class="body">one replicated MLA</text>
+  <text x="880" y="370" class="mono">parser = KIMI_K3_MLA_CACHE_SHAPE</text>
+  <text x="880" y="400" class="body">保留现有 KDA shard remap 和 MLA prefix copy</text>
+  <text x="880" y="428" class="body">parser 只看该 domain 的局部 block groups</text>
+
+  <rect x="850" y="490" width="610" height="220" rx="16" fill="#f5f3ff" stroke="#a78bfa"/>
+  <text x="880" y="525" class="label">Domain B：drafter-attn</text>
+  <rect x="885" y="552" width="535" height="62" rx="8" fill="#ddd6fe" stroke="#8b5cf6"/>
+  <text x="1152" y="578" text-anchor="middle" class="body">DFlash/DSpark FullAttention / SWA groups</text>
+  <text x="1152" y="600" text-anchor="middle" class="mono">own block tables + own layout descriptor</text>
+  <text x="880" y="650" class="mono">parser = FlashAttention or FlashInfer</text>
+  <text x="880" y="680" class="body">按 NHD/HND、Hkv、head_dim 和 P/D TP 独立处理</text>
+
+  <path d="M1000 455 C1000 735, 1050 735, 1080 760" class="arrow"/>
+  <path d="M1300 710 C1300 735, 1240 735, 1210 760" class="arrow"/>
+  <rect x="940" y="760" width="430" height="76" rx="14" fill="#d1fae5" stroke="#10b981"/>
+  <text x="1155" y="790" text-anchor="middle" class="label">Atomic request completion</text>
+  <text x="1155" y="817" text-anchor="middle" class="mono">A complete AND B complete</text>
+  <text x="1155" y="860" text-anchor="middle" class="body">任一 domain 失败 → 不推进 computed tokens，释放或回退</text>
+</svg>

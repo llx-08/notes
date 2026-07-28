@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>Kimi K3、DSpark 与 PD 分离 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="Kimi K3、DSpark 与 PD 分离 状态：设计分析与修改计划 日期：2026-07-28 结论适用范围：本文所列代码版本，不代表后续分支已经自动具备相同能力。 1. 结论摘要 基于以下代码版本的静态审查： vLLM origin&amp;#x2F;hmz&amp;#x2F;dspark_v3 ： 3883053c0ff59fba6b0ad0c0f31ec48cbc834e5b vLLM alex&amp;#x2F;kimi-k3-mla-z"><meta property="og:type" content="blog"><meta property="og:title" content="Kimi K3、DSpark 与 PD 分离"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/28/2026-07-28-kimi%20k3%E3%80%81dspark%E4%B8%8Epd%E5%88%86%E7%A6%BB/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="Kimi K3、DSpark 与 PD 分离 状态：设计分析与修改计划 日期：2026-07-28 结论适用范围：本文所列代码版本，不代表后续分支已经自动具备相同能力。 1. 结论摘要 基于以下代码版本的静态审查： vLLM origin&amp;#x2F;hmz&amp;#x2F;dspark_v3 ： 3883053c0ff59fba6b0ad0c0f31ec48cbc834e5b vLLM alex&amp;#x2F;kimi-k3-mla-z"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/kimi-k3-dspark-pd-flow.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/kimi-k3-cache-layout.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/kimi-k3-pd-target-architecture.svg"><meta property="article:published_time" content="2026-07-28T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-28T05:16:28.654Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/kimi-k3-dspark-pd-flow.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/28/2026-07-28-kimi%20k3%E3%80%81dspark%E4%B8%8Epd%E5%88%86%E7%A6%BB/"},"headline":"Kimi K3、DSpark 与 PD 分离","image":[],"datePublished":"2026-07-28T00:00:00.000Z","dateModified":"2026-07-28T05:16:28.654Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"Kimi K3、DSpark 与 PD 分离 状态：设计分析与修改计划 日期：2026-07-28 结论适用范围：本文所列代码版本，不代表后续分支已经自动具备相同能力。 1. 结论摘要 基于以下代码版本的静态审查： vLLM origin&#x2F;hmz&#x2F;dspark_v3 ： 3883053c0ff59fba6b0ad0c0f31ec48cbc834e5b vLLM alex&#x2F;kimi-k3-mla-z"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/28/2026-07-28-kimi%20k3%E3%80%81dspark%E4%B8%8Epd%E5%88%86%E7%A6%BB/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-28T00:00:00.000Z" title="7/28/2026, 12:00:00 AM">2026-07-28</time>发表</span><span class="level-item"><time dateTime="2026-07-28T05:16:28.654Z" title="7/28/2026, 5:16:28 AM">2026-07-28</time>更新</span><span class="level-item">37 分钟读完 (大约5524个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">Kimi K3、DSpark 与 PD 分离</h1><div class="content"><h1 id="Kimi-K3、DSpark-与-PD-分离"><a href="#Kimi-K3、DSpark-与-PD-分离" class="headerlink" title="Kimi K3、DSpark 与 PD 分离"></a>Kimi K3、DSpark 与 PD 分离</h1><blockquote>
+<p>状态：设计分析与修改计划<br>日期：2026-07-28<br>结论适用范围：本文所列代码版本，不代表后续分支已经自动具备相同能力。</p>
+</blockquote>
+<h2 id="1-结论摘要"><a href="#1-结论摘要" class="headerlink" title="1. 结论摘要"></a>1. 结论摘要</h2><p>基于以下代码版本的静态审查：</p>
+<ul>
+<li>vLLM <code>origin/hmz/dspark_v3</code>：<code>3883053c0ff59fba6b0ad0c0f31ec48cbc834e5b</code></li>
+<li>vLLM <code>alex/kimi-k3-mla-zeroing-20260722</code>：<code>d28bf21877006ed90cbd0adb528d25b15ac01ea7</code></li>
+<li>blade-kvt <code>main</code>：<code>752697132e8b0409ad134724fec2882c9ca57380</code></li>
+</ul>
+<p>当前能力可以概括为：</p>
+<table>
+<thead>
+<tr>
+<th>组合</th>
+<th>当前状态</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Kimi K3 + 本地推理</td>
+<td>支持</td>
+<td>KDA + MLA hybrid cache 已接入 vLLM</td>
+</tr>
+<tr>
+<td>Kimi K3 + PD 分离</td>
+<td>支持基础链路</td>
+<td>K3 分支和 blade-kvt main 已实现专用 <code>cache_shape=8</code></td>
+</tr>
+<tr>
+<td>DFlash/DSpark + 普通 target + PD</td>
+<td><code>hmz/dspark_v3</code> 已有适配</td>
+<td>P 节点 prefill 时会保留 drafter context KV</td>
+</tr>
+<tr>
+<td>Kimi K3 + DFlash/DSpark</td>
+<td>需要兼容的 drafter checkpoint 和集成验证</td>
+<td>当前 DSpark port 只正式识别 Qwen3 DSpark checkpoint 架构</td>
+</tr>
+<tr>
+<td>Kimi K3 + DFlash/DSpark + PD</td>
+<td><strong>当前不支持开箱即用</strong></td>
+<td>分支未集成，且 K3 KVT block-group/layout contract 无法表示额外 drafter KV groups</td>
+</tr>
+</tbody></table>
+<p>这里的“不支持”不是单纯缺少测试，而是存在确定的代码契约冲突：</p>
+<ol>
+<li>K3 分支在 <code>skip_decode_drafting</code> 时过早返回，P 节点没有写入 DFlash/DSpark context KV。</li>
+<li>K3 的 Blade-KVT <code>cache_shape=8</code> 只接受“若干 KDA groups + 一个 replicated MLA group”。</li>
+<li>DFlash/DSpark 会增加自己的 FullAttention/SlidingWindow KV groups。</li>
+<li>vLLM K3 KVT 注册逻辑和 Blade-KVT K3 parser 都对 attention group 数量作了严格断言。</li>
+</ol>
+<p><img src="/notes/imgs/kimi-k3-dspark-pd-flow.svg" alt="K3、DFlash/DSpark 与 PD 的数据流"></p>
+<h2 id="2-术语和边界"><a href="#2-术语和边界" class="headerlink" title="2. 术语和边界"></a>2. 术语和边界</h2><h3 id="2-1-P、D-与-PD-分离"><a href="#2-1-P、D-与-PD-分离" class="headerlink" title="2.1 P、D 与 PD 分离"></a>2.1 P、D 与 PD 分离</h3><ul>
+<li><strong>P 节点（Prefill producer）</strong>：执行 prompt 的主要 prefill，产生可复用 cache。</li>
+<li><strong>D 节点（Decode consumer）</strong>：接收 cache，完成少量本地重算后进入 decode。</li>
+<li><strong>KVT</strong>：本文特指 vLLM <code>HybridConnector</code> 中的 Blade-KVT backend。</li>
+<li><strong>target cache</strong>：Kimi K3 主模型的 KDA recurrent state 和 MLA latent KV。</li>
+<li><strong>drafter cache</strong>：DFlash/DSpark draft model 自己的 attention K/V。</li>
+</ul>
+<p>target cache 与 drafter cache 服务于不同模型计算，不能因为它们都由同一个 scheduler 管理，就把它们视为相同 layout。</p>
+<h3 id="2-2-gamma"><a href="#2-2-gamma" class="headerlink" title="2.2 gamma"></a>2.2 <code>gamma</code></h3><p>本文使用：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">gamma = num_speculative_tokens</span><br></pre></td></tr></table></figure>
+
+<p>对于开启 speculative decoding 的 hybrid target，现有 PD 逻辑让 P 节点只计算：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">remote_prefill_tokens = prompt_len - (gamma + 1)</span><br></pre></td></tr></table></figure>
+
+<p>D 节点加载远端 cache 后，再本地重算最后 <code>gamma + 1</code> 个 token。这样做的目的包括：</p>
+<ul>
+<li>恢复 hybrid recurrent state 到 D 节点将要使用的位置；</li>
+<li>为 speculative verification 准备连续的 lookahead 空间；</li>
+<li>避免直接传输仍会被本地重算覆盖的尾部状态；</li>
+<li>保持 scheduler、block table 和实际 cache 内容的 token 计数一致。</li>
+</ul>
+<h3 id="2-3-logical-block-group、physical-tensor-与-physical-page"><a href="#2-3-logical-block-group、physical-tensor-与-physical-page" class="headerlink" title="2.3 logical block group、physical tensor 与 physical page"></a>2.3 logical block group、physical tensor 与 physical page</h3><p>这三个概念必须分开：</p>
+<ul>
+<li><strong>logical block group</strong>：scheduler 为一种 cache spec 维护的 block table。</li>
+<li><strong>physical tensor</strong>：worker 实际注册给 attention backend/KVT 的 GPU storage。</li>
+<li><strong>physical page</strong>：一个 block id 在 storage 中对应的定长字节跨度。</li>
+</ul>
+<p>vLLM 可以让多个 layer view 共享同一块 physical tensor，但它们仍可能属于不同 logical block group，并持有不同 block table。Blade-KVT 的 parser 接收的是各 logical group 的 block-id 列表，然后把它们映射到已注册 storage 的物理偏移。</p>
+<h2 id="3-Kimi-K3-的-target-cache"><a href="#3-Kimi-K3-的-target-cache" class="headerlink" title="3. Kimi K3 的 target cache"></a>3. Kimi K3 的 target cache</h2><p>Kimi K3 是 KDA + MLA hybrid 模型。两类 cache 的语义完全不同。</p>
+<h3 id="3-1-KDA-cache"><a href="#3-1-KDA-cache" class="headerlink" title="3.1 KDA cache"></a>3.1 KDA cache</h3><p>每个 KDA layer 的 runtime cache 是两个 tensor：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">conv_state:</span><br><span class="line">  [num_blocks, state_len, 3 * local_heads * head_dim]</span><br><span class="line"></span><br><span class="line">recurrent_state:</span><br><span class="line">  [num_blocks, local_heads, head_dim, head_dim]</span><br></pre></td></tr></table></figure>
+
+<p>其中：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">state_len = short_conv_kernel_size - 1 + gamma</span><br><span class="line">local_heads = num_heads / tensor_parallel_size</span><br></pre></td></tr></table></figure>
+
+<p>当前 PAI-vLLM 的 KDA conv state 使用 SD layout：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[state_len, Q/K/V channels]</span><br></pre></td></tr></table></figure>
+
+<p>而不是 DS layout：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[Q/K/V channels, state_len]</span><br></pre></td></tr></table></figure>
+
+<p>Blade-KVT 通过 <code>kda_conv_dim_first=false</code> 区分这一点。</p>
+<p>一个 KDA physical page 的有效字节可表示为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[conv state][recurrent state][padding]</span><br></pre></td></tr></table></figure>
+
+<p>padding 的存在是为了让不同 cache spec 使用统一 page stride。KVT 通过 <code>kda_page_stride</code> 获取 block 之间真正的物理间隔，不能简单用有效 state 大小推导下一个 block 地址。</p>
+<h4 id="TP-remap"><a href="#TP-remap" class="headerlink" title="TP remap"></a>TP remap</h4><p>当 P/D tensor parallel size 不同时：</p>
+<ul>
+<li><code>P TP &gt; D TP</code>：多个 P rank 的 Q/K/V channel shard 和 recurrent head shard合并到一个 D rank。</li>
+<li><code>P TP &lt; D TP</code>：一个 P rank 的 channel/head shard拆分到多个 D rank。</li>
+<li><code>P TP == D TP</code>：同 rank 的整页一对一复制。</li>
+</ul>
+<p>KDA state 代表 prefix 末端的递归状态，不是普通的逐 token KV。因此当前 Blade-KVT 在 <code>reach_last_token</code> 后发送 KDA page，而不是把它当成 MLA 一样按 token block 连续流式发送。</p>
+<h3 id="3-2-MLA-cache"><a href="#3-2-MLA-cache" class="headerlink" title="3.2 MLA cache"></a>3.2 MLA cache</h3><p>K3 fused MLA 的逻辑 tensor shape 是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[num_blocks, block_size, kv_lora_rank + qk_rope_head_dim]</span><br></pre></td></tr></table></figure>
+
+<p>当前 K3 kernel 固定：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">kv_lora_rank = 512</span><br><span class="line">qk_rope_head_dim = 64</span><br><span class="line">latent head_size = 576</span><br></pre></td></tr></table></figure>
+
+<p>KVT 使用：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">hybrid_attn_token_size = 576 * element_size</span><br></pre></td></tr></table></figure>
+
+<p>确定每个 token 需要复制的真实 MLA payload。</p>
+<p>K3 MLA 是 rank-replicated cache。TP remap 时，Blade-KVT 不应像普通 MHA 那样拼接 KV heads：</p>
+<ul>
+<li>P/D 等 TP：rank 一对一发送。</li>
+<li>P TP 大于 D TP：每个 D rank 只需要一个代表性 P rank 的 MLA 副本。</li>
+<li>P TP 小于 D TP：P 侧 MLA 副本 fan-out 到相应 D ranks。</li>
+</ul>
+<p>MLA view 使用 KDA-sized physical page 时，只有页首的真实 MLA prefix 有效：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[token 0 latent][token 1 latent]...[token B-1 latent][padding]</span><br></pre></td></tr></table></figure>
+
+<p>Blade-KVT 不复制尾部 padding。</p>
+<h3 id="3-3-K3-的-KVT-cache-shape-8"><a href="#3-3-K3-的-KVT-cache-shape-8" class="headerlink" title="3.3 K3 的 KVT cache_shape=8"></a>3.3 K3 的 KVT <code>cache_shape=8</code></h3><p>K3 分支强制：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">BLLM_KVTRANS_CACHE_SHAPE=8</span><br><span class="line">attn_pack_size=1</span><br></pre></td></tr></table></figure>
+
+<p>Blade-KVT 将其解释成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">task block groups:</span><br><span class="line">  0 .. num_gdn_layers-1 : KDA groups</span><br><span class="line">  num_gdn_layers        : exactly one replicated MLA group</span><br></pre></td></tr></table></figure>
+
+<p><code>parse_block_kimi_k3.cpp</code> 当前有如下契约：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">group_idx = num_gdn_layers;</span><br><span class="line">src_groups.<span class="built_in">size</span>() == group_idx + <span class="number">1</span>;</span><br><span class="line">dst_groups.<span class="built_in">size</span>() == group_idx + <span class="number">1</span>;</span><br><span class="line">src.attn_pack_size == <span class="number">1</span>;</span><br><span class="line">dst.attn_pack_size == <span class="number">1</span>;</span><br></pre></td></tr></table></figure>
+
+<p>因此 <code>cache_shape=8</code> 不是任意 hybrid cache 的通用编码，而是 K3 target cache 的专用协议。</p>
+<p><img src="/notes/imgs/kimi-k3-cache-layout.svg" alt="K3 target 与 drafter KV cache layout"></p>
+<h2 id="4-DFlash-与-DSpark-的-drafter-cache"><a href="#4-DFlash-与-DSpark-的-drafter-cache" class="headerlink" title="4. DFlash 与 DSpark 的 drafter cache"></a>4. DFlash 与 DSpark 的 drafter cache</h2><h3 id="4-1-共同-backbone"><a href="#4-1-共同-backbone" class="headerlink" title="4.1 共同 backbone"></a>4.1 共同 backbone</h3><p>当前 Qwen3 DSpark 实现复用 DFlash backbone：</p>
+<ul>
+<li><code>DSparkProposer</code> 继承 <code>DFlashProposer</code>。</li>
+<li><code>Qwen3DSparkModel</code> 继承 <code>DFlashQwen3Model</code>。</li>
+<li>两者使用相同的 draft attention layers 和相同的 paged KV cache。</li>
+</ul>
+<p>因此 DFlash 与 DSpark 的 cache layout 相同；差别主要在 query 数量和采样过程。</p>
+<h3 id="4-2-context-KV-的产生"><a href="#4-2-context-KV-的产生" class="headerlink" title="4.2 context KV 的产生"></a>4.2 context KV 的产生</h3><p>DFlash/DSpark 不是直接复用 target 的 K/V。它们执行以下过程：</p>
+<ol>
+<li>target model forward 产出指定层的 hidden states；</li>
+<li>drafter 对这些 hidden states 做每层 K/V projection；</li>
+<li>对 K 做 RMSNorm 和 RoPE；</li>
+<li>按 drafter 自己的 block table/slot mapping 写入 draft KV cache；</li>
+<li>draft query pass 读取 context KV，并把 query token 的 K/V 写入同一套 paged cache。</li>
+</ol>
+<p>因此 PD 场景必须满足下面二选一：</p>
+<ul>
+<li>P 节点产生并传输 drafter context KV；</li>
+<li>D 节点对完整 prefix 重新计算 drafter context KV。</li>
+</ul>
+<p>当前设计显然选择第一种，否则 D 节点仍需对整个 prompt 做 drafter prefill，会削弱 PD 分离收益。</p>
+<h3 id="4-3-DFlash-与-DSpark-的-query-差异"><a href="#4-3-DFlash-与-DSpark-的-query-差异" class="headerlink" title="4.3 DFlash 与 DSpark 的 query 差异"></a>4.3 DFlash 与 DSpark 的 query 差异</h3><p>设 <code>gamma = num_speculative_tokens</code>：</p>
+<ul>
+<li>DFlash：每个请求运行 <code>gamma + 1</code> 个 drafter query。</li>
+<li>DSpark：每个请求运行 <code>gamma</code> 个 query，再使用 Markov head 按顺序采样。</li>
+</ul>
+<p>这不会改变每层 KV 的基本物理 shape，但会影响：</p>
+<ul>
+<li>lookahead slot 数量；</li>
+<li>当前 step 写入的 slot mapping；</li>
+<li>CUDA graph capture token 数；</li>
+<li>KDA <code>state_len</code> 中为 speculative token 预留的空间；</li>
+<li>P/D 尾部重算长度。</li>
+</ul>
+<h3 id="4-4-attention-backend-对物理-layout-的影响"><a href="#4-4-attention-backend-对物理-layout-的影响" class="headerlink" title="4.4 attention backend 对物理 layout 的影响"></a>4.4 attention backend 对物理 layout 的影响</h3><p>DFlash/DSpark draft layer 使用普通 FullAttention 或 SlidingWindowAttention cache spec。</p>
+<p>FlashAttention 暴露的 tensor view：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[2, num_blocks, block_size, num_kv_heads, head_dim]</span><br></pre></td></tr></table></figure>
+
+<p>其中维度 0 为 K/V。底层 storage 可根据 <code>VLLM_KV_CACHE_LAYOUT</code> 使用 NHD 或 HND stride。</p>
+<p>FlashInfer NHD view：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[num_blocks, 2, block_size, num_kv_heads, head_dim]</span><br></pre></td></tr></table></figure>
+
+<p>FlashInfer HND 的物理顺序：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[num_blocks, 2, num_kv_heads, block_size, head_dim]</span><br></pre></td></tr></table></figure>
+
+<p>所以“传输 drafter KV”不能只知道它是 DFlash/DSpark，还必须知道：</p>
+<ul>
+<li>attention backend；</li>
+<li>NHD/HND；</li>
+<li>block size；</li>
+<li>local KV heads；</li>
+<li>head dim；</li>
+<li>dtype；</li>
+<li>P/D TP 映射；</li>
+<li>FullAttention 与 SlidingWindow 的 logical group 边界。</li>
+</ul>
+<h2 id="5-当前-PD-数据流"><a href="#5-当前-PD-数据流" class="headerlink" title="5. 当前 PD 数据流"></a>5. 当前 PD 数据流</h2><p>目标数据流应是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">1. D scheduler 为 target cache 和 drafter cache 分配 blocks</span><br><span class="line">2. D 将目标 block ids 和 worker/layout 信息发送给 P</span><br><span class="line">3. P 只计算 prompt 前 n-(gamma+1) 个 token</span><br><span class="line">4. P 生成 K3 KDA/MLA cache</span><br><span class="line">5. P 从 target hidden states 生成 DFlash/DSpark context KV</span><br><span class="line">6. KVT 将 target cache 与 drafter cache 传到 D</span><br><span class="line">7. D 等待所有必需 cache domains 完成</span><br><span class="line">8. D 将成功加载的 token 标记为 computed</span><br><span class="line">9. D 本地重算最后 gamma+1 个 token</span><br><span class="line">10. D 进入 speculative decode/verify</span><br></pre></td></tr></table></figure>
+
+<p>P 节点在 prompt batch 上不需要生成 draft token，但必须执行步骤 5。</p>
+<p><code>hmz/dspark_v3</code> 中的提交：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">9cc80052c6 Preserve DFlash context KV when skipping drafting</span><br></pre></td></tr></table></figure>
+
+<p>已经把 <code>skip_decode_drafting</code> 的返回点移动到：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="variable language_">self</span>.model.precompute_and_store_context_kv(...)</span><br></pre></td></tr></table></figure>
+
+<p>之后。这是 DFlash/DSpark 与 PD 组合的必要条件。</p>
+<p>K3 分支中，<code>skip_decode_drafting</code> 仍在 context KV precompute 之前返回，因此尚未满足该条件。</p>
+<h2 id="6-为什么-K3-DFlash-DSpark-PD-当前冲突"><a href="#6-为什么-K3-DFlash-DSpark-PD-当前冲突" class="headerlink" title="6. 为什么 K3 + DFlash/DSpark + PD 当前冲突"></a>6. 为什么 K3 + DFlash/DSpark + PD 当前冲突</h2><h3 id="6-1-分支能力没有合并"><a href="#6-1-分支能力没有合并" class="headerlink" title="6.1 分支能力没有合并"></a>6.1 分支能力没有合并</h3><p><code>hmz/dspark_v3</code> 不包含 K3 model/K3 KVT 提交；K3 分支不包含 <code>dspark_v3</code> 最近的 context-KV、dummy run、async rejection 和长度处理修复。</p>
+<p>直接选择任一分支都得不到完整能力。</p>
+<h3 id="6-2-K3-parser-不接受额外-drafter-groups"><a href="#6-2-K3-parser-不接受额外-drafter-groups" class="headerlink" title="6.2 K3 parser 不接受额外 drafter groups"></a>6.2 K3 parser 不接受额外 drafter groups</h3><p>加入 drafter 后，scheduler 看到的 cache groups 类似：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">[KDA group 0]</span><br><span class="line">[KDA group 1]</span><br><span class="line">...</span><br><span class="line">[K3 MLA group]</span><br><span class="line">[draft FullAttention group 0]</span><br><span class="line">[draft FullAttention/SWA group 1]</span><br><span class="line">...</span><br></pre></td></tr></table></figure>
+
+<p>而 Blade-KVT K3 parser 只接受：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[KDA groups...][one K3 MLA group]</span><br></pre></td></tr></table></figure>
+
+<p>额外 group 会触发 <code>src_groups.size() == num_gdn_layers + 1</code> 断言。</p>
+<h3 id="6-3-vLLM-注册阶段也可能先失败"><a href="#6-3-vLLM-注册阶段也可能先失败" class="headerlink" title="6.3 vLLM 注册阶段也可能先失败"></a>6.3 vLLM 注册阶段也可能先失败</h3><p>K3 <code>_build_kvt_args()</code> 强制 <code>attn_pack_size == 1</code>，并要求每个 <code>KVCacheTensor.shared_by</code> 中只有一个 non-indexer attention entry。</p>
+<p>vLLM 统一 page size 并构造 shared physical tensor 时，K3 MLA layer 和少量 drafter attention layers 可能被放进同一个 <code>shared_by</code>。这会使 non-indexer attention 数量大于 1，在进入 Blade-KVT 之前就失败。</p>
+<p>即使 cache grouping 恰好把它们分开，Blade-KVT 的 block-group 数量断言仍会失败。</p>
+<h3 id="6-4-drafter-context-KV-缺失"><a href="#6-4-drafter-context-KV-缺失" class="headerlink" title="6.4 drafter context KV 缺失"></a>6.4 drafter context KV 缺失</h3><p>K3 分支当前逻辑：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">skip_decode_drafting</span><br><span class="line">  -&gt; return</span><br><span class="line">  -&gt; 没有 precompute_and_store_context_kv</span><br></pre></td></tr></table></figure>
+
+<p>结果是 P 节点没有可供传输的 drafter prefix cache。D 节点若把对应 token 标记为已计算，将读取未初始化、旧数据或刚被 zero kernel 清空的 KV。</p>
+<h3 id="6-5-load-与-zeroing-必须覆盖新增-group"><a href="#6-5-load-与-zeroing-必须覆盖新增-group" class="headerlink" title="6.5 load 与 zeroing 必须覆盖新增 group"></a>6.5 load 与 zeroing 必须覆盖新增 group</h3><p>D 节点为远端 cache 分配的新 blocks 可能同时进入：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">SchedulerOutput.new_block_ids_to_zero</span><br></pre></td></tr></table></figure>
+
+<p>外部 load 和 zero kernel 如果作用于同一 block，会存在覆盖竞态。组合实现必须保证：</p>
+<ul>
+<li>所有计划从 KVT 加载的 target 和 drafter blocks，都从同一个 scheduler output 的 zero list 中排除；</li>
+<li>只排除 load target blocks，不排除 store blocks；</li>
+<li>block id 如果是 per-group namespace，过滤必须携带 group/domain 信息；</li>
+<li>load 失败时不能把未成功加载的 tokens 标记为 computed。</li>
+</ul>
+<h3 id="6-6-缺少组合测试"><a href="#6-6-缺少组合测试" class="headerlink" title="6.6 缺少组合测试"></a>6.6 缺少组合测试</h3><p>在两个 vLLM 分支和 blade-kvt main 中均未找到 Kimi K3 与 DFlash/DSpark 组合 PD 的测试或显式支持声明。</p>
+<p><img src="/notes/imgs/kimi-k3-pd-target-architecture.svg" alt="当前冲突与建议目标架构"></p>
+<h2 id="7-修改计划"><a href="#7-修改计划" class="headerlink" title="7. 修改计划"></a>7. 修改计划</h2><h3 id="7-1-总体原则"><a href="#7-1-总体原则" class="headerlink" title="7.1 总体原则"></a>7.1 总体原则</h3><p>建议把传输拆成两个逻辑 cache domain：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">target-k3 domain:</span><br><span class="line">  KDA groups + one replicated MLA group</span><br><span class="line">  parser = KIMI_K3_MLA_CACHE_SHAPE</span><br><span class="line"></span><br><span class="line">drafter-attn domain:</span><br><span class="line">  DFlash/DSpark FullAttention/SWA groups</span><br><span class="line">  parser = standard FlashAttention/FlashInfer parser</span><br></pre></td></tr></table></figure>
+
+<p>两个 domain 可以：</p>
+<ol>
+<li>复用同一条底层 transport/session，但具有独立 layout descriptor 和完成信号；或</li>
+<li>使用两个 KVT client/server 实例，并在 vLLM connector 层聚合完成状态。</li>
+</ol>
+<p>不建议简单取消 <code>num_gdn_layers + 1</code> 断言后，把 drafter groups 当成 K3 MLA 继续解析。K3 MLA 是 replicated latent cache，而 drafter cache 是普通 K/V cache，TP remap、token size 和布局都不同。</p>
+<h3 id="7-2-Phase-0：建立可合并基线"><a href="#7-2-Phase-0：建立可合并基线" class="headerlink" title="7.2 Phase 0：建立可合并基线"></a>7.2 Phase 0：建立可合并基线</h3><p>目标：在一个集成分支中同时获得 K3 与最新 DSpark/DFlash 能力。</p>
+<p>工作项：</p>
+<ol>
+<li>以 K3 分支为基线，合入 <code>hmz/dspark_v3</code> 的 DFlash/DSpark commits。</li>
+<li>至少包含：<ul>
+<li>P 节点跳过 drafting 时仍写 context KV；</li>
+<li>dummy/profile path 对 <code>skip_decode_drafting</code> 的处理；</li>
+<li>rejection count 的 GPU-side 处理；</li>
+<li>DFlash max length、DP dummy sequence length 和 CUDA graph 修复。</li>
+</ul>
+</li>
+<li>处理 <code>gpu_model_runner.py</code>、<code>speculative.py</code> 和 <code>dflash.py</code> 的冲突。</li>
+<li>保留 K3 KDA/MLA、multimodal boundary 和 KVT zeroing 相关修改。</li>
+<li>明确支持的 drafter checkpoint：<ul>
+<li>DFlash checkpoint architecture；</li>
+<li>DSpark 当前 <code>Qwen3DSparkModel</code> 限制是否继续保留；</li>
+<li>checkpoint hidden size、vocab、embedding/lm_head 是否能与 K3 target 对齐。</li>
+</ul>
+</li>
+</ol>
+<p>交付条件：</p>
+<ul>
+<li>K3 不开 PD 时能分别启动 DFlash 和 DSpark。</li>
+<li>普通 target 的既有 DFlash/DSpark + PD 测试不回退。</li>
+<li>K3 不开 speculative decoding 时既有 PD 行为不回退。</li>
+</ul>
+<h3 id="7-3-Phase-1：引入-cache-domain-描述"><a href="#7-3-Phase-1：引入-cache-domain-描述" class="headerlink" title="7.3 Phase 1：引入 cache-domain 描述"></a>7.3 Phase 1：引入 cache-domain 描述</h3><p>目标：不要再用一个全局 <code>cache_shape</code> 隐式描述所有 cache groups。</p>
+<p>建议在 vLLM hybrid connector 内新增类似结构：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@dataclass</span></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">CacheTransferDomain</span>:</span><br><span class="line">    name: <span class="built_in">str</span></span><br><span class="line">    group_ids: <span class="built_in">list</span>[<span class="built_in">int</span>]</span><br><span class="line">    layer_names: <span class="built_in">list</span>[<span class="built_in">str</span>]</span><br><span class="line">    layout_kind: <span class="type">Literal</span>[<span class="string">"kimi_k3_target"</span>, <span class="string">"flash"</span>, <span class="string">"flashinfer"</span>]</span><br><span class="line">    cache_shape: <span class="built_in">int</span></span><br><span class="line">    block_size: <span class="built_in">int</span></span><br><span class="line">    token_bytes: <span class="built_in">list</span>[<span class="built_in">int</span>]</span><br><span class="line">    physical_tensors: <span class="built_in">dict</span>[<span class="built_in">str</span>, torch.Tensor]</span><br></pre></td></tr></table></figure>
+
+<p>修改位置：</p>
+<ul>
+<li><code>vllm/v1/hybrid_connector/__init__.py</code><ul>
+<li>group 分类不能只返回 <code>gdn/attn</code>；</li>
+<li>需要区分 target K3 MLA 与 drafter attention；</li>
+<li>使用 model tag、layer-name set 或显式 cache owner，避免依赖脆弱的字符串匹配。</li>
+</ul>
+</li>
+<li><code>vllm/v1/hybrid_connector/kvtbackend.py</code><ul>
+<li><code>_build_kvt_args()</code> 拆成按 domain 构建；</li>
+<li>K3 特有参数只传给 target-k3 domain；</li>
+<li>drafter domain 使用自身 backend/layout/head metadata。</li>
+</ul>
+</li>
+<li><code>vllm/v1/hybrid_connector/engine_proxy.py</code><ul>
+<li>worker info、block ids 和完成状态携带 domain id。</li>
+</ul>
+</li>
+</ul>
+<p>关键不变量：</p>
+<ul>
+<li>每个 logical cache group 恰好属于一个 transfer domain。</li>
+<li>一个 domain 的 parser 只能接收该 domain 声明的 group ids。</li>
+<li>domain 之间不能通过列表位置隐式推断类型。</li>
+</ul>
+<h3 id="7-4-Phase-2：隔离物理注册与-block-table"><a href="#7-4-Phase-2：隔离物理注册与-block-table" class="headerlink" title="7.4 Phase 2：隔离物理注册与 block table"></a>7.4 Phase 2：隔离物理注册与 block table</h3><p>目标：避免 K3 MLA 与 drafter attention 在 <code>KVCacheTensor.shared_by</code> 中被误认为一个 attention pack。</p>
+<p>需要评估并实现以下方案之一：</p>
+<h4 id="方案-A：在-KV-cache-config-阶段隔离-storage-pool"><a href="#方案-A：在-KV-cache-config-阶段隔离-storage-pool" class="headerlink" title="方案 A：在 KV cache config 阶段隔离 storage pool"></a>方案 A：在 KV cache config 阶段隔离 storage pool</h4><ul>
+<li>target K3 groups 使用 KDA-sized physical pages；</li>
+<li>drafter groups 使用普通 attention pages；</li>
+<li>scheduler 维护独立 block pools/block tables；</li>
+<li>KVT 注册天然按 domain 分开。</li>
+</ul>
+<p>优点：</p>
+<ul>
+<li>layout 清晰；</li>
+<li>parser 简单；</li>
+<li>不会把 K3 padding 施加到所有 drafter pages。</li>
+</ul>
+<p>代价：</p>
+<ul>
+<li>需要扩展当前“统一 page size/共享 physical tensor”的分组与分配逻辑；</li>
+<li>scheduler 的多 pool 支持和 prefix cache 行为需要系统验证。</li>
+</ul>
+<h4 id="方案-B：允许共享-storage，但注册-domain-specific-views"><a href="#方案-B：允许共享-storage，但注册-domain-specific-views" class="headerlink" title="方案 B：允许共享 storage，但注册 domain-specific views"></a>方案 B：允许共享 storage，但注册 domain-specific views</h4><ul>
+<li>保留统一 page stride；</li>
+<li>为 target 与 drafter 建立互不混淆的 flat view；</li>
+<li>每个 domain 携带自己的 logical group id 到 physical offset 映射；</li>
+<li>同一 storage 可被多个 KVT domain 注册，但禁止发送重叠的有效区域。</li>
+</ul>
+<p>优点：</p>
+<ul>
+<li>对 scheduler block allocation 改动较小。</li>
+</ul>
+<p>风险：</p>
+<ul>
+<li>同一物理 storage 多次注册；</li>
+<li>block-id namespace 和 storage offset 更难证明正确；</li>
+<li>zeroing、abort 和复用时更容易出现跨 domain 竞态。</li>
+</ul>
+<p>建议优先验证方案 A；若当前 scheduler 架构成本过高，再采用方案 B。</p>
+<h3 id="7-5-Phase-3：扩展-Blade-KVT-多-domain-传输"><a href="#7-5-Phase-3：扩展-Blade-KVT-多-domain-传输" class="headerlink" title="7.5 Phase 3：扩展 Blade-KVT 多 domain 传输"></a>7.5 Phase 3：扩展 Blade-KVT 多 domain 传输</h3><p>目标：让 K3 target parser 与普通 attention parser 在同一请求中协作，而不是互相替代。</p>
+<p>blade-kvt 修改点：</p>
+<ul>
+<li>Python API：<ul>
+<li><code>blade_kvt/kv_transfer_impl.py</code></li>
+<li>client/server constructor 接受 domain descriptors，或允许创建命名子实例。</li>
+</ul>
+</li>
+<li>pybind/API：<ul>
+<li><code>kvtransfer/kvtransfer_pybind.cpp</code></li>
+<li>序列化 domain id、layout kind、group range 和完成信号。</li>
+</ul>
+</li>
+<li>worker metadata：<ul>
+<li><code>kvtransfer/include/common.h</code></li>
+<li><code>kvtransfer/src/common.cpp</code></li>
+<li>不再假设一个 worker 只有一个 <code>cache_shape</code>。</li>
+</ul>
+</li>
+<li>parser dispatch：<ul>
+<li><code>kvtransfer/src/tx_stub.cpp</code></li>
+<li>按 domain 选择 <code>parse_kimi_k3_*</code>、FlashAttention 或 FlashInfer parser。</li>
+</ul>
+</li>
+<li>K3 parser：<ul>
+<li><code>kvtransfer/src/parse_block_kimi_k3.cpp</code></li>
+<li>保持其内部 <code>KDA + one MLA</code> 契约；</li>
+<li>断言应针对 target-k3 domain 的局部 groups，而不是整个请求的全部 groups。</li>
+</ul>
+</li>
+</ul>
+<p>完成语义：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">request load complete =</span><br><span class="line">  target-k3 domain complete</span><br><span class="line">  AND drafter-attn domain complete</span><br></pre></td></tr></table></figure>
+
+<p>任何必需 domain 失败，都不能把整个 prefix 标记为已加载。</p>
+<h3 id="7-6-Phase-4：补齐-producer-consumer-生命周期"><a href="#7-6-Phase-4：补齐-producer-consumer-生命周期" class="headerlink" title="7.6 Phase 4：补齐 producer/consumer 生命周期"></a>7.6 Phase 4：补齐 producer/consumer 生命周期</h3><h4 id="P-节点"><a href="#P-节点" class="headerlink" title="P 节点"></a>P 节点</h4><p>修改 <code>vllm/v1/spec_decode/dflash.py</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">prompt batch + KVT producer:</span><br><span class="line">  build context slot mapping</span><br><span class="line">  precompute_and_store_context_kv</span><br><span class="line">  skip query drafting</span><br><span class="line">  expose drafter domain as ready</span><br></pre></td></tr></table></figure>
+
+<p>需要保证：</p>
+<ul>
+<li>context slot mapping 来自 drafter cache group，而不是 K3 MLA group；</li>
+<li>padding request/CUDA graph dummy request 不写真实 cache；</li>
+<li>partial prefix hit 时只写缺失区间；</li>
+<li>multimodal hidden-state selection 与 target layer ids 一致；</li>
+<li>async scheduler 不会在 context KV 尚未 ready 时触发 send。</li>
+</ul>
+<h4 id="D-节点"><a href="#D-节点" class="headerlink" title="D 节点"></a>D 节点</h4><p>需要保证：</p>
+<ul>
+<li>target 与 drafter domain 都完成后才推进 <code>num_computed_tokens</code>；</li>
+<li>本地重算 <code>gamma + 1</code> 时使用正确的 target/drafter block tables；</li>
+<li>load 失败、超时和 P abort 时，两类 blocks 都能释放；</li>
+<li>fallback local prefill 会覆盖两类 cache，不保留半完成的远端状态。</li>
+</ul>
+<h3 id="7-7-Phase-5：zeroing、复用与一致性"><a href="#7-7-Phase-5：zeroing、复用与一致性" class="headerlink" title="7.7 Phase 5：zeroing、复用与一致性"></a>7.7 Phase 5：zeroing、复用与一致性</h3><p>目标：外部 load 不能被同 step 的 zero kernel 覆盖。</p>
+<p>修改方向：</p>
+<ol>
+<li>每个 backend/domain metadata 暴露 load target block ids。</li>
+<li><code>HybridScheduler.build_connector_meta()</code> 构建 metadata 后，立即从实际发送给 worker 的 <code>SchedulerOutput.new_block_ids_to_zero</code> 中过滤。</li>
+<li>对多 group namespace 使用：</li>
+</ol>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">(cache_group_id, block_id)</span><br></pre></td></tr></table></figure>
+
+<p>而不是裸 <code>block_id</code>。<br>4. 保留现有 <code>sched_discard_zero_block_ids()</code>，它保护 pending-list 阶段；同时增加 same-output filtering，保护 block ids 已经被 <code>take_new_block_ids()</code> drain 的窗口。<br>5. 只过滤 load blocks，不能过滤 P 侧 store blocks。<br>6. 只有实际成功加载的 token 才能被 <code>mark_loaded/_step_loaded</code> 计入 computed。</p>
+<p>还需要覆盖：</p>
+<ul>
+<li>block reuse；</li>
+<li>request abort；</li>
+<li>prefix-cache hit；</li>
+<li>partial block；</li>
+<li>null block；</li>
+<li>CUDA graph padding block；</li>
+<li>P/D 异步完成顺序。</li>
+</ul>
+<h3 id="7-8-Phase-6：配置检查、可观测性与回退"><a href="#7-8-Phase-6：配置检查、可观测性与回退" class="headerlink" title="7.8 Phase 6：配置检查、可观测性与回退"></a>7.8 Phase 6：配置检查、可观测性与回退</h3><p>启动时应明确拒绝不支持的组合：</p>
+<ul>
+<li>K3 + KVT 但 Blade-KVT 缺少 K3 ABI；</li>
+<li>DSpark checkpoint architecture 不支持；</li>
+<li>P/D draft backend layout 不兼容；</li>
+<li>P/D block size 不可映射；</li>
+<li>TP remap 比例不合法；</li>
+<li>K3 target domain 或 drafter domain 缺失；</li>
+<li>multimodal placeholder 被 <code>n-(gamma+1)</code> 边界切开。</li>
+</ul>
+<p>建议新增日志：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">domain name</span><br><span class="line">group ids</span><br><span class="line">layer names</span><br><span class="line">layout kind</span><br><span class="line">registered storage address/size</span><br><span class="line">page stride</span><br><span class="line">token bytes</span><br><span class="line">P/D TP mapping</span><br><span class="line">scheduled/load/ready token count</span><br><span class="line">zero-excluded block ids count</span><br></pre></td></tr></table></figure>
+
+<p>建议增加 feature flag：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">VLLM_KIMI_K3_DRAFTER_PD=0/1</span><br></pre></td></tr></table></figure>
+
+<p>在完成全部测试前默认关闭。关闭时：</p>
+<ul>
+<li>明确报错，或</li>
+<li>自动回退到 D 节点本地 prefill；</li>
+</ul>
+<p>不能静默进入只加载 target、不加载 drafter 的半支持状态。</p>
+<h2 id="8-测试计划"><a href="#8-测试计划" class="headerlink" title="8. 测试计划"></a>8. 测试计划</h2><h3 id="8-1-单元测试"><a href="#8-1-单元测试" class="headerlink" title="8.1 单元测试"></a>8.1 单元测试</h3><p>vLLM：</p>
+<ul>
+<li>cache group 能稳定分为 target-k3 与 drafter-attn domains；</li>
+<li>domain-specific block ids 不串组；</li>
+<li><code>skip_decode_drafting</code> 仍写 context KV；</li>
+<li>partial prefix hit 只填充缺失 draft slots；</li>
+<li>load blocks 从 same-output zero list 排除；</li>
+<li>load failure 不推进 computed tokens；</li>
+<li>abort 释放所有 domain 的 blocks。</li>
+</ul>
+<p>Blade-KVT：</p>
+<ul>
+<li>K3 target domain 仍满足 <code>KDA + one MLA</code>；</li>
+<li>drafter FlashAttention NHD/HND block parsing；</li>
+<li>drafter FlashInfer NHD/HND block parsing；</li>
+<li>equal TP、P TP &gt; D TP、P TP &lt; D TP；</li>
+<li>incomplete last block；</li>
+<li>manager block size 与 kernel block size不同；</li>
+<li>两个 domain 的完成信号乱序到达。</li>
+</ul>
+<h3 id="8-2-cache-correctness-测试"><a href="#8-2-cache-correctness-测试" class="headerlink" title="8.2 cache correctness 测试"></a>8.2 cache correctness 测试</h3><p>对同一 prompt 比较：</p>
+<ol>
+<li>单机本地 prefill 后的 target/drafter cache；</li>
+<li>P 计算、KVT 传输、D 尾部重算后的 target/drafter cache。</li>
+</ol>
+<p>比较范围：</p>
+<ul>
+<li>KDA conv state；</li>
+<li>KDA recurrent state；</li>
+<li>K3 MLA 有效 prefix；</li>
+<li>每层 drafter K；</li>
+<li>每层 drafter V；</li>
+<li>最后 partial block 的有效 slots；</li>
+<li>padding 区域不作为模型正确性比较对象，但要验证不会被读取。</li>
+</ul>
+<p>建议保留物理页 dump 工具，同时增加 logical slot dump，避免只比较 flat storage 时被 padding 干扰。</p>
+<h3 id="8-3-端到端矩阵"><a href="#8-3-端到端矩阵" class="headerlink" title="8.3 端到端矩阵"></a>8.3 端到端矩阵</h3><p>至少覆盖：</p>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>取值</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>method</td>
+<td>DFlash、DSpark</td>
+</tr>
+<tr>
+<td>target cache dtype</td>
+<td>BF16、K3 支持的 FP8 模式</td>
+</tr>
+<tr>
+<td>draft cache dtype</td>
+<td>BF16、FP8（若 checkpoint/backend 支持）</td>
+</tr>
+<tr>
+<td>P/D TP</td>
+<td>相等、P&gt;D、P&lt;D</td>
+</tr>
+<tr>
+<td>draft backend</td>
+<td>FlashAttention、FlashInfer</td>
+</tr>
+<tr>
+<td>cache layout</td>
+<td>NHD、HND</td>
+</tr>
+<tr>
+<td>gamma</td>
+<td>1、4、checkpoint 最大值</td>
+</tr>
+<tr>
+<td>prompt</td>
+<td>短 prompt、跨 block、最后一块不满、长上下文</td>
+</tr>
+<tr>
+<td>scheduler</td>
+<td>sync、async/substep</td>
+</tr>
+<tr>
+<td>prefix cache</td>
+<td>miss、full hit、partial hit</td>
+</tr>
+<tr>
+<td>modality</td>
+<td>text、K3 image prompt</td>
+</tr>
+<tr>
+<td>failure</td>
+<td>P abort、load timeout、一个 domain 失败</td>
+</tr>
+</tbody></table>
+<p>正确性判据：</p>
+<ul>
+<li>与不做 PD 的同配置输出 token 一致；</li>
+<li>verification logits 在容差内一致；</li>
+<li>acceptance length 分布无异常下降；</li>
+<li>无 NaN、无 stale KV、无非法 block access；</li>
+<li>不出现同 block 的 load/zero 覆盖；</li>
+<li>request 完成/取消后无 block leak。</li>
+</ul>
+<h3 id="8-4-性能与资源验收"><a href="#8-4-性能与资源验收" class="headerlink" title="8.4 性能与资源验收"></a>8.4 性能与资源验收</h3><p>需要测量：</p>
+<ul>
+<li>P prefill latency；</li>
+<li>target 与 drafter 各自传输字节数；</li>
+<li>两 domain 传输是否可并行；</li>
+<li>D wait time；</li>
+<li>D 本地 <code>gamma + 1</code> 重算耗时；</li>
+<li>TTFT、TPOT；</li>
+<li>GPU cache memory；</li>
+<li>注册同一 storage 多次时的额外开销；</li>
+<li>P/D TP remap 的 copy kernel 时间。</li>
+</ul>
+<p>组合能力只有在“正确传输 drafter KV”后仍显著优于 D 节点完整 drafter prefill，才有上线价值。</p>
+<h2 id="9-分阶段提交建议"><a href="#9-分阶段提交建议" class="headerlink" title="9. 分阶段提交建议"></a>9. 分阶段提交建议</h2><p>建议把实现拆成可独立审查和回滚的提交：</p>
+<ol>
+<li><code>[SpecDecode] Preserve DFlash context KV on KVT producers</code></li>
+<li><code>[Core] Classify target and drafter KV cache domains</code></li>
+<li><code>[KVT] Build domain-specific cache registration metadata</code></li>
+<li><code>[Blade-KVT] Support multi-layout domains per PD request</code></li>
+<li><code>[PD] Aggregate K3 target and drafter load completion</code></li>
+<li><code>[BugFix] Exclude all hybrid load blocks from same-step zeroing</code></li>
+<li><code>[Test] Add Kimi K3 DFlash/DSpark PD cache parity coverage</code></li>
+<li><code>[Docs] Document Kimi K3 drafter PD layout and constraints</code></li>
+</ol>
+<p>每个提交都应保持：</p>
+<ul>
+<li>K3 无 speculative decoding 的 PD 可用；</li>
+<li>非 K3 的 DFlash/DSpark PD 可用；</li>
+<li>feature flag 关闭时不改变现网行为。</li>
+</ul>
+<h2 id="10-最终验收标准"><a href="#10-最终验收标准" class="headerlink" title="10. 最终验收标准"></a>10. 最终验收标准</h2><p>只有同时满足以下条件，才能声明支持 Kimi K3 + DFlash/DSpark + PD：</p>
+<ol>
+<li>P 节点实际生成了 target 与 drafter prefix cache。</li>
+<li>KVT 使用正确的独立 layout 传输了两类 cache。</li>
+<li>D 节点在两类 cache 都完成后才推进 computed token。</li>
+<li>D 本地正确重算最后 <code>gamma + 1</code> 个 token。</li>
+<li>P/D TP 相等和不相等场景均通过 cache parity 测试。</li>
+<li>FullAttention/SWA、FlashAttention/FlashInfer 的 group 和 layout 均未混淆。</li>
+<li>load blocks 不会被 zero kernel 覆盖。</li>
+<li>abort、timeout、fallback 和 prefix-cache reuse 不泄漏 blocks。</li>
+<li>端到端输出与本地 prefill 基线一致。</li>
+<li>存在持续运行的组合回归测试，而不是只靠一次手工验证。</li>
+</ol>
+<p>在这些条件完成前，配置层应明确拒绝该组合或回退到 D 节点本地 prefill。</p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>Kimi K3、DSpark 与 PD 分离</p><p><a href="https://llx-08.github.io/notes/2026/07/28/2026-07-28-kimi k3、dspark与pd分离/">https://llx-08.github.io/notes/2026/07/28/2026-07-28-kimi k3、dspark与pd分离/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-28</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-28</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/"><span class="level-item">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">59</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-28T00:00:00.000Z">2026-07-28</time></p><p class="title"><a href="/notes/2026/07/28/2026-07-28-kimi%20k3%E3%80%81dspark%E4%B8%8Epd%E5%88%86%E7%A6%BB/">Kimi K3、DSpark 与 PD 分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">31</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

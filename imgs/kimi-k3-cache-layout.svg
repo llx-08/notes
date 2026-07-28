@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1560" height="980" viewBox="0 0 1560 980" role="img" aria-labelledby="title desc">
+  <title id="title">Kimi K3 target cache 与 DFlash/DSpark drafter cache layout</title>
+  <desc id="desc">对比 KDA state、K3 MLA latent KV、FlashAttention 和 FlashInfer drafter KV 的逻辑与物理布局。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#f1f5f9"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#334155" flood-opacity="0.16"/>
+    </filter>
+    <style>
+      .title { font:700 34px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .section { font:700 24px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .label { font:700 18px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .body { font:400 16px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .mono { font:500 15px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#334155; }
+      .white { fill:white; }
+      .brace { stroke:#64748b; stroke-width:2; fill:none; }
+    </style>
+  </defs>
+
+  <rect width="1560" height="980" fill="url(#bg)"/>
+  <text x="780" y="54" text-anchor="middle" class="title">Kimi K3 target cache 与 DFlash/DSpark drafter cache</text>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="95" width="1440" height="405" rx="22" fill="#ffffff"/>
+    <rect x="60" y="535" width="1440" height="385" rx="22" fill="#ffffff"/>
+  </g>
+
+  <rect x="60" y="95" width="1440" height="58" rx="22" fill="#0f766e"/>
+  <text x="90" y="133" class="section white">A. Kimi K3 target domain：cache_shape=8</text>
+
+  <text x="100" y="190" class="label">KDA physical page</text>
+  <rect x="100" y="215" width="380" height="105" rx="8" fill="#99f6e4" stroke="#14b8a6"/>
+  <rect x="480" y="215" width="285" height="105" rx="8" fill="#5eead4" stroke="#0d9488"/>
+  <rect x="765" y="215" width="175" height="105" rx="8" fill="#e2e8f0" stroke="#94a3b8"/>
+  <text x="290" y="260" text-anchor="middle" class="label">conv_state</text>
+  <text x="290" y="286" text-anchor="middle" class="mono">[state_len, 3×Hlocal×D]</text>
+  <text x="622" y="260" text-anchor="middle" class="label">recurrent_state</text>
+  <text x="622" y="286" text-anchor="middle" class="mono">[Hlocal, D, D]</text>
+  <text x="852" y="273" text-anchor="middle" class="label">padding</text>
+  <path d="M100 340 L100 360 L940 360 L940 340" class="brace"/>
+  <text x="520" y="388" text-anchor="middle" class="mono">kda_page_stride（block 到 block 的真实物理跨度）</text>
+
+  <text x="1000" y="190" class="label">K3 MLA physical page</text>
+  <rect x="1000" y="215" width="330" height="105" rx="8" fill="#a7f3d0" stroke="#10b981"/>
+  <rect x="1330" y="215" width="120" height="105" rx="8" fill="#e2e8f0" stroke="#94a3b8"/>
+  <g>
+    <line x1="1082" y1="215" x2="1082" y2="320" stroke="#34d399"/>
+    <line x1="1164" y1="215" x2="1164" y2="320" stroke="#34d399"/>
+    <line x1="1246" y1="215" x2="1246" y2="320" stroke="#34d399"/>
+  </g>
+  <text x="1165" y="255" text-anchor="middle" class="label">B 个 token latent</text>
+  <text x="1165" y="282" text-anchor="middle" class="mono">每 token 576 elements</text>
+  <text x="1390" y="273" text-anchor="middle" class="label">padding</text>
+  <path d="M1000 340 L1000 360 L1450 360 L1450 340" class="brace"/>
+  <text x="1225" y="388" text-anchor="middle" class="mono">同样使用 KDA-sized page stride</text>
+
+  <rect x="100" y="415" width="1350" height="54" rx="12" fill="#ecfeff" stroke="#67e8f9"/>
+  <text x="125" y="438" class="body">Logical block groups：</text>
+  <text x="125" y="461" class="mono">[KDA 0] [KDA 1] ... [KDA N-1] [exactly one rank-replicated MLA]</text>
+  <text x="1030" y="451" class="body">KDA 与 MLA 是不同 block tables，不是同一请求块内的字节拼接。</text>
+
+  <rect x="60" y="535" width="1440" height="58" rx="22" fill="#6d28d9"/>
+  <text x="90" y="573" class="section white">B. DFlash/DSpark drafter-attn domain：普通 K/V paged cache</text>
+
+  <text x="100" y="635" class="label">FlashAttention tensor view</text>
+  <rect x="100" y="660" width="620" height="105" rx="12" fill="#ede9fe" stroke="#8b5cf6"/>
+  <rect x="120" y="680" width="275" height="65" rx="8" fill="#c4b5fd"/>
+  <rect x="405" y="680" width="275" height="65" rx="8" fill="#ddd6fe"/>
+  <text x="258" y="708" text-anchor="middle" class="label">K pages</text>
+  <text x="258" y="731" text-anchor="middle" class="mono">[Nblock, B, Hkv, D]</text>
+  <text x="542" y="708" text-anchor="middle" class="label">V pages</text>
+  <text x="542" y="731" text-anchor="middle" class="mono">[Nblock, B, Hkv, D]</text>
+  <text x="410" y="793" text-anchor="middle" class="mono">view: [2, Nblock, B, Hkv, D]</text>
+
+  <text x="840" y="635" class="label">FlashInfer</text>
+  <rect x="840" y="660" width="610" height="105" rx="12" fill="#f3e8ff" stroke="#a855f7"/>
+  <rect x="860" y="680" width="270" height="65" rx="8" fill="#d8b4fe"/>
+  <rect x="1140" y="680" width="270" height="65" rx="8" fill="#e9d5ff"/>
+  <text x="995" y="708" text-anchor="middle" class="label">NHD</text>
+  <text x="995" y="731" text-anchor="middle" class="mono">[Nblock, 2, B, Hkv, D]</text>
+  <text x="1275" y="708" text-anchor="middle" class="label">HND physical order</text>
+  <text x="1275" y="731" text-anchor="middle" class="mono">[Nblock, 2, Hkv, B, D]</text>
+
+  <rect x="100" y="825" width="1350" height="60" rx="12" fill="#faf5ff" stroke="#d8b4fe"/>
+  <text x="125" y="850" class="body">DFlash 与 DSpark 使用相同 drafter cache；差异在 query/sampling：</text>
+  <text x="125" y="875" class="mono">DFlash = γ+1 queries；DSpark = γ queries + sequential Markov sampling</text>
+  <text x="905" y="863" class="body">它们不能用 K3 replicated MLA parser 解释。</text>
+</svg>
