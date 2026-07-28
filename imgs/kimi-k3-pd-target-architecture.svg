@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1560" height="940" viewBox="0 0 1560 940" role="img" aria-labelledby="title desc">
-  <title id="title">Kimi K3 与 DFlash/DSpark PD 当前冲突及目标架构</title>
-  <desc id="desc">左侧展示把所有 cache group 送入 K3 parser 时的冲突，右侧展示拆分 target-k3 与 drafter-attn transfer domain 的建议架构。</desc>
+  <title id="title">Kimi K3 与 DFlash/DSpark PD 的传输层冲突及目标架构</title>
+  <desc id="desc">运行时组合分支已经存在；左侧展示其仍把所有 cache group 送入 K3 parser 时的传输层冲突，右侧展示拆分 target-k3 与 drafter-attn transfer domain 的建议架构。</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#fff7ed"/>
@@ -25,7 +25,7 @@
   </defs>
 
   <rect width="1560" height="940" fill="url(#bg)"/>
-  <text x="780" y="54" text-anchor="middle" class="title">当前冲突与建议的多 cache-domain 架构</text>
+  <text x="780" y="54" text-anchor="middle" class="title">Runtime 已集成，KVT 仍需多 cache-domain</text>
 
   <g filter="url(#shadow)">
     <rect x="55" y="95" width="700" height="785" rx="22" fill="#ffffff"/>
@@ -33,7 +33,7 @@
   </g>
 
   <rect x="55" y="95" width="700" height="62" rx="22" fill="#dc2626"/>
-  <text x="405" y="136" text-anchor="middle" class="panel-title" fill="white">当前：所有 groups 强行进入 cache_shape=8</text>
+  <text x="405" y="136" text-anchor="middle" class="panel-title" fill="white">组合分支现状：所有 groups 仍进入 cache_shape=8</text>
 
   <text x="100" y="205" class="label">Scheduler groups</text>
   <g>
