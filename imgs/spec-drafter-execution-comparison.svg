@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">MTP、Eagle3、DFlash 和 DSpark 执行流程对比</title>
+  <desc id="desc">左侧展示 MTP 和 Eagle3 的逐 token 自回归 drafting，右侧展示 DFlash 和 DSpark 的 block-parallel drafting。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eff6ff"/>
+      <stop offset="0.5" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#f5f3ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#334155" flood-opacity="0.16"/>
+    </filter>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto">
+      <path d="M0,0 L11,5.5 L0,11 Z" fill="#475569"/>
+    </marker>
+    <style>
+      .title { font:700 34px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .group { font:700 24px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:white; }
+      .card-title { font:700 22px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .label { font:700 17px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .body { font:400 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .mono { font:500 14px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#334155; }
+      .arrow { stroke:#475569; stroke-width:3; fill:none; marker-end:url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+  <text x="800" y="52" text-anchor="middle" class="title">从逐 token 自回归到 block-parallel drafting</text>
+
+  <g filter="url(#shadow)">
+    <rect x="50" y="90" width="730" height="850" rx="22" fill="#ffffff"/>
+    <rect x="820" y="90" width="730" height="850" rx="22" fill="#ffffff"/>
+  </g>
+  <rect x="50" y="90" width="730" height="62" rx="22" fill="#2563eb"/>
+  <rect x="820" y="90" width="730" height="62" rx="22" fill="#7c3aed"/>
+  <text x="415" y="131" text-anchor="middle" class="group">MTP / Eagle3：transformer 级串行依赖</text>
+  <text x="1185" y="131" text-anchor="middle" class="group">DFlash / DSpark：block-parallel backbone</text>
+
+  <rect x="85" y="185" width="660" height="330" rx="18" fill="#eff6ff" stroke="#60a5fa"/>
+  <text x="115" y="220" class="card-title">MTP</text>
+  <rect x="115" y="250" width="195" height="70" rx="10" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="212" y="278" text-anchor="middle" class="label">target hidden</text>
+  <text x="212" y="301" text-anchor="middle" class="body">+ actual token embed</text>
+  <path d="M310 285 L365 285" class="arrow"/>
+  <rect x="370" y="250" width="165" height="70" rx="10" fill="#bfdbfe" stroke="#3b82f6"/>
+  <text x="452" y="279" text-anchor="middle" class="label">MTP layer</text>
+  <text x="452" y="301" text-anchor="middle" class="mono">step 0</text>
+  <path d="M535 285 L590 285" class="arrow"/>
+  <rect x="595" y="250" width="115" height="70" rx="10" fill="#93c5fd" stroke="#2563eb"/>
+  <text x="652" y="279" text-anchor="middle" class="label">token 1</text>
+  <text x="652" y="301" text-anchor="middle" class="body">+ hidden 1</text>
+  <path d="M652 320 C652 350, 545 350, 510 372" class="arrow"/>
+  <rect x="370" y="365" width="165" height="70" rx="10" fill="#bfdbfe" stroke="#3b82f6"/>
+  <text x="452" y="394" text-anchor="middle" class="label">MTP layer</text>
+  <text x="452" y="416" text-anchor="middle" class="mono">step 1</text>
+  <path d="M370 400 L315 400" class="arrow"/>
+  <rect x="170" y="365" width="140" height="70" rx="10" fill="#93c5fd" stroke="#2563eb"/>
+  <text x="240" y="394" text-anchor="middle" class="label">token 2</text>
+  <text x="240" y="416" text-anchor="middle" class="body">继续串行…</text>
+  <text x="415" y="477" text-anchor="middle" class="mono">gamma tokens ≈ gamma 次有依赖的 drafter transformer</text>
+
+  <rect x="85" y="545" width="660" height="350" rx="18" fill="#eef2ff" stroke="#818cf8"/>
+  <text x="115" y="580" class="card-title">Eagle3</text>
+  <rect x="115" y="610" width="200" height="110" rx="10" fill="#e0e7ff" stroke="#818cf8"/>
+  <text x="215" y="640" text-anchor="middle" class="label">target aux hidden</text>
+  <text x="215" y="665" text-anchor="middle" class="mono">layer a / b / c</text>
+  <text x="215" y="695" text-anchor="middle" class="body">concat + norm + FC</text>
+  <path d="M315 665 L370 665" class="arrow"/>
+  <rect x="375" y="625" width="165" height="80" rx="10" fill="#c7d2fe" stroke="#6366f1"/>
+  <text x="457" y="655" text-anchor="middle" class="label">Eagle layer</text>
+  <text x="457" y="680" text-anchor="middle" class="body">causal forward</text>
+  <path d="M540 665 L595 665" class="arrow"/>
+  <rect x="600" y="625" width="110" height="80" rx="10" fill="#a5b4fc" stroke="#4f46e5"/>
+  <text x="655" y="655" text-anchor="middle" class="label">token 1</text>
+  <text x="655" y="680" text-anchor="middle" class="body">hidden 1</text>
+  <path d="M655 705 C655 755, 535 755, 520 785" class="arrow"/>
+  <rect x="375" y="765" width="165" height="80" rx="10" fill="#c7d2fe" stroke="#6366f1"/>
+  <text x="457" y="795" text-anchor="middle" class="label">Eagle layer</text>
+  <text x="457" y="820" text-anchor="middle" class="body">next causal step</text>
+  <path d="M375 805 L310 805" class="arrow"/>
+  <rect x="170" y="765" width="135" height="80" rx="10" fill="#a5b4fc" stroke="#4f46e5"/>
+  <text x="237" y="795" text-anchor="middle" class="label">token 2</text>
+  <text x="237" y="820" text-anchor="middle" class="body">继续串行…</text>
+  <text x="415" y="875" text-anchor="middle" class="mono">每一步都读取并追加 Eagle causal KV</text>
+
+  <rect x="855" y="185" width="660" height="330" rx="18" fill="#faf5ff" stroke="#c084fc"/>
+  <text x="885" y="220" class="card-title">DFlash</text>
+  <rect x="885" y="250" width="205" height="82" rx="10" fill="#f3e8ff" stroke="#c084fc"/>
+  <text x="987" y="280" text-anchor="middle" class="label">target hidden states</text>
+  <text x="987" y="305" text-anchor="middle" class="body">all context positions</text>
+  <path d="M1090 291 L1145 291" class="arrow"/>
+  <rect x="1150" y="250" width="325" height="82" rx="10" fill="#e9d5ff" stroke="#a855f7"/>
+  <text x="1312" y="280" text-anchor="middle" class="label">per-layer context K/V precompute</text>
+  <text x="1312" y="305" text-anchor="middle" class="mono">projection + K norm + RoPE</text>
+  <rect x="885" y="365" width="235" height="80" rx="10" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="1002" y="394" text-anchor="middle" class="label">bonus + gamma MASK</text>
+  <text x="1002" y="419" text-anchor="middle" class="mono">gamma + 1 queries</text>
+  <path d="M1120 405 L1175 405" class="arrow"/>
+  <rect x="1180" y="365" width="185" height="80" rx="10" fill="#ddd6fe" stroke="#7c3aed"/>
+  <text x="1272" y="394" text-anchor="middle" class="label">one backbone</text>
+  <text x="1272" y="419" text-anchor="middle" class="body">parallel block</text>
+  <path d="M1365 405 L1420 405" class="arrow"/>
+  <rect x="1425" y="365" width="60" height="80" rx="10" fill="#c4b5fd" stroke="#6d28d9"/>
+  <text x="1455" y="394" text-anchor="middle" class="label">γ</text>
+  <text x="1455" y="419" text-anchor="middle" class="body">logits</text>
+  <text x="1185" y="477" text-anchor="middle" class="mono">transformer 内没有逐 token 重跑</text>
+
+  <rect x="855" y="545" width="660" height="350" rx="18" fill="#f5f3ff" stroke="#a78bfa"/>
+  <text x="885" y="580" class="card-title">DSpark</text>
+  <rect x="885" y="610" width="200" height="80" rx="10" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="985" y="639" text-anchor="middle" class="label">anchor + MASK</text>
+  <text x="985" y="664" text-anchor="middle" class="mono">gamma queries</text>
+  <path d="M1085 650 L1140 650" class="arrow"/>
+  <rect x="1145" y="610" width="185" height="80" rx="10" fill="#ddd6fe" stroke="#7c3aed"/>
+  <text x="1237" y="639" text-anchor="middle" class="label">one backbone</text>
+  <text x="1237" y="664" text-anchor="middle" class="body">base logits parallel</text>
+  <path d="M1330 650 L1385 650" class="arrow"/>
+  <rect x="1390" y="610" width="95" height="80" rx="10" fill="#c4b5fd" stroke="#6d28d9"/>
+  <text x="1437" y="639" text-anchor="middle" class="label">base</text>
+  <text x="1437" y="664" text-anchor="middle" class="body">logits</text>
+  <rect x="920" y="750" width="170" height="80" rx="10" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="1005" y="779" text-anchor="middle" class="label">prev token</text>
+  <text x="1005" y="804" text-anchor="middle" class="mono">markov_w1</text>
+  <path d="M1090 790 L1145 790" class="arrow"/>
+  <rect x="1150" y="750" width="205" height="80" rx="10" fill="#ddd6fe" stroke="#7c3aed"/>
+  <text x="1252" y="779" text-anchor="middle" class="label">low-rank bias</text>
+  <text x="1252" y="804" text-anchor="middle" class="mono">base + markov_w2</text>
+  <path d="M1355 790 L1410 790" class="arrow"/>
+  <rect x="1415" y="750" width="70" height="80" rx="10" fill="#c4b5fd" stroke="#6d28d9"/>
+  <text x="1450" y="779" text-anchor="middle" class="label">token</text>
+  <text x="1450" y="804" text-anchor="middle" class="body">next</text>
+  <path d="M1450 830 C1450 865, 1030 865, 1005 830" class="arrow"/>
+  <text x="1185" y="875" text-anchor="middle" class="mono">只有轻量 Markov head 顺序执行，backbone 不重跑</text>
+
+  <rect x="490" y="955" width="620" height="32" rx="16" fill="#fee2e2" stroke="#f87171"/>
+  <text x="800" y="977" text-anchor="middle" class="body">CUDA graph 可以融合 launch，但不能把 MTP/Eagle3 的数据依赖变成真正并行</text>
+</svg>
