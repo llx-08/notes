@@ -291,6 +291,91 @@ sges[1].length = 4032;
 sges[1].lkey   = payload_mr->lkey;
 ```
 
+这里故意使用了两个不同来源的 `lkey`，因为这个例子假设：
+
+```text
+header  所在地址范围注册成 header_mr
+payload 所在地址范围注册成 payload_mr
+```
+
+`lkey` 不是“整条 WR 共用的 key”，而是 **SGE 所描述的本地地址范围所属 MR 的
+local key**。RNIC 处理每个 SGE 时，都要用该 SGE 自己的 `lkey` 检查：
+
+```text
+SGE.addr ... SGE.addr + SGE.length
+是否完整落在这个 lkey 对应的 MR 注册范围内？
+这个 MR 是否属于该 QP 所在的 PD？
+RNIC 是否有权对它执行本次 local DMA read/write？
+```
+
+因此，两个 SGE 的 `lkey` 是否相同取决于它们属于哪个 MR，而不是取决于它们是否
+属于同一条 WR。
+
+情况一：header 和 payload 是两个独立 MR，`lkey` 通常不同：
+
+```text
+header_mr:
+  registered range = [A, A + 64)
+  lkey = 0x111
+
+payload_mr:
+  registered range = [B, B + 4032)
+  lkey = 0x222
+
+SGE[0] = [addr=A, length=64,   lkey=0x111]
+SGE[1] = [addr=B, length=4032, lkey=0x222]
+```
+
+情况二：header 和 payload 都是同一个大 MR 中的子区间，它们可以使用同一个
+`lkey`：
+
+```cpp
+ibv_mr* message_mr = ibv_reg_mr(
+    pd, whole_buffer, whole_buffer_size, access_flags);
+
+sges[0].addr   = reinterpret_cast<uintptr_t>(header);
+sges[0].length = 64;
+sges[0].lkey   = message_mr->lkey;
+
+sges[1].addr   = reinterpret_cast<uintptr_t>(payload);
+sges[1].length = 4032;
+sges[1].lkey   = message_mr->lkey;
+```
+
+只要 `header` 和 `payload` 的两个完整区间都落在 `message_mr` 的注册范围内，这样
+就是合法的。一个大 MR 可以覆盖很多应用 buffer，因此“有两个 buffer”不代表一定
+有两个 lkey。
+
+反过来，一个 SGE 只有一个 `lkey`，所以它不能用一个地址区间跨越两个独立 MR：
+
+```text
+MR-1: [0x1000, 0x2000), lkey=K1
+MR-2: [0x2000, 0x3000), lkey=K2
+
+错误：
+SGE(addr=0x1800, length=0x1000, lkey=K1)
+                        └─ 后半段越过 MR-1，K1 无法覆盖
+
+正确：
+SGE[0](addr=0x1800, length=0x0800, lkey=K1)
+SGE[1](addr=0x2000, length=0x0800, lkey=K2)
+```
+
+在支持 GPUDirect RDMA 的场景中，也可能出现一条 WR 的某个 SGE 指向已注册的 host
+memory，另一个 SGE 指向已注册的 GPU memory；它们自然使用各自 MR 的 lkey。能否
+这样组合还要满足 QP capability（例如 `max_send_sge`）以及平台/驱动的
+GPUDirect RDMA 支持。
+
+最简记忆方式是：
+
+```text
+addr + length 回答：“访问哪一段本地内存？”
+lkey          回答：“用哪一个 MR 注册结果证明有权访问这段内存？”
+
+一条 WR 可以引用多个 SGE；
+每个 SGE 都必须携带与自己的地址范围匹配的 lkey。
+```
+
 然后构造一条引用它们的 WR：
 
 ```cpp
