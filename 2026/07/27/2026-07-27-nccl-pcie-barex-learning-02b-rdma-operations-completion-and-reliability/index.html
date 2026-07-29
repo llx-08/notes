@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>02b. RDMA 操作、WR/CQ 完成与可靠性 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="02b. RDMA 操作、WR&amp;#x2F;CQ 完成与可靠性 1. Two-sided 与 One-sided SEND&amp;#x2F;RECV 发送端： 1 SQ: SEND(local SGE) 接收端必须提前： 1 RQ: RECV(local SGE) RNIC 匹配 RQ WQE，把 payload DMA 到接收 buffer，并在双方 CQ 产生 completion。 RDMA WRITE 发起端 SQ"><meta property="og:type" content="blog"><meta property="og:title" content="02b. RDMA 操作、WR/CQ 完成与可靠性"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="02b. RDMA 操作、WR&amp;#x2F;CQ 完成与可靠性 1. Two-sided 与 One-sided SEND&amp;#x2F;RECV 发送端： 1 SQ: SEND(local SGE) 接收端必须提前： 1 RQ: RECV(local SGE) RNIC 匹配 RQ WQE，把 payload DMA 到接收 buffer，并在双方 CQ 产生 completion。 RDMA WRITE 发起端 SQ"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/rdma_operations.svg"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-29T00:03:24.883Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/rdma_operations.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/"},"headline":"02b. RDMA 操作、WR/CQ 完成与可靠性","image":[],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-29T00:03:24.883Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"02b. RDMA 操作、WR&#x2F;CQ 完成与可靠性 1. Two-sided 与 One-sided SEND&#x2F;RECV 发送端： 1 SQ: SEND(local SGE) 接收端必须提前： 1 RQ: RECV(local SGE) RNIC 匹配 RQ WQE，把 payload DMA 到接收 buffer，并在双方 CQ 产生 completion。 RDMA WRITE 发起端 SQ"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>02b. RDMA 操作、WR/CQ 完成与可靠性 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="02b. RDMA 操作、WR&amp;#x2F;CQ 完成与可靠性 1. WR、WQE 与 SGE 不要一上来就看 ibv_post_send() 代码。先把三个缩写逐个定义清楚： 1 2 3 WR &amp;#x3D; Work Request WQE &amp;#x3D; Work Queue Element SGE &amp;#x3D; Scatter&amp;#x2F;Gather Element 它们分别处于不同层次： 1 2 3 4 5 SGE：描述“一段本地内存” ↓"><meta property="og:type" content="blog"><meta property="og:title" content="02b. RDMA 操作、WR/CQ 完成与可靠性"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="02b. RDMA 操作、WR&amp;#x2F;CQ 完成与可靠性 1. WR、WQE 与 SGE 不要一上来就看 ibv_post_send() 代码。先把三个缩写逐个定义清楚： 1 2 3 WR &amp;#x3D; Work Request WQE &amp;#x3D; Work Queue Element SGE &amp;#x3D; Scatter&amp;#x2F;Gather Element 它们分别处于不同层次： 1 2 3 4 5 SGE：描述“一段本地内存” ↓"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/rdma_operations.svg"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-29T00:16:04.031Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/rdma_operations.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/"},"headline":"02b. RDMA 操作、WR/CQ 完成与可靠性","image":[],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-29T00:16:04.031Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"02b. RDMA 操作、WR&#x2F;CQ 完成与可靠性 1. WR、WQE 与 SGE 不要一上来就看 ibv_post_send() 代码。先把三个缩写逐个定义清楚： 1 2 3 WR &#x3D; Work Request WQE &#x3D; Work Queue Element SGE &#x3D; Scatter&#x2F;Gather Element 它们分别处于不同层次： 1 2 3 4 5 SGE：描述“一段本地内存” ↓"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
   (function () {
       function switchTab() {
           if (!location.hash) {
@@ -142,7 +142,518 @@ mjx-container[display="true"] + br {
   display: none;
 }
 </style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
-</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-29T00:03:24.883Z" title="7/29/2026, 12:03:24 AM">2026-07-29</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">2 小时读完 (大约15471个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">02b. RDMA 操作、WR/CQ 完成与可靠性</h1><div class="content"><h1 id="02b-RDMA-操作、WR-CQ-完成与可靠性"><a href="#02b-RDMA-操作、WR-CQ-完成与可靠性" class="headerlink" title="02b. RDMA 操作、WR/CQ 完成与可靠性"></a>02b. RDMA 操作、WR/CQ 完成与可靠性</h1><h2 id="1-Two-sided-与-One-sided"><a href="#1-Two-sided-与-One-sided" class="headerlink" title="1. Two-sided 与 One-sided"></a>1. Two-sided 与 One-sided</h2><p><img src="/notes/imgs/rdma_operations.svg" alt="SEND/RECV、WRITE、WRITE_WITH_IMM 数据与完成语义"></p>
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-29T00:16:04.031Z" title="7/29/2026, 12:16:04 AM">2026-07-29</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">2 小时读完 (大约15471个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">02b. RDMA 操作、WR/CQ 完成与可靠性</h1><div class="content"><h1 id="02b-RDMA-操作、WR-CQ-完成与可靠性"><a href="#02b-RDMA-操作、WR-CQ-完成与可靠性" class="headerlink" title="02b. RDMA 操作、WR/CQ 完成与可靠性"></a>02b. RDMA 操作、WR/CQ 完成与可靠性</h1><h2 id="1-WR、WQE-与-SGE"><a href="#1-WR、WQE-与-SGE" class="headerlink" title="1. WR、WQE 与 SGE"></a>1. WR、WQE 与 SGE</h2><p>不要一上来就看 <code>ibv_post_send()</code> 代码。先把三个缩写逐个定义清楚：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">WR  = Work Request</span><br><span class="line">WQE = Work Queue Element</span><br><span class="line">SGE = Scatter/Gather Element</span><br></pre></td></tr></table></figure>
+
+<p>它们分别处于不同层次：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">SGE：描述“一段本地内存”</span><br><span class="line">  ↓ 一个或多个 SGE 被 WR 引用</span><br><span class="line">WR：描述“应用希望执行的一次逻辑操作”</span><br><span class="line">  ↓ post 后由 provider 编码</span><br><span class="line">WQE：描述“RNIC 可以从硬件队列取走并执行的一项工作”</span><br></pre></td></tr></table></figure>
+
+<h3 id="1-1-先逐个定义：全称、含义与用途"><a href="#1-1-先逐个定义：全称、含义与用途" class="headerlink" title="1.1 先逐个定义：全称、含义与用途"></a>1.1 先逐个定义：全称、含义与用途</h3><h4 id="1-1-1-WR：Work-Request"><a href="#1-1-1-WR：Work-Request" class="headerlink" title="1.1.1 WR：Work Request"></a>1.1.1 WR：Work Request</h4><p><strong>英文全称：Work Request。中文可译为“工作请求”。</strong></p>
+<p>这里的 <code>Work</code> 是“要网卡完成的一项工作”，不是特指 WRITE；<code>Request</code> 表示它是应用<br>提交给 verbs/provider 的软件请求。</p>
+<p>定义：</p>
+<blockquote>
+<p>WR 是应用在软件接口层构造的请求对象，用来表达“我希望这个 QP 执行什么操作、<br>使用哪些本地内存、是否需要 completion，以及该 operation 的专用参数是什么”。</p>
+</blockquote>
+<p>libibverbs 中主要有两类 WR：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">ibv_send_wr</span><br><span class="line">  用于提交到 SQ</span><br><span class="line">  可表达 SEND、RDMA WRITE、RDMA READ、ATOMIC 等主动操作</span><br><span class="line"></span><br><span class="line">ibv_recv_wr</span><br><span class="line">  用于提交到 RQ/SRQ</span><br><span class="line">  表达“下一条 SEND/Immediate 到达时，可以使用哪些本地 receive buffer”</span><br></pre></td></tr></table></figure>
+
+<p>WR 的用途是把一次逻辑操作的参数交给 provider。以 <code>ibv_send_wr</code> 为例，重要字段包括：</p>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>wr_id</code></td>
+<td>应用自定义的 64-bit cookie；CQE 会带回来，便于找回 request/buffer/callback</td>
+</tr>
+<tr>
+<td><code>next</code></td>
+<td>把多条 WR 串成 linked list，一次 <code>ibv_post_send()</code> 批量提交</td>
+</tr>
+<tr>
+<td><code>sg_list</code></td>
+<td>指向 SGE 数组，描述本地数据从哪里读或写到哪里</td>
+</tr>
+<tr>
+<td><code>num_sge</code></td>
+<td>本 WR 使用多少个 SGE</td>
+</tr>
+<tr>
+<td><code>opcode</code></td>
+<td>操作类型，如 <code>IBV_WR_SEND</code>、<code>IBV_WR_RDMA_WRITE</code></td>
+</tr>
+<tr>
+<td><code>send_flags</code></td>
+<td>是否 signaled、inline、fence 等</td>
+</tr>
+<tr>
+<td><code>wr.rdma.remote_addr</code></td>
+<td>READ/WRITE 的远端 virtual address</td>
+</tr>
+<tr>
+<td><code>wr.rdma.rkey</code></td>
+<td>访问该远端地址所需的 rkey</td>
+</tr>
+<tr>
+<td><code>imm_data</code></td>
+<td>WITH_IMM 操作携带的 32-bit immediate data</td>
+</tr>
+</tbody></table>
+<p>一条 WR 的例子：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">ibv_send_wr wr = {};</span><br><span class="line">wr.wr_id      = request_id;</span><br><span class="line">wr.opcode     = IBV_WR_RDMA_WRITE;</span><br><span class="line">wr.send_flags = IBV_SEND_SIGNALED;</span><br><span class="line">wr.sg_list    = &amp;local_sge;</span><br><span class="line">wr.num_sge    = <span class="number">1</span>;</span><br><span class="line">wr.wr.rdma.remote_addr = remote_address;</span><br><span class="line">wr.wr.rdma.rkey        = remote_rkey;</span><br></pre></td></tr></table></figure>
+
+<p>此时它仍然只是 CPU 进程内存中的 C 结构体：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">构造 WR</span><br><span class="line">  ≠ 已经进入 SQ</span><br><span class="line">  ≠ RNIC 已经看到</span><br><span class="line">  ≠ 数据已经发送</span><br></pre></td></tr></table></figure>
+
+<p>只有调用 <code>ibv_post_send()</code> 或 <code>ibv_post_recv()</code> 后，provider 才接受并转换这个请求。</p>
+<p>WR 的创建者和读取者：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">应用/通信库创建 WR</span><br><span class="line">       ↓</span><br><span class="line">libibverbs provider 在 post 调用中读取 WR</span><br><span class="line">       ↓</span><br><span class="line">provider 将其编码成硬件 WQE</span><br></pre></td></tr></table></figure>
+
+<p>所以 WR 是 <strong>portable verbs API 层对象</strong>；不同 RNIC 仍使用相同的<br><code>ibv_send_wr/ibv_recv_wr</code> 接口。</p>
+<h4 id="1-1-2-WQE：Work-Queue-Element"><a href="#1-1-2-WQE：Work-Queue-Element" class="headerlink" title="1.1.2 WQE：Work Queue Element"></a>1.1.2 WQE：Work Queue Element</h4><p><strong>英文全称：Work Queue Element。中文可译为“工作队列元素”。</strong></p>
+<p>拆开理解：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Work Queue = 设备工作队列</span><br><span class="line">Element    = 队列中的一个元素/槽位</span><br></pre></td></tr></table></figure>
+
+<p>定义：</p>
+<blockquote>
+<p>WQE 是 provider 根据 WR 编码出的、放入 QP 的 SQ/RQ、可由 RNIC 直接解释和执行的<br>硬件工作描述符。</p>
+</blockquote>
+<p>WQE 的用途是把软件请求变成设备可执行格式。例如一条 RDMA WRITE WQE 需要让 RNIC<br>知道：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">执行哪种 opcode</span><br><span class="line">从哪些 local registered memory 读取</span><br><span class="line">一共传多少字节</span><br><span class="line">使用哪个 local lkey</span><br><span class="line">写到哪个 remote address</span><br><span class="line">使用哪个 remote rkey</span><br><span class="line">是否 inline/signaled/fenced</span><br><span class="line">完成后是否需要写 CQE</span><br></pre></td></tr></table></figure>
+
+<p>两类最常见的 WQE：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">Send WQE</span><br><span class="line">  位于 QP Send Queue</span><br><span class="line">  RNIC 主动执行 SEND/WRITE/READ/ATOMIC</span><br><span class="line"></span><br><span class="line">Receive WQE</span><br><span class="line">  位于 QP Receive Queue 或 SRQ</span><br><span class="line">  RNIC 收到 SEND/Immediate 时取出，用来决定本地 receive buffer/context</span><br></pre></td></tr></table></figure>
+
+<p>WQE 的创建者和读取者：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">provider 创建/编码 WQE</span><br><span class="line">       ↓</span><br><span class="line">WQE 被写入 SQ 或 RQ</span><br><span class="line">       ↓</span><br><span class="line">doorbell 通知 RNIC</span><br><span class="line">       ↓</span><br><span class="line">RNIC 取出并执行 WQE</span><br></pre></td></tr></table></figure>
+
+<p>与 WR 不同，WQE 的真实二进制布局通常是 <strong>provider/RNIC 专用格式</strong>。应用不能假设：</p>
+<ul>
+<li>所有网卡的 WQE 字段顺序相同；</li>
+<li>一条 WQE 固定是多少字节；</li>
+<li>WR 中的 C 字段可以原样 memcpy 给任意 RNIC；</li>
+<li>可以绕过 provider 直接按某台网卡格式操作另一台网卡。</li>
+</ul>
+<p>“一条 WR 通常对应一条逻辑 WQE”适合建立心智模型，但精确编码、分段、padding、<br>inline layout 和特殊 opcode 仍由 provider/硬件决定。</p>
+<p>WQE 主要是<strong>描述符</strong>，通常不保存完整 non-inline payload。它保存 payload 的本地<br>地址、长度和 lkey；RNIC 执行时再 DMA 访问实际 buffer。只有 inline 等模式会把小<br>payload 直接编码到 WQE/提交区域。</p>
+<h4 id="1-1-3-SGE：Scatter-Gather-Element"><a href="#1-1-3-SGE：Scatter-Gather-Element" class="headerlink" title="1.1.3 SGE：Scatter/Gather Element"></a>1.1.3 SGE：Scatter/Gather Element</h4><p><strong>英文全称：Scatter/Gather Element。中文可译为“分散/聚集元素”或“散布/聚集项”。</strong></p>
+<p>定义：</p>
+<blockquote>
+<p>SGE 是对“一段本地已注册内存”的描述，由本地地址、长度和 lkey 组成。一个 WR 可以<br>引用一个或多个 SGE。</p>
+</blockquote>
+<p>libibverbs 的核心结构：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">ibv_sge</span> {</span><br><span class="line">    <span class="type">uint64_t</span> addr;    <span class="comment">// 本地 virtual address</span></span><br><span class="line">    <span class="type">uint32_t</span> length;  <span class="comment">// 这段内存的字节数</span></span><br><span class="line">    <span class="type">uint32_t</span> lkey;    <span class="comment">// 证明本地 RNIC 有权访问该内存</span></span><br><span class="line">};</span><br></pre></td></tr></table></figure>
+
+<p>三个字段分别回答：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">addr   ：从本机哪一个 virtual address 开始？</span><br><span class="line">length ：连续访问多少字节？</span><br><span class="line">lkey   ：这段本地地址是否已注册，RNIC 是否有权限 DMA？</span><br></pre></td></tr></table></figure>
+
+<p>SGE 的用途由 operation 方向决定：</p>
+<table>
+<thead>
+<tr>
+<th>WR 类型</th>
+<th>SGE 描述的本地内存角色</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>SEND</td>
+<td>本地 source；RNIC 从这里 DMA read 后发送</td>
+</tr>
+<tr>
+<td>Receive</td>
+<td>本地 destination；RNIC 把收到的 SEND payload DMA write 到这里</td>
+</tr>
+<tr>
+<td>RDMA WRITE</td>
+<td>本地 source；写到 WR 单独指定的远端地址</td>
+</tr>
+<tr>
+<td>RDMA READ</td>
+<td>本地 destination；远端读回的数据写到这里</td>
+</tr>
+<tr>
+<td>ATOMIC</td>
+<td>本地 result buffer；保存远端原子操作返回的旧值</td>
+</tr>
+</tbody></table>
+<p>最容易混淆的一点是：</p>
+<blockquote>
+<p><strong>SGE 只描述本地内存，不描述远端内存。</strong></p>
+</blockquote>
+<p>例如 RDMA WRITE 同时需要：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">本地 source：</span><br><span class="line">  SGE.addr + SGE.length + SGE.lkey</span><br><span class="line"></span><br><span class="line">远端 destination：</span><br><span class="line">  WR.wr.rdma.remote_addr + WR.wr.rdma.rkey</span><br></pre></td></tr></table></figure>
+
+<p>远端地址/rkey 属于 operation-specific WR 字段，不是 SGE。</p>
+<p>为什么叫 Scatter/Gather：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">Gather（发送侧聚集）</span><br><span class="line">  SGE[0] header</span><br><span class="line">  SGE[1] metadata</span><br><span class="line">  SGE[2] payload</span><br><span class="line">       ↓ RNIC 按顺序读取</span><br><span class="line">  形成一条逻辑发送消息</span><br><span class="line"></span><br><span class="line">Scatter（接收侧分散）</span><br><span class="line">  一条收到的逻辑消息</span><br><span class="line">       ↓ RNIC 按 Receive SGE 顺序写入</span><br><span class="line">  SGE[0] buffer A</span><br><span class="line">  SGE[1] buffer B</span><br><span class="line">  SGE[2] buffer C</span><br></pre></td></tr></table></figure>
+
+<p>SGE 本身不是 queue element：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">错误理解：SGE 和 WQE 都是 SQ 中并列的任务</span><br><span class="line"></span><br><span class="line">正确理解：WQE 是队列任务；</span><br><span class="line">          SGE 是该任务内部引用的本地 memory segment 描述</span><br></pre></td></tr></table></figure>
+
+<h4 id="1-1-4-三者一张表对比"><a href="#1-1-4-三者一张表对比" class="headerlink" title="1.1.4 三者一张表对比"></a>1.1.4 三者一张表对比</h4><table>
+<thead>
+<tr>
+<th>对象</th>
+<th>英文全称</th>
+<th>所在层次</th>
+<th>谁创建</th>
+<th>谁读取/使用</th>
+<th>核心用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>WR</td>
+<td>Work Request</td>
+<td>libibverbs API/应用软件层</td>
+<td>应用或通信库</td>
+<td>provider</td>
+<td>表达一次逻辑 operation</td>
+</tr>
+<tr>
+<td>WQE</td>
+<td>Work Queue Element</td>
+<td>QP SQ/RQ 硬件工作队列层</td>
+<td>provider</td>
+<td>RNIC</td>
+<td>让设备执行这项工作</td>
+</tr>
+<tr>
+<td>SGE</td>
+<td>Scatter/Gather Element</td>
+<td>WR 的本地 memory 描述层；随后编码进 WQE</td>
+<td>应用或通信库</td>
+<td>provider 编码，RNIC 按编码访问</td>
+<td>描述一段 local registered memory</td>
+</tr>
+</tbody></table>
+<p>再加两个后文经常出现的对象：</p>
+<table>
+<thead>
+<tr>
+<th>对象</th>
+<th>英文全称</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>WQ</td>
+<td>Work Queue</td>
+<td>保存 WQE 的工作队列；常见为 SQ/RQ</td>
+</tr>
+<tr>
+<td>CQE</td>
+<td>Completion Queue Element</td>
+<td>RNIC 写入 CQ 的完成结果，带 status、opcode、wr_id 等</td>
+</tr>
+</tbody></table>
+<h4 id="1-1-5-三者的包含和转换关系"><a href="#1-1-5-三者的包含和转换关系" class="headerlink" title="1.1.5 三者的包含和转换关系"></a>1.1.5 三者的包含和转换关系</h4><p>假设应用要把两段离散 local buffer 写到一个连续 remote range：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">local header  = 地址 A，64 B</span><br><span class="line">local payload = 地址 B，4032 B</span><br><span class="line">remote target = 地址 R，4096 B</span><br></pre></td></tr></table></figure>
+
+<p>应用首先构造两个 SGE：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">ibv_sge sges[<span class="number">2</span>] = {};</span><br><span class="line"></span><br><span class="line">sges[<span class="number">0</span>].addr   = <span class="built_in">reinterpret_cast</span>&lt;<span class="type">uintptr_t</span>&gt;(header);</span><br><span class="line">sges[<span class="number">0</span>].length = <span class="number">64</span>;</span><br><span class="line">sges[<span class="number">0</span>].lkey   = header_mr-&gt;lkey;</span><br><span class="line"></span><br><span class="line">sges[<span class="number">1</span>].addr   = <span class="built_in">reinterpret_cast</span>&lt;<span class="type">uintptr_t</span>&gt;(payload);</span><br><span class="line">sges[<span class="number">1</span>].length = <span class="number">4032</span>;</span><br><span class="line">sges[<span class="number">1</span>].lkey   = payload_mr-&gt;lkey;</span><br></pre></td></tr></table></figure>
+
+<p>然后构造一条引用它们的 WR：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">ibv_send_wr wr = {};</span><br><span class="line">wr.wr_id      = request_id;</span><br><span class="line">wr.opcode     = IBV_WR_RDMA_WRITE;</span><br><span class="line">wr.send_flags = IBV_SEND_SIGNALED;</span><br><span class="line">wr.sg_list    = sges;</span><br><span class="line">wr.num_sge    = <span class="number">2</span>;</span><br><span class="line">wr.wr.rdma.remote_addr = remote_target;</span><br><span class="line">wr.wr.rdma.rkey        = remote_rkey;</span><br></pre></td></tr></table></figure>
+
+<p>最后 post：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">ibv_send_wr* bad_wr = <span class="literal">nullptr</span>;</span><br><span class="line"><span class="type">int</span> rc = <span class="built_in">ibv_post_send</span>(qp, &amp;wr, &amp;bad_wr);</span><br></pre></td></tr></table></figure>
+
+<p>转换链：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line">SGE[0] ─┐</span><br><span class="line">        ├─→ WR</span><br><span class="line">SGE[1] ─┘    opcode=RDMA_WRITE</span><br><span class="line">             remote_addr=R</span><br><span class="line">             rkey=...</span><br><span class="line">                │</span><br><span class="line">                │ ibv_post_send()</span><br><span class="line">                ▼</span><br><span class="line">        provider 编码 Send WQE</span><br><span class="line">          ├─ control/opcode</span><br><span class="line">          ├─ remote address/rkey</span><br><span class="line">          ├─ local data segment 0（来自 SGE[0]）</span><br><span class="line">          └─ local data segment 1（来自 SGE[1]）</span><br><span class="line">                │</span><br><span class="line">                │ doorbell</span><br><span class="line">                ▼</span><br><span class="line">        RNIC 执行 WQE</span><br><span class="line">          ├─ DMA read 地址 A 的 64 B</span><br><span class="line">          ├─ DMA read 地址 B 的 4032 B</span><br><span class="line">          ├─ 在网络上按序发送 4096 B</span><br><span class="line">          └─ 远端 RNIC 写入从地址 R 开始的连续 range</span><br><span class="line">                │</span><br><span class="line">                ▼</span><br><span class="line">        signaled completion → CQE(wr_id=request_id)</span><br></pre></td></tr></table></figure>
+
+<p>这一例子把三者的职责完全分开了：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">SGE 回答：本地字节在哪里？</span><br><span class="line">WR 回答：这些字节要执行什么逻辑操作？</span><br><span class="line">WQE 回答：如何把该请求表示成这块 RNIC 能执行的队列任务？</span><br></pre></td></tr></table></figure>
+
+<p>接下来再进入 Work Queue、具体 WQE 字段和构造/执行流程。</p>
+<h3 id="1-2-Work-Queue、SQ、RQ-与-WQE"><a href="#1-2-Work-Queue、SQ、RQ-与-WQE" class="headerlink" title="1.2 Work Queue、SQ、RQ 与 WQE"></a>1.2 Work Queue、SQ、RQ 与 WQE</h3><p>要理解 WQE 放在哪里，先看完整层次：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">应用想做的事情</span><br><span class="line">  “把 local buffer 写到远端地址”</span><br><span class="line">        │</span><br><span class="line">        ▼</span><br><span class="line">WR（Work Request）</span><br><span class="line">  应用通过 libibverbs 提交的 C 结构体/API 语义</span><br><span class="line">        │ provider 转换</span><br><span class="line">        ▼</span><br><span class="line">WQE（Work Queue Element）</span><br><span class="line">  放入 QP Work Queue、供 RNIC 执行的硬件描述符</span><br><span class="line">        │ RNIC 取出并执行</span><br><span class="line">        ▼</span><br><span class="line">网络 packet / PCIe transaction</span><br><span class="line">  真正承载 payload 与设备 DMA 的更低层动作</span><br><span class="line">        │</span><br><span class="line">        ▼</span><br><span class="line">CQE（Completion Queue Element）</span><br><span class="line">  RNIC 写回的完成记录</span><br></pre></td></tr></table></figure>
+
+<p>一句话概括：</p>
+<blockquote>
+<p><strong>WR 是软件接口中的“请求”，WQE 是这个请求进入设备工作队列后的硬件表示，<br>CQE 是设备执行到完成边界后写回的结果。</strong></p>
+</blockquote>
+<p>不同 provider/RNIC 的 WQE 二进制布局并不属于通用 verbs ABI。应用通常填写<br><code>ibv_send_wr</code>、<code>ibv_recv_wr</code> 和 <code>ibv_sge</code>，由 provider 按具体网卡格式编码 WQE。<br>因此不要在应用代码中假设所有 RNIC 的 WQE 都有相同字节数或字段偏移。</p>
+<p>QP（Queue Pair）之所以叫“队列对”，是因为它通常包含：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">QP</span><br><span class="line">├─ SQ：Send Queue</span><br><span class="line">│    └─ Send WQE 0, Send WQE 1, Send WQE 2, ...</span><br><span class="line">│</span><br><span class="line">└─ RQ：Receive Queue</span><br><span class="line">     └─ Receive WQE 0, Receive WQE 1, Receive WQE 2, ...</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><strong>SQ WQE</strong> 描述本端主动发起的 SEND、RDMA WRITE、RDMA READ、ATOMIC 等操作；</li>
+<li><strong>RQ WQE</strong> 描述接收端预先提供的 receive buffer；</li>
+<li><strong>CQ</strong> 不是 QP 内的第三条工作队列，而是完成事件队列；多个 QP 可以关联同一个 CQ；</li>
+<li>RQ 也可以被 <strong>SRQ（Shared Receive Queue）</strong> 替代，让多个 QP 共享一池 Receive WQE。</li>
+</ul>
+<p>可以把 SQ/RQ 理解为“待办事项队列”，把 CQ 理解为“已办结果队列”：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">应用/Provider                      RNIC</span><br><span class="line"></span><br><span class="line">向 SQ 放 Send WQE   ─────────────→ 取 WQE、发包、重试、完成</span><br><span class="line">向 RQ 放 Recv WQE   ─────────────→ 收到 SEND 后匹配一个 WQE</span><br><span class="line">轮询 CQ             ←───────────── 写 CQE</span><br></pre></td></tr></table></figure>
+
+<p>注意，“Send Queue”不只执行 SEND opcode。RDMA WRITE、READ、ATOMIC 也都通过<br><code>ibv_post_send()</code> 提交到 SQ；这里的 send 更接近“本端主动发起”。</p>
+<h3 id="1-3-WR-与-WQE-为什么不是同一个对象"><a href="#1-3-WR-与-WQE-为什么不是同一个对象" class="headerlink" title="1.3 WR 与 WQE 为什么不是同一个对象"></a>1.3 WR 与 WQE 为什么不是同一个对象</h3><p>应用构造的是通用 verbs WR：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">ibv_sge sge = {};</span><br><span class="line">sge.addr   = <span class="built_in">reinterpret_cast</span>&lt;<span class="type">uintptr_t</span>&gt;(local_buffer);</span><br><span class="line">sge.length = bytes;</span><br><span class="line">sge.lkey   = local_mr-&gt;lkey;</span><br><span class="line"></span><br><span class="line">ibv_send_wr wr = {};</span><br><span class="line">wr.wr_id      = opaque_cookie;</span><br><span class="line">wr.sg_list    = &amp;sge;</span><br><span class="line">wr.num_sge    = <span class="number">1</span>;</span><br><span class="line">wr.opcode     = IBV_WR_RDMA_WRITE;</span><br><span class="line">wr.send_flags = IBV_SEND_SIGNALED;</span><br><span class="line">wr.wr.rdma.remote_addr = remote_address;</span><br><span class="line">wr.wr.rdma.rkey        = remote_rkey;</span><br><span class="line"></span><br><span class="line">ibv_send_wr* bad_wr = <span class="literal">nullptr</span>;</span><br><span class="line"><span class="type">int</span> rc = <span class="built_in">ibv_post_send</span>(qp, &amp;wr, &amp;bad_wr);</span><br></pre></td></tr></table></figure>
+
+<p>这段代码里的 <code>wr</code> 是进程地址空间中的普通 C 结构体。<code>ibv_post_send()</code> 成功时，<br>provider 已经读取 WR/SGE 内容，并把它编码到 QP 的硬件 SQ 中。应用随后可以复用<br><code>ibv_send_wr</code> 和 <code>ibv_sge</code> 这两个<strong>描述符对象本身</strong>。</p>
+<p>但 non-inline 的 <code>local_buffer</code> 不同：RNIC 可能稍后才 DMA 读取 payload，所以在相应<br>WR 完成前，应用不能释放、注销或改写仍由设备读取的那段 buffer。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">post 返回后：</span><br><span class="line"></span><br><span class="line">ibv_send_wr 对象        → provider 已读取，通常可以复用</span><br><span class="line">ibv_sge 对象            → provider 已读取，通常可以复用</span><br><span class="line">SGE 指向的 payload      → non-inline 时仍可能被 RNIC DMA，不能提前复用</span><br><span class="line">MR / lkey               → WQE 完成前必须继续有效</span><br></pre></td></tr></table></figure>
+
+<p>若 <code>IBV_SEND_INLINE</code> 成功使用，payload 已在 post 路径被复制进 WQE/设备提交区域，<br>原 payload buffer 通常在 <code>ibv_post_send()</code> 返回后即可复用；后文第 6 节会继续解释。</p>
+<h3 id="1-4-一个-Send-WQE-概念上包含什么"><a href="#1-4-一个-Send-WQE-概念上包含什么" class="headerlink" title="1.4 一个 Send WQE 概念上包含什么"></a>1.4 一个 Send WQE 概念上包含什么</h3><p>WQE 的确切二进制 layout 是 provider/硬件相关的，但可以用下面的逻辑结构理解：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">Send WQE</span><br><span class="line">┌─────────────────────────────────────────────────────────┐</span><br><span class="line">│ Control                                                 │</span><br><span class="line">│ opcode、flags、WQE 序号、是否 signaled/fence/inline ... │</span><br><span class="line">├─────────────────────────────────────────────────────────┤</span><br><span class="line">│ Local data description                                  │</span><br><span class="line">│ SGE 0: local_addr + length + lkey                       │</span><br><span class="line">│ SGE 1: local_addr + length + lkey                       │</span><br><span class="line">│ ...                                                     │</span><br><span class="line">├─────────────────────────────────────────────────────────┤</span><br><span class="line">│ Operation-specific fields                               │</span><br><span class="line">│ WRITE/READ: remote_addr + rkey                          │</span><br><span class="line">│ SEND_WITH_IMM/WRITE_WITH_IMM: immediate data            │</span><br><span class="line">│ ATOMIC: compare/swap/add operand                         │</span><br><span class="line">├─────────────────────────────────────────────────────────┤</span><br><span class="line">│ Optional inline payload                                 │</span><br><span class="line">│ 设置 IBV_SEND_INLINE 时，小数据可直接嵌入提交区域        │</span><br><span class="line">└─────────────────────────────────────────────────────────┘</span><br></pre></td></tr></table></figure>
+
+<p>并不是每种 opcode 都使用全部区域：</p>
+<table>
+<thead>
+<tr>
+<th>Opcode</th>
+<th>本地 SGE</th>
+<th><code>remote_addr+rkey</code></th>
+<th>其他典型字段</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>SEND</td>
+<td>要发送的 local payload</td>
+<td>不需要</td>
+<td>可带 immediate</td>
+</tr>
+<tr>
+<td>RDMA WRITE</td>
+<td>local source</td>
+<td>需要</td>
+<td>可带 immediate</td>
+</tr>
+<tr>
+<td>RDMA READ</td>
+<td>local destination</td>
+<td>需要</td>
+<td>读取长度来自 local SGE 总长度</td>
+</tr>
+<tr>
+<td>ATOMIC</td>
+<td>local result buffer</td>
+<td>需要</td>
+<td>compare/swap 或 add operand</td>
+</tr>
+<tr>
+<td>Receive WQE</td>
+<td>local destination</td>
+<td>不需要</td>
+<td>通常主要由 SGE 组成</td>
+</tr>
+</tbody></table>
+<p>这里的表是语义视图，不等于硬件 WQE 中一定按这个顺序排列。</p>
+<h3 id="1-5-SGE：一个-WQE-可以引用多段本地内存"><a href="#1-5-SGE：一个-WQE-可以引用多段本地内存" class="headerlink" title="1.5 SGE：一个 WQE 可以引用多段本地内存"></a>1.5 SGE：一个 WQE 可以引用多段本地内存</h3><p>SGE 是 <strong>Scatter/Gather Element</strong>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">SGE = addr + length + lkey</span><br></pre></td></tr></table></figure>
+
+<p>例如一条 SEND WQE 可以引用三段不连续内存：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">SGE[0] → header MR:  [地址 A, 64 B,   lkey_A]</span><br><span class="line">SGE[1] → metadata:   [地址 B, 256 B,  lkey_B]</span><br><span class="line">SGE[2] → payload MR: [地址 C, 32 KiB, lkey_C]</span><br></pre></td></tr></table></figure>
+
+<p>RNIC 按 SGE 顺序读取它们，在网络上形成一条逻辑 message：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">网络字节序列 = header || metadata || payload</span><br></pre></td></tr></table></figure>
+
+<p>应用不用先把三段数据复制到一个连续 staging buffer，这就是 gather。接收 WQE 也可以<br>有多个 SGE，让收到的连续 message 分散写入多段本地内存，这就是 scatter。</p>
+<p>限制来自 QP/device capability：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">max_send_sge   一条 Send WR/WQE 最多可引用多少 SGE</span><br><span class="line">max_recv_sge   一条 Receive WR/WQE 最多可引用多少 SGE</span><br></pre></td></tr></table></figure>
+
+<p>还要注意：</p>
+<ul>
+<li>各 SGE 的 <code>[addr, addr+length)</code> 必须在对应 lkey 注册范围内；</li>
+<li>使用多个 SGE 减少了应用 memcpy，但 RNIC 仍要执行多段 DMA read/write；</li>
+<li>SGE 数太多会增大 WQE、增加地址处理和 DMA 碎片化成本；</li>
+<li>一个 WQE 的总 payload 是各有效 SGE length 之和，不是“一个 SGE 就是一条 packet”。</li>
+</ul>
+<h3 id="1-6-Receive-WQE-保存的是数据，还是-buffer-描述符"><a href="#1-6-Receive-WQE-保存的是数据，还是-buffer-描述符" class="headerlink" title="1.6 Receive WQE 保存的是数据，还是 buffer 描述符"></a>1.6 Receive WQE 保存的是数据，还是 buffer 描述符</h3><p>Receive WQE 不是收到的 packet 本身，它是接收端预先交给 RNIC 的“空 buffer 清单”：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">ibv_sge recv_sge = {};</span><br><span class="line">recv_sge.addr   = <span class="built_in">reinterpret_cast</span>&lt;<span class="type">uintptr_t</span>&gt;(recv_buffer);</span><br><span class="line">recv_sge.length = recv_capacity;</span><br><span class="line">recv_sge.lkey   = recv_mr-&gt;lkey;</span><br><span class="line"></span><br><span class="line">ibv_recv_wr recv_wr = {};</span><br><span class="line">recv_wr.wr_id   = recv_buffer_id;</span><br><span class="line">recv_wr.sg_list = &amp;recv_sge;</span><br><span class="line">recv_wr.num_sge = <span class="number">1</span>;</span><br><span class="line"></span><br><span class="line">ibv_recv_wr* bad_recv_wr = <span class="literal">nullptr</span>;</span><br><span class="line"><span class="built_in">ibv_post_recv</span>(qp, &amp;recv_wr, &amp;bad_recv_wr);</span><br></pre></td></tr></table></figure>
+
+<p>执行 SEND 时：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">远端 SEND message 到达</span><br><span class="line">  → 接收 RNIC 从 QP RQ/SRQ 取出一个 Receive WQE</span><br><span class="line">  → 按 WQE 中的 SGE，把 payload DMA 到 application buffer</span><br><span class="line">  → 生成 Receive CQE</span><br><span class="line">  → CQE.wr_id 帮应用找回是哪个 buffer</span><br><span class="line">  → CQE.byte_len 告诉应用实际收到多少字节</span><br></pre></td></tr></table></figure>
+
+<p>一个可能包含许多网络 packet 的大 SEND message，通常仍只消费一个 Receive WQE。<br>如果 message 大于 Receive WQE 所提供的总 SGE capacity，会得到 local length error，<br>而不是自动拼接多个普通 Receive WQE 来容纳一条 message。</p>
+<p>不同 operation 对远端 RQ 的关系：</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>是否消费远端 Receive WQE</th>
+<th>原因</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>SEND / SEND_WITH_IMM</td>
+<td>是</td>
+<td>需要由远端 RQ 指定 payload 落点</td>
+</tr>
+<tr>
+<td>RDMA WRITE</td>
+<td>否</td>
+<td>落点已由 <code>remote_addr+rkey</code> 指定</td>
+</tr>
+<tr>
+<td>RDMA WRITE_WITH_IMM</td>
+<td>通常是</td>
+<td>payload 写 remote MR；Receive WQE 承接 immediate 通知上下文</td>
+</tr>
+<tr>
+<td>RDMA READ</td>
+<td>否</td>
+<td>远端只按 rkey 提供被读取的 MR</td>
+</tr>
+<tr>
+<td>ATOMIC</td>
+<td>否</td>
+<td>直接操作远端 MR 中的地址</td>
+</tr>
+</tbody></table>
+<p>所以增加 <code>max_recv_wr</code> 主要能增加“可提前接收多少条 SEND/Immediate 消息”，不会扩大<br>plain RDMA WRITE 的发送 BDP window。</p>
+<h3 id="1-7-ibv-post-send-到-RNIC-执行的完整流程"><a href="#1-7-ibv-post-send-到-RNIC-执行的完整流程" class="headerlink" title="1.7 ibv_post_send() 到 RNIC 执行的完整流程"></a>1.7 <code>ibv_post_send()</code> 到 RNIC 执行的完整流程</h3><p>下面把“准备描述符 → doorbell → 设备取任务”展开到 WQE 粒度：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line">应用线程</span><br><span class="line">  │</span><br><span class="line">  │ 1. 填 ibv_sge / ibv_send_wr</span><br><span class="line">  │</span><br><span class="line">  ▼</span><br><span class="line">ibv_post_send(qp, first_wr, &amp;bad_wr)</span><br><span class="line">  │</span><br><span class="line">  │ 2. provider 检查/预留 SQ slot</span><br><span class="line">  │ 3. 把 WR 编码为硬件 WQE</span><br><span class="line">  │ 4. 更新 SQ producer index</span><br><span class="line">  │ 5. memory barrier：确保 WQE 内容先于通知对设备可见</span><br><span class="line">  │ 6. 写 doorbell record / MMIO doorbell</span><br><span class="line">  ▼</span><br><span class="line">RNIC</span><br><span class="line">  │</span><br><span class="line">  │ 7. 发现 producer index 前进</span><br><span class="line">  │ 8. 取 WQE，解析 opcode、SGE、key、地址</span><br><span class="line">  │ 9. 检查 QP 状态、权限和资源</span><br><span class="line">  │10. non-inline 发送时 DMA read local payload</span><br><span class="line">  │11. 按 path MTU packetize，维护 PSN、ACK、retry 等状态</span><br><span class="line">  │12. 网络发送；远端 RNIC 执行写入/读取/原子/接收语义</span><br><span class="line">  │13. 达到该 WR 的 transport completion 条件</span><br><span class="line">  │14. 若 signaled 或发生需要报告的错误，向 CQ 写 CQE</span><br><span class="line">  ▼</span><br><span class="line">应用 poll CQ</span><br><span class="line">  │</span><br><span class="line">  │15. 根据 CQE.wr_id 回收 buffer、MR 引用、batch/callback</span><br><span class="line">  ▼</span><br><span class="line">SQ slot/应用资源可安全复用</span><br></pre></td></tr></table></figure>
+
+<p>其中第 3～6 步由 provider 和硬件实现决定。常见实现会把 SQ ring 映射到用户态，<br>避免每次 post 都进入内核；也可能用类似 BlueFlame 的设备专用 MMIO 提交方式把小 WQE<br>直接推给网卡。它们都是优化细节，不能反推成所有 RNIC 都会以完全相同方式“DMA fetch<br>一份 host WQE”。</p>
+<h3 id="1-8-Doorbell-是什么，为什么不能先敲再写完-WQE"><a href="#1-8-Doorbell-是什么，为什么不能先敲再写完-WQE" class="headerlink" title="1.8 Doorbell 是什么，为什么不能先敲再写完 WQE"></a>1.8 Doorbell 是什么，为什么不能先敲再写完 WQE</h3><p>WQE ring 是一排已经分配好的槽位。软件先写槽位，再通知设备“新的 producer index<br>到这里了”：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">SQ ring</span><br><span class="line"></span><br><span class="line">consumer                         producer</span><br><span class="line">   │                                │</span><br><span class="line">   ▼                                ▼</span><br><span class="line">┌──────┬──────┬──────┬──────┬──────┬──────┐</span><br><span class="line">│ done │ done │ WQE2 │ WQE3 │ free │ free │</span><br><span class="line">└──────┴──────┴──────┴──────┴──────┴──────┘</span><br><span class="line">                 新提交范围 ──────┘</span><br><span class="line"></span><br><span class="line">写好 WQE2/WQE3</span><br><span class="line">  → memory barrier</span><br><span class="line">  → doorbell 告诉 RNIC producer 已前进</span><br></pre></td></tr></table></figure>
+
+<p>若设备在 WQE 字段完全可见前就收到 doorbell，理论上可能读取到部分旧值/未完成内容。<br>因此 provider 必须处理正确的内存顺序；应用不应绕过 provider 自己随意写 doorbell。</p>
+<p>一次 <code>ibv_post_send()</code> 可以提交一条 WR linked list。provider 可以在准备一串 WQE 后<br>只做一次或更少的 doorbell 动作，所以 batch posting 能减少：</p>
+<ul>
+<li>API 调用和锁开销；</li>
+<li>producer index 更新；</li>
+<li>MMIO/doorbell 次数；</li>
+<li>每 WQE 的固定提交成本。</li>
+</ul>
+<p>但 batch 并不会把 N 条 WR 自动变成一条 WQE。通常仍是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">N 个 WR → N 个 WQE → 可以一次 post/doorbell 通知</span><br></pre></td></tr></table></figure>
+
+<p>如果应用想真正提高 <code>bytes/WQE</code>，需要把多个小逻辑对象合并进更大的 buffer/WR，或者<br>在 capability 允许时使用一个带多个 SGE 的 WR。</p>
+<h3 id="1-9-WQE、网络-Packet-和-PCIe-TLP-不是一一对应"><a href="#1-9-WQE、网络-Packet-和-PCIe-TLP-不是一一对应" class="headerlink" title="1.9 WQE、网络 Packet 和 PCIe TLP 不是一一对应"></a>1.9 WQE、网络 Packet 和 PCIe TLP 不是一一对应</h3><p>这是最重要的层次关系之一：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">一个 8 MiB RDMA WRITE WR</span><br><span class="line">        │ provider 编码</span><br><span class="line">        ▼</span><br><span class="line">通常是一条逻辑 Send WQE</span><br><span class="line">        │ RNIC 按 path MTU 拆分</span><br><span class="line">        ▼</span><br><span class="line">许多 RDMA transport packets</span><br><span class="line">        │ 网卡 DMA/PCIe packetization</span><br><span class="line">        ▼</span><br><span class="line">许多 PCIe Read/Write TLP</span><br></pre></td></tr></table></figure>
+
+<p>举一个只用于理解数量级的例子。假设：</p>
+<ul>
+<li>RDMA WRITE payload 为 8 MiB；</li>
+<li>RoCE path MTU 为 4 KiB；</li>
+<li>暂不计算协议 header、分段边界和重传。</li>
+</ul>
+<p>那么网络 packet 数量约为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">8 MiB / 4 KiB = 2048 packets</span><br></pre></td></tr></table></figure>
+
+<p>但应用仍可能只提交了一条 WR/WQE。RNIC 为读取这 8 MiB local payload 产生的 PCIe<br>Read TLP 数量又受 PCIe Maximum Read Request Size、completion 切分、地址对齐等影响，<br>不会简单等于 2048。</p>
+<p>反过来，一个小 inline WQE 可能把 payload 随 WQE 一起提交，省掉对应用 payload 的<br>额外 DMA read，但 doorbell/MMIO 和网络 packet 仍然存在。</p>
+<p>因此：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">WQE depth        以“工作请求数”计</span><br><span class="line">网络 BDP         以“在途字节数”计</span><br><span class="line">packet rate      以“网络包数/秒”计</span><br><span class="line">PCIe 压力        以 TLP、payload byte、read/write transaction 等计</span><br></pre></td></tr></table></figure>
+
+<p>四种指标不能互相直接替换。</p>
+<h3 id="1-10-WQE-的状态与“outstanding”究竟指什么"><a href="#1-10-WQE-的状态与“outstanding”究竟指什么" class="headerlink" title="1.10 WQE 的状态与“outstanding”究竟指什么"></a>1.10 WQE 的状态与“outstanding”究竟指什么</h3><p>概念生命周期可以画成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">应用未提交</span><br><span class="line">   ↓</span><br><span class="line">posted：已写入 SQ，producer 已前进</span><br><span class="line">   ↓</span><br><span class="line">fetched/issued：RNIC 已取 WQE，开始 DMA/发包</span><br><span class="line">   ↓</span><br><span class="line">in flight：对应 packet/响应/ACK 尚在推进</span><br><span class="line">   ↓</span><br><span class="line">retired：RNIC 已达到 transport 完成条件</span><br><span class="line">   ↓</span><br><span class="line">CQE visible：signaled WR 的完成记录可被 poll</span><br><span class="line">   ↓</span><br><span class="line">reclaimed：应用/provider 回收 slot 和业务资源</span><br></pre></td></tr></table></figure>
+
+<p>这些名字是帮助理解的概念状态，不是所有 verbs provider 都向应用暴露的正式状态机。<br>“outstanding WQE”在不同文档中也可能指：</p>
+<ol>
+<li>已 post 但尚未由软件回收的 SQ WQE；</li>
+<li>RNIC 已激活但尚未完成的 WQE；</li>
+<li>firmware 某个 transmit work queue 能同时维护的 active WQE；</li>
+<li>某个上层库用 semaphore 允许的 inflight request。</li>
+</ol>
+<p>所以看到 <code>max_send_wr</code>、<code>ACCL_TX_DEPTH</code>、<code>LOG_MAX_OUTSTANDING_WQE</code> 时不能认为它们是<br>同一个变量。更完整的三层窗口已在<br><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/">02c RoCE 拥塞、BDP 与调优</a> 第 3.5 节说明。</p>
+<h3 id="1-11-Queue-Depth-是怎样设置和查询的"><a href="#1-11-Queue-Depth-是怎样设置和查询的" class="headerlink" title="1.11 Queue Depth 是怎样设置和查询的"></a>1.11 Queue Depth 是怎样设置和查询的</h3><p>创建 QP 时，应用请求 capacity：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">ibv_qp_init_attr attr = {};</span><br><span class="line">attr.send_cq = send_cq;</span><br><span class="line">attr.recv_cq = recv_cq;</span><br><span class="line">attr.qp_type = IBV_QPT_RC;</span><br><span class="line"></span><br><span class="line">attr.cap.max_send_wr  = requested_sq_depth;</span><br><span class="line">attr.cap.max_recv_wr  = requested_rq_depth;</span><br><span class="line">attr.cap.max_send_sge = requested_send_sge;</span><br><span class="line">attr.cap.max_recv_sge = requested_recv_sge;</span><br><span class="line">attr.cap.max_inline_data = requested_inline_bytes;</span><br><span class="line"></span><br><span class="line">ibv_qp* qp = <span class="built_in">ibv_create_qp</span>(pd, &amp;attr);</span><br></pre></td></tr></table></figure>
+
+<p>需要区分：</p>
+<table>
+<thead>
+<tr>
+<th>能力/参数</th>
+<th>单位</th>
+<th>回答的问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>device <code>max_qp_wr</code></td>
+<td>WR/WQE 数</td>
+<td>单个 QP work queue 的设备能力上限</td>
+</tr>
+<tr>
+<td>QP <code>max_send_wr</code></td>
+<td>Send WR/WQE 数</td>
+<td>这个 QP 实际 SQ capacity</td>
+</tr>
+<tr>
+<td>QP <code>max_recv_wr</code></td>
+<td>Receive WR/WQE 数</td>
+<td>这个 QP 实际 RQ capacity</td>
+</tr>
+<tr>
+<td><code>max_send_sge</code></td>
+<td>SGE/WQE</td>
+<td>一条 Send WQE 最多引用几段本地内存</td>
+</tr>
+<tr>
+<td><code>max_recv_sge</code></td>
+<td>SGE/WQE</td>
+<td>一条 Receive WQE 最多提供几段 buffer</td>
+</tr>
+<tr>
+<td><code>max_inline_data</code></td>
+<td>byte</td>
+<td>最多多少 payload 可 inline</td>
+</tr>
+<tr>
+<td>CQ <code>cqe</code></td>
+<td>CQE 数</td>
+<td>CQ 能容纳多少尚未 poll 的完成记录</td>
+</tr>
+</tbody></table>
+<p>provider 可能对申请值取整或返回实际支持值，所以不能只写配置，不检查创建结果和设备<br>能力。还要保证：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">可能同时产生但尚未 poll 的 CQE 数 &lt; CQ capacity</span><br></pre></td></tr></table></figure>
+
+<p>否则即使 SQ 很深，也可能发生 CQ overrun。</p>
+<h3 id="1-12-Signaled-Unsignaled-改变-CQE-数，不等于不占-WQE"><a href="#1-12-Signaled-Unsignaled-改变-CQE-数，不等于不占-WQE" class="headerlink" title="1.12 Signaled/Unsignaled 改变 CQE 数，不等于不占 WQE"></a>1.12 Signaled/Unsignaled 改变 CQE 数，不等于不占 WQE</h3><p>假设提交 8 条 WR：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">WQE 0  unsignaled</span><br><span class="line">WQE 1  unsignaled</span><br><span class="line">WQE 2  unsignaled</span><br><span class="line">WQE 3  signaled</span><br><span class="line">WQE 4  unsignaled</span><br><span class="line">WQE 5  unsignaled</span><br><span class="line">WQE 6  unsignaled</span><br><span class="line">WQE 7  signaled</span><br></pre></td></tr></table></figure>
+
+<p>所有 8 条仍然：</p>
+<ul>
+<li>占 SQ WQE slot；</li>
+<li>被 RNIC 执行；</li>
+<li>使用本地/远端 key 和 buffer；</li>
+<li>可能产生许多网络 packet；</li>
+<li>完成前都不能随意释放其 non-inline payload。</li>
+</ul>
+<p>区别是正常成功路径通常只为 WQE 3 和 WQE 7 生成可见 CQE。由于同一 RC SQ 的有序<br>推进，应用 poll 到 WQE 7 的成功 completion 后，可以按自身记账规则回收它之前已经<br>被该 completion 覆盖的同 SQ 工作。</p>
+<p>如果一直 post unsignaled WQE 而长期没有 signaled 边界，应用就没有可靠的正常 CQE<br>来推进回收，最终可能把 SQ 填满。这也是为什么 Barex batch 会选择性 signaled 并维护<br>自己的 permit/callback。</p>
+<h3 id="1-13-ibv-post-send-失败时，哪些-WQE-已经进入-SQ"><a href="#1-13-ibv-post-send-失败时，哪些-WQE-已经进入-SQ" class="headerlink" title="1.13 ibv_post_send() 失败时，哪些 WQE 已经进入 SQ"></a>1.13 <code>ibv_post_send()</code> 失败时，哪些 WQE 已经进入 SQ</h3><p>WR linked list：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">WR0 → WR1 → WR2 → WR3 → NULL</span><br></pre></td></tr></table></figure>
+
+<p>调用：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">ibv_send_wr* bad_wr = <span class="literal">nullptr</span>;</span><br><span class="line"><span class="type">int</span> rc = <span class="built_in">ibv_post_send</span>(qp, &amp;wr0, &amp;bad_wr);</span><br></pre></td></tr></table></figure>
+
+<p>若返回非零，<code>bad_wr</code> 指向 provider 未能 post 的第一条 WR。它之前的 WR 可能已经成功<br>进入 SQ，<code>bad_wr</code> 及其后继尚未成功提交。应用不能简单地把整个 batch 当成“全部未发”<br>再次 post，否则可能重复执行前缀中的 RDMA WRITE/ATOMIC。</p>
+<p>因此 batch 封装需要处理：</p>
+<ul>
+<li>已成功前缀的完成和资源生命周期；</li>
+<li>失败后缀是否重试；</li>
+<li>非幂等 operation 是否允许重试；</li>
+<li>callback 是按 WR 还是按 batch 触发；</li>
+<li>permit 应归还多少。</li>
+</ul>
+<p>这正是 Barex <code>WriteBatch</code> 相比“手写一个 <code>for</code> 循环”多承担的部分。</p>
+<h3 id="1-14-结合-Barex：一批-Write-如何变成-WQE"><a href="#1-14-结合-Barex：一批-Write-如何变成-WQE" class="headerlink" title="1.14 结合 Barex：一批 Write 如何变成 WQE"></a>1.14 结合 Barex：一批 Write 如何变成 WQE</h3><p>Barex 的简化链路：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">WriteBatch(items)</span><br><span class="line">  → 为每个 item 准备 ibv_sge</span><br><span class="line">  → 为每个 item 准备 IBV_WR_RDMA_WRITE</span><br><span class="line">  → 用 wr.next 串成 linked list</span><br><span class="line">  → PostSendOrEnqueue(permits = WR 数)</span><br><span class="line">  → ibv_post_send(qp, first_wr, &amp;bad_wr)</span><br><span class="line">  → provider 编码多个 Send WQE</span><br><span class="line">  → RNIC 执行</span><br><span class="line">  → signaled 边界产生 CQE</span><br><span class="line">  → XContextImpl 处理 completion</span><br><span class="line">  → ReleaseAndPostSend 归还 permit、继续软件队列</span><br></pre></td></tr></table></figure>
+
+<p>Barex 中：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">ACCL_TX_DEPTH</span><br><span class="line">  → send_semaphore_ 初值</span><br><span class="line">  → qp_init_attr.cap.max_send_wr</span><br><span class="line"></span><br><span class="line">ACCL_SOFT_TX_DEPTH</span><br><span class="line">  → 尚未获得 permit、还没有 post 到 SQ 的 software task 上限</span><br></pre></td></tr></table></figure>
+
+<p>因此一批 32 个 item 如果通常生成 32 条 WR，就需要 32 个发送 permit；一次<br><code>ibv_post_send()</code> 虽然可以把链表批量提交，但 SQ 里仍会新增约 32 个 WQE，而不是只占<br>一个 WQE。</p>
+<p>Barex 常让 batch 最后一条 WR signaled，再用自己的 <code>x_wr_id</code>、<code>call_once</code> 和 completion<br>处理聚合为一次业务 callback。这里存在三个不同的“批量”：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">业务 batch：      用户希望一组 item 作为一个逻辑操作完成</span><br><span class="line">post batch：      一次 ibv_post_send 提交一条 WR linked list</span><br><span class="line">completion batch：多个 WQE 由较少的 signaled CQE 代表回收边界</span><br></pre></td></tr></table></figure>
+
+<p>三者经常数量相关，但不是同一个概念。</p>
+<h3 id="1-15-常见问题与误区"><a href="#1-15-常见问题与误区" class="headerlink" title="1.15 常见问题与误区"></a>1.15 常见问题与误区</h3><h4 id="误区-1：WQE-就是网络包"><a href="#误区-1：WQE-就是网络包" class="headerlink" title="误区 1：WQE 就是网络包"></a>误区 1：WQE 就是网络包</h4><p>不是。一条大 WQE 可以拆成很多 packet；一个 SEND message 的多个 packet 通常仍匹配<br>一个 Receive WQE。</p>
+<h4 id="误区-2：WQE-里一定装着-payload"><a href="#误区-2：WQE-里一定装着-payload" class="headerlink" title="误区 2：WQE 里一定装着 payload"></a>误区 2：WQE 里一定装着 payload</h4><p>通常 WQE 主要保存地址、长度、key、opcode 等描述符，non-inline payload 仍在 MR 中，<br>由 RNIC DMA 读取。只有 inline 等模式会把小 payload 嵌入提交区域。</p>
+<h4 id="误区-3：ibv-post-send-返回成功就是远端处理完了"><a href="#误区-3：ibv-post-send-返回成功就是远端处理完了" class="headerlink" title="误区 3：ibv_post_send() 返回成功就是远端处理完了"></a>误区 3：<code>ibv_post_send()</code> 返回成功就是远端处理完了</h4><p>它只说明 provider 接受了 WR/WQE。要等待 transport completion 应 poll CQ；要知道远端<br>业务处理完，还需要应用层协议。</p>
+<h4 id="误区-4：Unsignaled-WQE-不占-SQ"><a href="#误区-4：Unsignaled-WQE-不占-SQ" class="headerlink" title="误区 4：Unsignaled WQE 不占 SQ"></a>误区 4：Unsignaled WQE 不占 SQ</h4><p>错误。它只是不要求每条正常成功操作都产生 CQE，WQE、buffer 和设备执行资源仍然存在。</p>
+<h4 id="误区-5：把-SQ-depth-调大就一定能填满-BDP"><a href="#误区-5：把-SQ-depth-调大就一定能填满-BDP" class="headerlink" title="误区 5：把 SQ depth 调大就一定能填满 BDP"></a>误区 5：把 SQ depth 调大就一定能填满 BDP</h4><p>有效窗口还受 Barex permit、RNIC active window、packet/PSN window、MR/pinned-memory<br>资源和拥塞控制限制；而可覆盖的 bytes 还取决于平均 <code>bytes/WQE</code>。</p>
+<h4 id="误区-6：一个-CQE-只能对应一个需要回收的业务对象"><a href="#误区-6：一个-CQE-只能对应一个需要回收的业务对象" class="headerlink" title="误区 6：一个 CQE 只能对应一个需要回收的业务对象"></a>误区 6：一个 CQE 只能对应一个需要回收的业务对象</h4><p>硬件 CQE 对应某个 signaled WR 的完成记录；上层可以利用 SQ ordering，让一个 signaled<br>边界回收此前多个 unsignaled WR，但必须维护准确的软件记账。</p>
+<h3 id="1-16-本节最小心智模型"><a href="#1-16-本节最小心智模型" class="headerlink" title="1.16 本节最小心智模型"></a>1.16 本节最小心智模型</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">WR：应用填写的请求</span><br><span class="line">WQE：provider 为 RNIC 编码的队列元素</span><br><span class="line">SGE：WQE 引用的一段 local registered memory</span><br><span class="line">SQ：主动 operation 的 WQE 队列</span><br><span class="line">RQ/SRQ：为 SEND/Immediate 预先提供 receive context/buffer 的 WQE 队列</span><br><span class="line">Doorbell：告诉 RNIC “producer index 前进了”</span><br><span class="line">CQE：RNIC 写回的完成结果</span><br><span class="line"></span><br><span class="line">一条 WQE ≠ 一条 packet ≠ 一条 PCIe TLP</span><br><span class="line">post success ≠ transport completion ≠ remote application completion</span><br><span class="line">unsignaled ≠ 不占 SQ</span><br><span class="line">SQ depth（WQE）× 平均 bytes/WQE 才能近似换算为 byte window</span><br></pre></td></tr></table></figure>
+
+<h2 id="2-Two-sided-与-One-sided"><a href="#2-Two-sided-与-One-sided" class="headerlink" title="2. Two-sided 与 One-sided"></a>2. Two-sided 与 One-sided</h2><p><img src="/notes/imgs/rdma_operations.svg" alt="SEND/RECV、WRITE、WRITE_WITH_IMM 数据与完成语义"></p>
 <h3 id="SEND-RECV"><a href="#SEND-RECV" class="headerlink" title="SEND/RECV"></a>SEND/RECV</h3><p>发送端：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">SQ: SEND(local SGE)</span><br></pre></td></tr></table></figure>
 
@@ -156,7 +667,7 @@ mjx-container[display="true"] + br {
 <p>接收端 CPU 不 post 对应 Recv，也不天然收到“哪个业务消息完成”的通知。</p>
 <h3 id="RDMA-READ"><a href="#RDMA-READ" class="headerlink" title="RDMA READ"></a>RDMA READ</h3><p>发起端从远端 MR 读取到本地 SGE。响应数据沿网络返回，因此对 RTT、outstanding read、<code>max_rd_atomic</code> 更敏感。</p>
 <h3 id="Atomic"><a href="#Atomic" class="headerlink" title="Atomic"></a>Atomic</h3><p>对远端 8-byte 等受支持位置做 Compare-and-Swap 或 Fetch-and-Add。限制依硬件和 QP type。</p>
-<h3 id="1-1-四种操作放在同一个例子里"><a href="#1-1-四种操作放在同一个例子里" class="headerlink" title="1.1 四种操作放在同一个例子里"></a>1.1 四种操作放在同一个例子里</h3><p>假设机器 A 要把 4 KiB 数据交给机器 B：</p>
+<h3 id="2-1-四种操作放在同一个例子里"><a href="#2-1-四种操作放在同一个例子里" class="headerlink" title="2.1 四种操作放在同一个例子里"></a>2.1 四种操作放在同一个例子里</h3><p>假设机器 A 要把 4 KiB 数据交给机器 B：</p>
 <h4 id="SEND-RECV：B-先准备“收件箱”"><a href="#SEND-RECV：B-先准备“收件箱”" class="headerlink" title="SEND/RECV：B 先准备“收件箱”"></a>SEND/RECV：B 先准备“收件箱”</h4><p>原来的三行写法省略了最关键的 RQ 状态变化。完整过程如下：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line">机器 B                                                   机器 A</span><br><span class="line"></span><br><span class="line">① 注册一块本地内存 buffer_B，得到 lkey</span><br><span class="line">② 构造 Receive WR：</span><br><span class="line">     wr_id  = buffer_B 的业务编号</span><br><span class="line">     SGE    = (addr=buffer_B, length=4 KiB, lkey)</span><br><span class="line">③ ibv_post_recv(qp_B, recv_wr)</span><br><span class="line">   将 Receive WQE 放入 B 的 RQ</span><br><span class="line"></span><br><span class="line">RQ_B：</span><br><span class="line">┌───────────────────────────────────────────────┐</span><br><span class="line">│ Receive WQE: buffer_B + 4 KiB + lkey + wr_id │  ← 这就是“准备收件箱”</span><br><span class="line">└───────────────────────────────────────────────┘</span><br><span class="line"></span><br><span class="line">                                                   ④ 构造 SEND WR：</span><br><span class="line">                                                        local buffer_A</span><br><span class="line">                                                        length=4 KiB</span><br><span class="line">                                                        local lkey</span><br><span class="line">                                                   ⑤ ibv_post_send(qp_A, send_wr)</span><br><span class="line"></span><br><span class="line">⑥ SEND packet 到达 B 的 RNIC</span><br><span class="line">⑦ B 的 RNIC 从 RQ_B 取出一个 Receive WQE</span><br><span class="line">⑧ RNIC 把 payload DMA 写入该 WQE 的 SGE：</span><br><span class="line">     buffer_A 的数据 → buffer_B</span><br><span class="line">⑨ 这个 Receive WQE 被消费，从 RQ 中移除</span><br><span class="line">⑩ B 的 Receive CQ 出现 CQE：</span><br><span class="line">     opcode   = IBV_WC_RECV</span><br><span class="line">     wr_id    = buffer_B 的业务编号</span><br><span class="line">     byte_len = 4096</span><br><span class="line">⑪ B poll 到 CQE，开始处理 buffer_B</span><br></pre></td></tr></table></figure>
 
@@ -204,7 +715,7 @@ mjx-container[display="true"] + br {
 <h4 id="Atomic：A-修改-B-的一个小状态"><a href="#Atomic：A-修改-B-的一个小状态" class="headerlink" title="Atomic：A 修改 B 的一个小状态"></a>Atomic：A 修改 B 的一个小状态</h4><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">A: fetch_add(remote_counter_B, +1)</span><br></pre></td></tr></table></figure>
 
 <p>Atomic 适合计数器/锁等小控制状态，不适合搬 4 KiB payload。</p>
-<h3 id="1-2-初学者选型表"><a href="#1-2-初学者选型表" class="headerlink" title="1.2 初学者选型表"></a>1.2 初学者选型表</h3><table>
+<h3 id="2-2-初学者选型表"><a href="#2-2-初学者选型表" class="headerlink" title="2.2 初学者选型表"></a>2.2 初学者选型表</h3><table>
 <thead>
 <tr>
 <th>问题</th>
@@ -233,7 +744,7 @@ mjx-container[display="true"] + br {
 </tr>
 </tbody></table>
 <p>这不是绝对规则。真实系统还会考虑硬件限制、安全、队列模型与业务完成语义。</p>
-<h3 id="1-3-五种-operation-一张表看完"><a href="#1-3-五种-operation-一张表看完" class="headerlink" title="1.3 五种 operation 一张表看完"></a>1.3 五种 operation 一张表看完</h3><p>下面默认讨论最常见的 RC QP。不同 transport type 支持的 opcode 集合不同，例如<br>RDMA Read 和 Atomic 不能简单套用到所有 UD/UC QP。</p>
+<h3 id="2-3-五种-operation-一张表看完"><a href="#2-3-五种-operation-一张表看完" class="headerlink" title="2.3 五种 operation 一张表看完"></a>2.3 五种 operation 一张表看完</h3><p>下面默认讨论最常见的 RC QP。不同 transport type 支持的 opcode 集合不同，例如<br>RDMA Read 和 Atomic 不能简单套用到所有 UD/UC QP。</p>
 <table>
 <thead>
 <tr>
@@ -293,7 +804,7 @@ mjx-container[display="true"] + br {
 </tr>
 </tbody></table>
 <p>“远端自然得到 CQE”是指对端应用在自己的 receive CQ 上可以直接 poll 到这次操作。<br>所有这些 operation 只要在发起端使用 <code>IBV_SEND_SIGNALED</code>，发起端都可以在 send CQ<br>得到本地 completion；这是另一件事。</p>
-<h3 id="1-4-One-sided-到底省略了哪一侧"><a href="#1-4-One-sided-到底省略了哪一侧" class="headerlink" title="1.4 One-sided 到底省略了哪一侧"></a>1.4 One-sided 到底省略了哪一侧</h3><p>One-sided 不表示“只有一块 RNIC 工作”，也不表示“数据不经过远端 RNIC”。它表示：</p>
+<h3 id="2-4-One-sided-到底省略了哪一侧"><a href="#2-4-One-sided-到底省略了哪一侧" class="headerlink" title="2.4 One-sided 到底省略了哪一侧"></a>2.4 One-sided 到底省略了哪一侧</h3><p>One-sided 不表示“只有一块 RNIC 工作”，也不表示“数据不经过远端 RNIC”。它表示：</p>
 <blockquote>
 <p>完成地址/key 交换后，发起端可以提交这次数据操作，而远端应用不需要为每次操作<br>再 post 一个与之配对的数据 WR。</p>
 </blockquote>
@@ -304,7 +815,7 @@ mjx-container[display="true"] + br {
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">应用 B post RECV</span><br><span class="line">应用 A post SEND</span><br><span class="line">  → 两端 RNIC 匹配 SEND/RECV</span><br><span class="line">  → B 得到 receive CQE</span><br></pre></td></tr></table></figure>
 
 <p>WRITE_WITH_IMM 是一个很有教学价值的“混合体”：payload placement 是 one-sided<br>WRITE，但 remote notification 使用 receive queue resource。</p>
-<h2 id="2-五种-RDMA-operation-逐项拆解"><a href="#2-五种-RDMA-operation-逐项拆解" class="headerlink" title="2. 五种 RDMA operation 逐项拆解"></a>2. 五种 RDMA operation 逐项拆解</h2><h3 id="2-1-SEND：把消息交给接收端准备好的-buffer"><a href="#2-1-SEND：把消息交给接收端准备好的-buffer" class="headerlink" title="2.1 SEND：把消息交给接收端准备好的 buffer"></a>2.1 SEND：把消息交给接收端准备好的 buffer</h3><p>SEND 是消息语义的 two-sided operation。发送端只描述本地数据：</p>
+<h2 id="3-五种-RDMA-operation-逐项拆解"><a href="#3-五种-RDMA-operation-逐项拆解" class="headerlink" title="3. 五种 RDMA operation 逐项拆解"></a>3. 五种 RDMA operation 逐项拆解</h2><h3 id="3-1-SEND：把消息交给接收端准备好的-buffer"><a href="#3-1-SEND：把消息交给接收端准备好的-buffer" class="headerlink" title="3.1 SEND：把消息交给接收端准备好的 buffer"></a>3.1 SEND：把消息交给接收端准备好的 buffer</h3><p>SEND 是消息语义的 two-sided operation。发送端只描述本地数据：</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">ibv_sge send_sge = {</span><br><span class="line">    .addr   = local_addr,</span><br><span class="line">    .length = length,</span><br><span class="line">    .lkey   = local_mr-&gt;lkey,</span><br><span class="line">};</span><br><span class="line"></span><br><span class="line">ibv_send_wr send_wr = {</span><br><span class="line">    .opcode  = IBV_WR_SEND,</span><br><span class="line">    .sg_list = &amp;send_sge,</span><br><span class="line">    .num_sge = <span class="number">1</span>,</span><br><span class="line">};</span><br></pre></td></tr></table></figure>
 
 <p>发送 WR 中没有远端 virtual address，也没有远端 rkey。接收端提前提交：</p>
@@ -377,7 +888,7 @@ mjx-container[display="true"] + br {
 <li>很适合控制消息、连接元数据、变长消息协议和主动消息。</li>
 </ul>
 <p>不要把 verbs <code>IBV_WR_SEND</code> 与 PyTorch/NCCL 的 <code>send()</code> 名字直接画等号。NCCL<br><code>ncclSend/ncclRecv</code> 表示点对点通信语义，底层 network plugin 可以使用 verbs SEND，<br>也可以使用 WRITE 加控制协议实现。</p>
-<h3 id="2-2-RDMA-WRITE：发起端直接把数据推到远端指定地址"><a href="#2-2-RDMA-WRITE：发起端直接把数据推到远端指定地址" class="headerlink" title="2.2 RDMA WRITE：发起端直接把数据推到远端指定地址"></a>2.2 RDMA WRITE：发起端直接把数据推到远端指定地址</h3><p>RDMA WRITE 是 one-sided push。发起端 WR 同时描述：</p>
+<h3 id="3-2-RDMA-WRITE：发起端直接把数据推到远端指定地址"><a href="#3-2-RDMA-WRITE：发起端直接把数据推到远端指定地址" class="headerlink" title="3.2 RDMA WRITE：发起端直接把数据推到远端指定地址"></a>3.2 RDMA WRITE：发起端直接把数据推到远端指定地址</h3><p>RDMA WRITE 是 one-sided push。发起端 WR 同时描述：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">从本地哪里读：local addr + length + lkey</span><br><span class="line">向远端哪里写：remote addr + rkey</span><br></pre></td></tr></table></figure>
 
 <p>伪代码：</p>
@@ -405,7 +916,7 @@ mjx-container[display="true"] + br {
 <li>大 payload 希望直接落位；</li>
 <li>远端不需要为每个 data chunk 运行 CPU receive handler。</li>
 </ul>
-<h3 id="2-3-RDMA-WRITE-WITH-IMMEDIATE：直接落位，再向远端-CQ-投递-32-bit-通知"><a href="#2-3-RDMA-WRITE-WITH-IMMEDIATE：直接落位，再向远端-CQ-投递-32-bit-通知" class="headerlink" title="2.3 RDMA WRITE WITH IMMEDIATE：直接落位，再向远端 CQ 投递 32-bit 通知"></a>2.3 RDMA WRITE WITH IMMEDIATE：直接落位，再向远端 CQ 投递 32-bit 通知</h3><p>WRITE_WITH_IMM 同时完成两件事：</p>
+<h3 id="3-3-RDMA-WRITE-WITH-IMMEDIATE：直接落位，再向远端-CQ-投递-32-bit-通知"><a href="#3-3-RDMA-WRITE-WITH-IMMEDIATE：直接落位，再向远端-CQ-投递-32-bit-通知" class="headerlink" title="3.3 RDMA WRITE WITH IMMEDIATE：直接落位，再向远端 CQ 投递 32-bit 通知"></a>3.3 RDMA WRITE WITH IMMEDIATE：直接落位，再向远端 CQ 投递 32-bit 通知</h3><p>WRITE_WITH_IMM 同时完成两件事：</p>
 <ol>
 <li>把 payload 按普通 RDMA Write 写到 <code>remote_addr+rkey</code>；</li>
 <li>向远端 receive CQ 产生一个携带 32-bit <code>imm_data</code> 的 completion。</li>
@@ -434,7 +945,7 @@ mjx-container[display="true"] + br {
 
 <p>Barex 内部还会使用 immediate value 的一部分 bit 表示内部消息类型，所以 Barex<br>用户实际可用的 bit 数要遵守它的 API 约定，不能把原生 verbs 的 32 bit 全部当作<br>业务字段。</p>
 <p>direct RDMA 不需要远端 per-layer callback，所以 <code>WriteBatch</code> 通常使用普通 WRITE，<br>不为每项 signal peer。</p>
-<h3 id="2-4-RDMA-READ：发起端主动从远端拉数据"><a href="#2-4-RDMA-READ：发起端主动从远端拉数据" class="headerlink" title="2.4 RDMA READ：发起端主动从远端拉数据"></a>2.4 RDMA READ：发起端主动从远端拉数据</h3><p>READ 是 one-sided pull。发起端提供：</p>
+<h3 id="3-4-RDMA-READ：发起端主动从远端拉数据"><a href="#3-4-RDMA-READ：发起端主动从远端拉数据" class="headerlink" title="3.4 RDMA READ：发起端主动从远端拉数据"></a>3.4 RDMA READ：发起端主动从远端拉数据</h3><p>READ 是 one-sided pull。发起端提供：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">远端源：remote addr + rkey</span><br><span class="line">本地目的：local addr + length + lkey</span><br></pre></td></tr></table></figure>
 
 <p>伪代码：</p>
@@ -455,7 +966,7 @@ mjx-container[display="true"] + br {
 <p>READ 适合“消费者掌握拉取时机”的场景，例如：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">生产者发布 remote_addr+rkey+ready state</span><br><span class="line">消费者需要时发起 READ</span><br><span class="line">消费者本地 CQE 完成后使用数据</span><br></pre></td></tr></table></figure>
 
-<h3 id="2-5-ATOMIC：在远端做不可分割的-read-modify-write"><a href="#2-5-ATOMIC：在远端做不可分割的-read-modify-write" class="headerlink" title="2.5 ATOMIC：在远端做不可分割的 read-modify-write"></a>2.5 ATOMIC：在远端做不可分割的 read-modify-write</h3><p>基础 RC verbs 常见两种 64-bit Atomic：</p>
+<h3 id="3-5-ATOMIC：在远端做不可分割的-read-modify-write"><a href="#3-5-ATOMIC：在远端做不可分割的-read-modify-write" class="headerlink" title="3.5 ATOMIC：在远端做不可分割的 read-modify-write"></a>3.5 ATOMIC：在远端做不可分割的 read-modify-write</h3><p>基础 RC verbs 常见两种 64-bit Atomic：</p>
 <h4 id="Compare-and-Swap"><a href="#Compare-and-Swap" class="headerlink" title="Compare-and-Swap"></a>Compare-and-Swap</h4><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">old = *remote_addr</span><br><span class="line">if old == compare:</span><br><span class="line">    *remote_addr = swap</span><br><span class="line">把 old 返回到发起端 local result buffer</span><br></pre></td></tr></table></figure>
 
 <p>对应：</p>
@@ -478,7 +989,7 @@ mjx-container[display="true"] + br {
 
 <p>还必须依据平台的 atomic coherence 能力、内存类型和同步协议设计。</p>
 <p>Atomic 适合小型控制状态，不适合传输 payload。用 Atomic 为每个小包更新全局热点<br>计数器还可能造成远端串行化和严重争用。</p>
-<h3 id="2-6-一次操作里到底有哪些地址和-key"><a href="#2-6-一次操作里到底有哪些地址和-key" class="headerlink" title="2.6 一次操作里到底有哪些地址和 key"></a>2.6 一次操作里到底有哪些地址和 key</h3><table>
+<h3 id="3-6-一次操作里到底有哪些地址和-key"><a href="#3-6-一次操作里到底有哪些地址和-key" class="headerlink" title="3.6 一次操作里到底有哪些地址和 key"></a>3.6 一次操作里到底有哪些地址和 key</h3><table>
 <thead>
 <tr>
 <th>Operation</th>
@@ -519,7 +1030,7 @@ mjx-container[display="true"] + br {
 </tr>
 </tbody></table>
 <p>注意 READ/ATOMIC 的 local SGE 是“接收返回数据的目的 buffer”，与 SEND/WRITE 的<br>“发送 payload 的源 buffer”方向相反。</p>
-<h3 id="2-7-Completion-表示什么"><a href="#2-7-Completion-表示什么" class="headerlink" title="2.7 Completion 表示什么"></a>2.7 Completion 表示什么</h3><table>
+<h3 id="3-7-Completion-表示什么"><a href="#3-7-Completion-表示什么" class="headerlink" title="3.7 Completion 表示什么"></a>3.7 Completion 表示什么</h3><table>
 <thead>
 <tr>
 <th>Operation</th>
@@ -557,7 +1068,7 @@ mjx-container[display="true"] + br {
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">WRITE_WITH_IMM CQE 到达</span><br><span class="line">  ≠ 远端 CPU callback 已执行完</span><br><span class="line">  ≠ 远端 CUDA kernel 已消费 payload</span><br><span class="line">  ≠ 整个 blade-kvt request 已完成</span><br></pre></td></tr></table></figure>
 
 <p>如果发送端必须知道“远端业务已经处理完成”，仍需应用层 ACK/response。</p>
-<h3 id="2-8-Packet-到达后保存在哪里，ACK-又表示什么"><a href="#2-8-Packet-到达后保存在哪里，ACK-又表示什么" class="headerlink" title="2.8 Packet 到达后保存在哪里，ACK 又表示什么"></a>2.8 Packet 到达后保存在哪里，ACK 又表示什么</h3><p>不要把以下三个对象混为一谈：</p>
+<h3 id="3-8-Packet-到达后保存在哪里，ACK-又表示什么"><a href="#3-8-Packet-到达后保存在哪里，ACK-又表示什么" class="headerlink" title="3.8 Packet 到达后保存在哪里，ACK 又表示什么"></a>3.8 Packet 到达后保存在哪里，ACK 又表示什么</h3><p>不要把以下三个对象混为一谈：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">RNIC ingress/reorder packet buffer</span><br><span class="line">  ≠ QP Receive Queue（RQ）</span><br><span class="line">  ≠ Receive WQE 指向的 application buffer</span><br></pre></td></tr></table></figure>
 
 <ul>
@@ -603,517 +1114,6 @@ mjx-container[display="true"] + br {
 </tr>
 </tbody></table>
 <p>因此“接收端已经回了 transport ACK”与“远端程序现在可以无条件读这块数据”也不能<br>简单画等号。接收程序应等待为该 operation 设计的 completion/notification，并满足<br>CPU/GPU memory visibility、stream ordering 与 buffer ownership 规则。尤其 plain<br>RDMA WRITE 没有远端 receive CQE，必须由上层协议明确通知边界。</p>
-<h2 id="3-WR、WQE-与-SGE"><a href="#3-WR、WQE-与-SGE" class="headerlink" title="3. WR、WQE 与 SGE"></a>3. WR、WQE 与 SGE</h2><p>不要一上来就看 <code>ibv_post_send()</code> 代码。先把三个缩写逐个定义清楚：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">WR  = Work Request</span><br><span class="line">WQE = Work Queue Element</span><br><span class="line">SGE = Scatter/Gather Element</span><br></pre></td></tr></table></figure>
-
-<p>它们分别处于不同层次：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">SGE：描述“一段本地内存”</span><br><span class="line">  ↓ 一个或多个 SGE 被 WR 引用</span><br><span class="line">WR：描述“应用希望执行的一次逻辑操作”</span><br><span class="line">  ↓ post 后由 provider 编码</span><br><span class="line">WQE：描述“RNIC 可以从硬件队列取走并执行的一项工作”</span><br></pre></td></tr></table></figure>
-
-<h3 id="3-1-先逐个定义：全称、含义与用途"><a href="#3-1-先逐个定义：全称、含义与用途" class="headerlink" title="3.1 先逐个定义：全称、含义与用途"></a>3.1 先逐个定义：全称、含义与用途</h3><h4 id="3-1-1-WR：Work-Request"><a href="#3-1-1-WR：Work-Request" class="headerlink" title="3.1.1 WR：Work Request"></a>3.1.1 WR：Work Request</h4><p><strong>英文全称：Work Request。中文可译为“工作请求”。</strong></p>
-<p>这里的 <code>Work</code> 是“要网卡完成的一项工作”，不是特指 WRITE；<code>Request</code> 表示它是应用<br>提交给 verbs/provider 的软件请求。</p>
-<p>定义：</p>
-<blockquote>
-<p>WR 是应用在软件接口层构造的请求对象，用来表达“我希望这个 QP 执行什么操作、<br>使用哪些本地内存、是否需要 completion，以及该 operation 的专用参数是什么”。</p>
-</blockquote>
-<p>libibverbs 中主要有两类 WR：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">ibv_send_wr</span><br><span class="line">  用于提交到 SQ</span><br><span class="line">  可表达 SEND、RDMA WRITE、RDMA READ、ATOMIC 等主动操作</span><br><span class="line"></span><br><span class="line">ibv_recv_wr</span><br><span class="line">  用于提交到 RQ/SRQ</span><br><span class="line">  表达“下一条 SEND/Immediate 到达时，可以使用哪些本地 receive buffer”</span><br></pre></td></tr></table></figure>
-
-<p>WR 的用途是把一次逻辑操作的参数交给 provider。以 <code>ibv_send_wr</code> 为例，重要字段包括：</p>
-<table>
-<thead>
-<tr>
-<th>字段</th>
-<th>用途</th>
-</tr>
-</thead>
-<tbody><tr>
-<td><code>wr_id</code></td>
-<td>应用自定义的 64-bit cookie；CQE 会带回来，便于找回 request/buffer/callback</td>
-</tr>
-<tr>
-<td><code>next</code></td>
-<td>把多条 WR 串成 linked list，一次 <code>ibv_post_send()</code> 批量提交</td>
-</tr>
-<tr>
-<td><code>sg_list</code></td>
-<td>指向 SGE 数组，描述本地数据从哪里读或写到哪里</td>
-</tr>
-<tr>
-<td><code>num_sge</code></td>
-<td>本 WR 使用多少个 SGE</td>
-</tr>
-<tr>
-<td><code>opcode</code></td>
-<td>操作类型，如 <code>IBV_WR_SEND</code>、<code>IBV_WR_RDMA_WRITE</code></td>
-</tr>
-<tr>
-<td><code>send_flags</code></td>
-<td>是否 signaled、inline、fence 等</td>
-</tr>
-<tr>
-<td><code>wr.rdma.remote_addr</code></td>
-<td>READ/WRITE 的远端 virtual address</td>
-</tr>
-<tr>
-<td><code>wr.rdma.rkey</code></td>
-<td>访问该远端地址所需的 rkey</td>
-</tr>
-<tr>
-<td><code>imm_data</code></td>
-<td>WITH_IMM 操作携带的 32-bit immediate data</td>
-</tr>
-</tbody></table>
-<p>一条 WR 的例子：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">ibv_send_wr wr = {};</span><br><span class="line">wr.wr_id      = request_id;</span><br><span class="line">wr.opcode     = IBV_WR_RDMA_WRITE;</span><br><span class="line">wr.send_flags = IBV_SEND_SIGNALED;</span><br><span class="line">wr.sg_list    = &amp;local_sge;</span><br><span class="line">wr.num_sge    = <span class="number">1</span>;</span><br><span class="line">wr.wr.rdma.remote_addr = remote_address;</span><br><span class="line">wr.wr.rdma.rkey        = remote_rkey;</span><br></pre></td></tr></table></figure>
-
-<p>此时它仍然只是 CPU 进程内存中的 C 结构体：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">构造 WR</span><br><span class="line">  ≠ 已经进入 SQ</span><br><span class="line">  ≠ RNIC 已经看到</span><br><span class="line">  ≠ 数据已经发送</span><br></pre></td></tr></table></figure>
-
-<p>只有调用 <code>ibv_post_send()</code> 或 <code>ibv_post_recv()</code> 后，provider 才接受并转换这个请求。</p>
-<p>WR 的创建者和读取者：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">应用/通信库创建 WR</span><br><span class="line">       ↓</span><br><span class="line">libibverbs provider 在 post 调用中读取 WR</span><br><span class="line">       ↓</span><br><span class="line">provider 将其编码成硬件 WQE</span><br></pre></td></tr></table></figure>
-
-<p>所以 WR 是 <strong>portable verbs API 层对象</strong>；不同 RNIC 仍使用相同的<br><code>ibv_send_wr/ibv_recv_wr</code> 接口。</p>
-<h4 id="3-1-2-WQE：Work-Queue-Element"><a href="#3-1-2-WQE：Work-Queue-Element" class="headerlink" title="3.1.2 WQE：Work Queue Element"></a>3.1.2 WQE：Work Queue Element</h4><p><strong>英文全称：Work Queue Element。中文可译为“工作队列元素”。</strong></p>
-<p>拆开理解：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Work Queue = 设备工作队列</span><br><span class="line">Element    = 队列中的一个元素/槽位</span><br></pre></td></tr></table></figure>
-
-<p>定义：</p>
-<blockquote>
-<p>WQE 是 provider 根据 WR 编码出的、放入 QP 的 SQ/RQ、可由 RNIC 直接解释和执行的<br>硬件工作描述符。</p>
-</blockquote>
-<p>WQE 的用途是把软件请求变成设备可执行格式。例如一条 RDMA WRITE WQE 需要让 RNIC<br>知道：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">执行哪种 opcode</span><br><span class="line">从哪些 local registered memory 读取</span><br><span class="line">一共传多少字节</span><br><span class="line">使用哪个 local lkey</span><br><span class="line">写到哪个 remote address</span><br><span class="line">使用哪个 remote rkey</span><br><span class="line">是否 inline/signaled/fenced</span><br><span class="line">完成后是否需要写 CQE</span><br></pre></td></tr></table></figure>
-
-<p>两类最常见的 WQE：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">Send WQE</span><br><span class="line">  位于 QP Send Queue</span><br><span class="line">  RNIC 主动执行 SEND/WRITE/READ/ATOMIC</span><br><span class="line"></span><br><span class="line">Receive WQE</span><br><span class="line">  位于 QP Receive Queue 或 SRQ</span><br><span class="line">  RNIC 收到 SEND/Immediate 时取出，用来决定本地 receive buffer/context</span><br></pre></td></tr></table></figure>
-
-<p>WQE 的创建者和读取者：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">provider 创建/编码 WQE</span><br><span class="line">       ↓</span><br><span class="line">WQE 被写入 SQ 或 RQ</span><br><span class="line">       ↓</span><br><span class="line">doorbell 通知 RNIC</span><br><span class="line">       ↓</span><br><span class="line">RNIC 取出并执行 WQE</span><br></pre></td></tr></table></figure>
-
-<p>与 WR 不同，WQE 的真实二进制布局通常是 <strong>provider/RNIC 专用格式</strong>。应用不能假设：</p>
-<ul>
-<li>所有网卡的 WQE 字段顺序相同；</li>
-<li>一条 WQE 固定是多少字节；</li>
-<li>WR 中的 C 字段可以原样 memcpy 给任意 RNIC；</li>
-<li>可以绕过 provider 直接按某台网卡格式操作另一台网卡。</li>
-</ul>
-<p>“一条 WR 通常对应一条逻辑 WQE”适合建立心智模型，但精确编码、分段、padding、<br>inline layout 和特殊 opcode 仍由 provider/硬件决定。</p>
-<p>WQE 主要是<strong>描述符</strong>，通常不保存完整 non-inline payload。它保存 payload 的本地<br>地址、长度和 lkey；RNIC 执行时再 DMA 访问实际 buffer。只有 inline 等模式会把小<br>payload 直接编码到 WQE/提交区域。</p>
-<h4 id="3-1-3-SGE：Scatter-Gather-Element"><a href="#3-1-3-SGE：Scatter-Gather-Element" class="headerlink" title="3.1.3 SGE：Scatter/Gather Element"></a>3.1.3 SGE：Scatter/Gather Element</h4><p><strong>英文全称：Scatter/Gather Element。中文可译为“分散/聚集元素”或“散布/聚集项”。</strong></p>
-<p>定义：</p>
-<blockquote>
-<p>SGE 是对“一段本地已注册内存”的描述，由本地地址、长度和 lkey 组成。一个 WR 可以<br>引用一个或多个 SGE。</p>
-</blockquote>
-<p>libibverbs 的核心结构：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">ibv_sge</span> {</span><br><span class="line">    <span class="type">uint64_t</span> addr;    <span class="comment">// 本地 virtual address</span></span><br><span class="line">    <span class="type">uint32_t</span> length;  <span class="comment">// 这段内存的字节数</span></span><br><span class="line">    <span class="type">uint32_t</span> lkey;    <span class="comment">// 证明本地 RNIC 有权访问该内存</span></span><br><span class="line">};</span><br></pre></td></tr></table></figure>
-
-<p>三个字段分别回答：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">addr   ：从本机哪一个 virtual address 开始？</span><br><span class="line">length ：连续访问多少字节？</span><br><span class="line">lkey   ：这段本地地址是否已注册，RNIC 是否有权限 DMA？</span><br></pre></td></tr></table></figure>
-
-<p>SGE 的用途由 operation 方向决定：</p>
-<table>
-<thead>
-<tr>
-<th>WR 类型</th>
-<th>SGE 描述的本地内存角色</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>SEND</td>
-<td>本地 source；RNIC 从这里 DMA read 后发送</td>
-</tr>
-<tr>
-<td>Receive</td>
-<td>本地 destination；RNIC 把收到的 SEND payload DMA write 到这里</td>
-</tr>
-<tr>
-<td>RDMA WRITE</td>
-<td>本地 source；写到 WR 单独指定的远端地址</td>
-</tr>
-<tr>
-<td>RDMA READ</td>
-<td>本地 destination；远端读回的数据写到这里</td>
-</tr>
-<tr>
-<td>ATOMIC</td>
-<td>本地 result buffer；保存远端原子操作返回的旧值</td>
-</tr>
-</tbody></table>
-<p>最容易混淆的一点是：</p>
-<blockquote>
-<p><strong>SGE 只描述本地内存，不描述远端内存。</strong></p>
-</blockquote>
-<p>例如 RDMA WRITE 同时需要：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">本地 source：</span><br><span class="line">  SGE.addr + SGE.length + SGE.lkey</span><br><span class="line"></span><br><span class="line">远端 destination：</span><br><span class="line">  WR.wr.rdma.remote_addr + WR.wr.rdma.rkey</span><br></pre></td></tr></table></figure>
-
-<p>远端地址/rkey 属于 operation-specific WR 字段，不是 SGE。</p>
-<p>为什么叫 Scatter/Gather：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">Gather（发送侧聚集）</span><br><span class="line">  SGE[0] header</span><br><span class="line">  SGE[1] metadata</span><br><span class="line">  SGE[2] payload</span><br><span class="line">       ↓ RNIC 按顺序读取</span><br><span class="line">  形成一条逻辑发送消息</span><br><span class="line"></span><br><span class="line">Scatter（接收侧分散）</span><br><span class="line">  一条收到的逻辑消息</span><br><span class="line">       ↓ RNIC 按 Receive SGE 顺序写入</span><br><span class="line">  SGE[0] buffer A</span><br><span class="line">  SGE[1] buffer B</span><br><span class="line">  SGE[2] buffer C</span><br></pre></td></tr></table></figure>
-
-<p>SGE 本身不是 queue element：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">错误理解：SGE 和 WQE 都是 SQ 中并列的任务</span><br><span class="line"></span><br><span class="line">正确理解：WQE 是队列任务；</span><br><span class="line">          SGE 是该任务内部引用的本地 memory segment 描述</span><br></pre></td></tr></table></figure>
-
-<h4 id="3-1-4-三者一张表对比"><a href="#3-1-4-三者一张表对比" class="headerlink" title="3.1.4 三者一张表对比"></a>3.1.4 三者一张表对比</h4><table>
-<thead>
-<tr>
-<th>对象</th>
-<th>英文全称</th>
-<th>所在层次</th>
-<th>谁创建</th>
-<th>谁读取/使用</th>
-<th>核心用途</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>WR</td>
-<td>Work Request</td>
-<td>libibverbs API/应用软件层</td>
-<td>应用或通信库</td>
-<td>provider</td>
-<td>表达一次逻辑 operation</td>
-</tr>
-<tr>
-<td>WQE</td>
-<td>Work Queue Element</td>
-<td>QP SQ/RQ 硬件工作队列层</td>
-<td>provider</td>
-<td>RNIC</td>
-<td>让设备执行这项工作</td>
-</tr>
-<tr>
-<td>SGE</td>
-<td>Scatter/Gather Element</td>
-<td>WR 的本地 memory 描述层；随后编码进 WQE</td>
-<td>应用或通信库</td>
-<td>provider 编码，RNIC 按编码访问</td>
-<td>描述一段 local registered memory</td>
-</tr>
-</tbody></table>
-<p>再加两个后文经常出现的对象：</p>
-<table>
-<thead>
-<tr>
-<th>对象</th>
-<th>英文全称</th>
-<th>用途</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>WQ</td>
-<td>Work Queue</td>
-<td>保存 WQE 的工作队列；常见为 SQ/RQ</td>
-</tr>
-<tr>
-<td>CQE</td>
-<td>Completion Queue Element</td>
-<td>RNIC 写入 CQ 的完成结果，带 status、opcode、wr_id 等</td>
-</tr>
-</tbody></table>
-<h4 id="3-1-5-三者的包含和转换关系"><a href="#3-1-5-三者的包含和转换关系" class="headerlink" title="3.1.5 三者的包含和转换关系"></a>3.1.5 三者的包含和转换关系</h4><p>假设应用要把两段离散 local buffer 写到一个连续 remote range：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">local header  = 地址 A，64 B</span><br><span class="line">local payload = 地址 B，4032 B</span><br><span class="line">remote target = 地址 R，4096 B</span><br></pre></td></tr></table></figure>
-
-<p>应用首先构造两个 SGE：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">ibv_sge sges[<span class="number">2</span>] = {};</span><br><span class="line"></span><br><span class="line">sges[<span class="number">0</span>].addr   = <span class="built_in">reinterpret_cast</span>&lt;<span class="type">uintptr_t</span>&gt;(header);</span><br><span class="line">sges[<span class="number">0</span>].length = <span class="number">64</span>;</span><br><span class="line">sges[<span class="number">0</span>].lkey   = header_mr-&gt;lkey;</span><br><span class="line"></span><br><span class="line">sges[<span class="number">1</span>].addr   = <span class="built_in">reinterpret_cast</span>&lt;<span class="type">uintptr_t</span>&gt;(payload);</span><br><span class="line">sges[<span class="number">1</span>].length = <span class="number">4032</span>;</span><br><span class="line">sges[<span class="number">1</span>].lkey   = payload_mr-&gt;lkey;</span><br></pre></td></tr></table></figure>
-
-<p>然后构造一条引用它们的 WR：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">ibv_send_wr wr = {};</span><br><span class="line">wr.wr_id      = request_id;</span><br><span class="line">wr.opcode     = IBV_WR_RDMA_WRITE;</span><br><span class="line">wr.send_flags = IBV_SEND_SIGNALED;</span><br><span class="line">wr.sg_list    = sges;</span><br><span class="line">wr.num_sge    = <span class="number">2</span>;</span><br><span class="line">wr.wr.rdma.remote_addr = remote_target;</span><br><span class="line">wr.wr.rdma.rkey        = remote_rkey;</span><br></pre></td></tr></table></figure>
-
-<p>最后 post：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">ibv_send_wr* bad_wr = <span class="literal">nullptr</span>;</span><br><span class="line"><span class="type">int</span> rc = <span class="built_in">ibv_post_send</span>(qp, &amp;wr, &amp;bad_wr);</span><br></pre></td></tr></table></figure>
-
-<p>转换链：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line">SGE[0] ─┐</span><br><span class="line">        ├─→ WR</span><br><span class="line">SGE[1] ─┘    opcode=RDMA_WRITE</span><br><span class="line">             remote_addr=R</span><br><span class="line">             rkey=...</span><br><span class="line">                │</span><br><span class="line">                │ ibv_post_send()</span><br><span class="line">                ▼</span><br><span class="line">        provider 编码 Send WQE</span><br><span class="line">          ├─ control/opcode</span><br><span class="line">          ├─ remote address/rkey</span><br><span class="line">          ├─ local data segment 0（来自 SGE[0]）</span><br><span class="line">          └─ local data segment 1（来自 SGE[1]）</span><br><span class="line">                │</span><br><span class="line">                │ doorbell</span><br><span class="line">                ▼</span><br><span class="line">        RNIC 执行 WQE</span><br><span class="line">          ├─ DMA read 地址 A 的 64 B</span><br><span class="line">          ├─ DMA read 地址 B 的 4032 B</span><br><span class="line">          ├─ 在网络上按序发送 4096 B</span><br><span class="line">          └─ 远端 RNIC 写入从地址 R 开始的连续 range</span><br><span class="line">                │</span><br><span class="line">                ▼</span><br><span class="line">        signaled completion → CQE(wr_id=request_id)</span><br></pre></td></tr></table></figure>
-
-<p>这一例子把三者的职责完全分开了：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">SGE 回答：本地字节在哪里？</span><br><span class="line">WR 回答：这些字节要执行什么逻辑操作？</span><br><span class="line">WQE 回答：如何把该请求表示成这块 RNIC 能执行的队列任务？</span><br></pre></td></tr></table></figure>
-
-<p>接下来再进入 Work Queue、具体 WQE 字段和构造/执行流程。</p>
-<h3 id="3-2-Work-Queue、SQ、RQ-与-WQE"><a href="#3-2-Work-Queue、SQ、RQ-与-WQE" class="headerlink" title="3.2 Work Queue、SQ、RQ 与 WQE"></a>3.2 Work Queue、SQ、RQ 与 WQE</h3><p>要理解 WQE 放在哪里，先看完整层次：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">应用想做的事情</span><br><span class="line">  “把 local buffer 写到远端地址”</span><br><span class="line">        │</span><br><span class="line">        ▼</span><br><span class="line">WR（Work Request）</span><br><span class="line">  应用通过 libibverbs 提交的 C 结构体/API 语义</span><br><span class="line">        │ provider 转换</span><br><span class="line">        ▼</span><br><span class="line">WQE（Work Queue Element）</span><br><span class="line">  放入 QP Work Queue、供 RNIC 执行的硬件描述符</span><br><span class="line">        │ RNIC 取出并执行</span><br><span class="line">        ▼</span><br><span class="line">网络 packet / PCIe transaction</span><br><span class="line">  真正承载 payload 与设备 DMA 的更低层动作</span><br><span class="line">        │</span><br><span class="line">        ▼</span><br><span class="line">CQE（Completion Queue Element）</span><br><span class="line">  RNIC 写回的完成记录</span><br></pre></td></tr></table></figure>
-
-<p>一句话概括：</p>
-<blockquote>
-<p><strong>WR 是软件接口中的“请求”，WQE 是这个请求进入设备工作队列后的硬件表示，<br>CQE 是设备执行到完成边界后写回的结果。</strong></p>
-</blockquote>
-<p>不同 provider/RNIC 的 WQE 二进制布局并不属于通用 verbs ABI。应用通常填写<br><code>ibv_send_wr</code>、<code>ibv_recv_wr</code> 和 <code>ibv_sge</code>，由 provider 按具体网卡格式编码 WQE。<br>因此不要在应用代码中假设所有 RNIC 的 WQE 都有相同字节数或字段偏移。</p>
-<p>QP（Queue Pair）之所以叫“队列对”，是因为它通常包含：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">QP</span><br><span class="line">├─ SQ：Send Queue</span><br><span class="line">│    └─ Send WQE 0, Send WQE 1, Send WQE 2, ...</span><br><span class="line">│</span><br><span class="line">└─ RQ：Receive Queue</span><br><span class="line">     └─ Receive WQE 0, Receive WQE 1, Receive WQE 2, ...</span><br></pre></td></tr></table></figure>
-
-<ul>
-<li><strong>SQ WQE</strong> 描述本端主动发起的 SEND、RDMA WRITE、RDMA READ、ATOMIC 等操作；</li>
-<li><strong>RQ WQE</strong> 描述接收端预先提供的 receive buffer；</li>
-<li><strong>CQ</strong> 不是 QP 内的第三条工作队列，而是完成事件队列；多个 QP 可以关联同一个 CQ；</li>
-<li>RQ 也可以被 <strong>SRQ（Shared Receive Queue）</strong> 替代，让多个 QP 共享一池 Receive WQE。</li>
-</ul>
-<p>可以把 SQ/RQ 理解为“待办事项队列”，把 CQ 理解为“已办结果队列”：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">应用/Provider                      RNIC</span><br><span class="line"></span><br><span class="line">向 SQ 放 Send WQE   ─────────────→ 取 WQE、发包、重试、完成</span><br><span class="line">向 RQ 放 Recv WQE   ─────────────→ 收到 SEND 后匹配一个 WQE</span><br><span class="line">轮询 CQ             ←───────────── 写 CQE</span><br></pre></td></tr></table></figure>
-
-<p>注意，“Send Queue”不只执行 SEND opcode。RDMA WRITE、READ、ATOMIC 也都通过<br><code>ibv_post_send()</code> 提交到 SQ；这里的 send 更接近“本端主动发起”。</p>
-<h3 id="3-3-WR-与-WQE-为什么不是同一个对象"><a href="#3-3-WR-与-WQE-为什么不是同一个对象" class="headerlink" title="3.3 WR 与 WQE 为什么不是同一个对象"></a>3.3 WR 与 WQE 为什么不是同一个对象</h3><p>应用构造的是通用 verbs WR：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">ibv_sge sge = {};</span><br><span class="line">sge.addr   = <span class="built_in">reinterpret_cast</span>&lt;<span class="type">uintptr_t</span>&gt;(local_buffer);</span><br><span class="line">sge.length = bytes;</span><br><span class="line">sge.lkey   = local_mr-&gt;lkey;</span><br><span class="line"></span><br><span class="line">ibv_send_wr wr = {};</span><br><span class="line">wr.wr_id      = opaque_cookie;</span><br><span class="line">wr.sg_list    = &amp;sge;</span><br><span class="line">wr.num_sge    = <span class="number">1</span>;</span><br><span class="line">wr.opcode     = IBV_WR_RDMA_WRITE;</span><br><span class="line">wr.send_flags = IBV_SEND_SIGNALED;</span><br><span class="line">wr.wr.rdma.remote_addr = remote_address;</span><br><span class="line">wr.wr.rdma.rkey        = remote_rkey;</span><br><span class="line"></span><br><span class="line">ibv_send_wr* bad_wr = <span class="literal">nullptr</span>;</span><br><span class="line"><span class="type">int</span> rc = <span class="built_in">ibv_post_send</span>(qp, &amp;wr, &amp;bad_wr);</span><br></pre></td></tr></table></figure>
-
-<p>这段代码里的 <code>wr</code> 是进程地址空间中的普通 C 结构体。<code>ibv_post_send()</code> 成功时，<br>provider 已经读取 WR/SGE 内容，并把它编码到 QP 的硬件 SQ 中。应用随后可以复用<br><code>ibv_send_wr</code> 和 <code>ibv_sge</code> 这两个<strong>描述符对象本身</strong>。</p>
-<p>但 non-inline 的 <code>local_buffer</code> 不同：RNIC 可能稍后才 DMA 读取 payload，所以在相应<br>WR 完成前，应用不能释放、注销或改写仍由设备读取的那段 buffer。</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">post 返回后：</span><br><span class="line"></span><br><span class="line">ibv_send_wr 对象        → provider 已读取，通常可以复用</span><br><span class="line">ibv_sge 对象            → provider 已读取，通常可以复用</span><br><span class="line">SGE 指向的 payload      → non-inline 时仍可能被 RNIC DMA，不能提前复用</span><br><span class="line">MR / lkey               → WQE 完成前必须继续有效</span><br></pre></td></tr></table></figure>
-
-<p>若 <code>IBV_SEND_INLINE</code> 成功使用，payload 已在 post 路径被复制进 WQE/设备提交区域，<br>原 payload buffer 通常在 <code>ibv_post_send()</code> 返回后即可复用；后文第 6 节会继续解释。</p>
-<h3 id="3-4-一个-Send-WQE-概念上包含什么"><a href="#3-4-一个-Send-WQE-概念上包含什么" class="headerlink" title="3.4 一个 Send WQE 概念上包含什么"></a>3.4 一个 Send WQE 概念上包含什么</h3><p>WQE 的确切二进制 layout 是 provider/硬件相关的，但可以用下面的逻辑结构理解：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">Send WQE</span><br><span class="line">┌─────────────────────────────────────────────────────────┐</span><br><span class="line">│ Control                                                 │</span><br><span class="line">│ opcode、flags、WQE 序号、是否 signaled/fence/inline ... │</span><br><span class="line">├─────────────────────────────────────────────────────────┤</span><br><span class="line">│ Local data description                                  │</span><br><span class="line">│ SGE 0: local_addr + length + lkey                       │</span><br><span class="line">│ SGE 1: local_addr + length + lkey                       │</span><br><span class="line">│ ...                                                     │</span><br><span class="line">├─────────────────────────────────────────────────────────┤</span><br><span class="line">│ Operation-specific fields                               │</span><br><span class="line">│ WRITE/READ: remote_addr + rkey                          │</span><br><span class="line">│ SEND_WITH_IMM/WRITE_WITH_IMM: immediate data            │</span><br><span class="line">│ ATOMIC: compare/swap/add operand                         │</span><br><span class="line">├─────────────────────────────────────────────────────────┤</span><br><span class="line">│ Optional inline payload                                 │</span><br><span class="line">│ 设置 IBV_SEND_INLINE 时，小数据可直接嵌入提交区域        │</span><br><span class="line">└─────────────────────────────────────────────────────────┘</span><br></pre></td></tr></table></figure>
-
-<p>并不是每种 opcode 都使用全部区域：</p>
-<table>
-<thead>
-<tr>
-<th>Opcode</th>
-<th>本地 SGE</th>
-<th><code>remote_addr+rkey</code></th>
-<th>其他典型字段</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>SEND</td>
-<td>要发送的 local payload</td>
-<td>不需要</td>
-<td>可带 immediate</td>
-</tr>
-<tr>
-<td>RDMA WRITE</td>
-<td>local source</td>
-<td>需要</td>
-<td>可带 immediate</td>
-</tr>
-<tr>
-<td>RDMA READ</td>
-<td>local destination</td>
-<td>需要</td>
-<td>读取长度来自 local SGE 总长度</td>
-</tr>
-<tr>
-<td>ATOMIC</td>
-<td>local result buffer</td>
-<td>需要</td>
-<td>compare/swap 或 add operand</td>
-</tr>
-<tr>
-<td>Receive WQE</td>
-<td>local destination</td>
-<td>不需要</td>
-<td>通常主要由 SGE 组成</td>
-</tr>
-</tbody></table>
-<p>这里的表是语义视图，不等于硬件 WQE 中一定按这个顺序排列。</p>
-<h3 id="3-5-SGE：一个-WQE-可以引用多段本地内存"><a href="#3-5-SGE：一个-WQE-可以引用多段本地内存" class="headerlink" title="3.5 SGE：一个 WQE 可以引用多段本地内存"></a>3.5 SGE：一个 WQE 可以引用多段本地内存</h3><p>SGE 是 <strong>Scatter/Gather Element</strong>：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">SGE = addr + length + lkey</span><br></pre></td></tr></table></figure>
-
-<p>例如一条 SEND WQE 可以引用三段不连续内存：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">SGE[0] → header MR:  [地址 A, 64 B,   lkey_A]</span><br><span class="line">SGE[1] → metadata:   [地址 B, 256 B,  lkey_B]</span><br><span class="line">SGE[2] → payload MR: [地址 C, 32 KiB, lkey_C]</span><br></pre></td></tr></table></figure>
-
-<p>RNIC 按 SGE 顺序读取它们，在网络上形成一条逻辑 message：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">网络字节序列 = header || metadata || payload</span><br></pre></td></tr></table></figure>
-
-<p>应用不用先把三段数据复制到一个连续 staging buffer，这就是 gather。接收 WQE 也可以<br>有多个 SGE，让收到的连续 message 分散写入多段本地内存，这就是 scatter。</p>
-<p>限制来自 QP/device capability：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">max_send_sge   一条 Send WR/WQE 最多可引用多少 SGE</span><br><span class="line">max_recv_sge   一条 Receive WR/WQE 最多可引用多少 SGE</span><br></pre></td></tr></table></figure>
-
-<p>还要注意：</p>
-<ul>
-<li>各 SGE 的 <code>[addr, addr+length)</code> 必须在对应 lkey 注册范围内；</li>
-<li>使用多个 SGE 减少了应用 memcpy，但 RNIC 仍要执行多段 DMA read/write；</li>
-<li>SGE 数太多会增大 WQE、增加地址处理和 DMA 碎片化成本；</li>
-<li>一个 WQE 的总 payload 是各有效 SGE length 之和，不是“一个 SGE 就是一条 packet”。</li>
-</ul>
-<h3 id="3-6-Receive-WQE-保存的是数据，还是-buffer-描述符"><a href="#3-6-Receive-WQE-保存的是数据，还是-buffer-描述符" class="headerlink" title="3.6 Receive WQE 保存的是数据，还是 buffer 描述符"></a>3.6 Receive WQE 保存的是数据，还是 buffer 描述符</h3><p>Receive WQE 不是收到的 packet 本身，它是接收端预先交给 RNIC 的“空 buffer 清单”：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">ibv_sge recv_sge = {};</span><br><span class="line">recv_sge.addr   = <span class="built_in">reinterpret_cast</span>&lt;<span class="type">uintptr_t</span>&gt;(recv_buffer);</span><br><span class="line">recv_sge.length = recv_capacity;</span><br><span class="line">recv_sge.lkey   = recv_mr-&gt;lkey;</span><br><span class="line"></span><br><span class="line">ibv_recv_wr recv_wr = {};</span><br><span class="line">recv_wr.wr_id   = recv_buffer_id;</span><br><span class="line">recv_wr.sg_list = &amp;recv_sge;</span><br><span class="line">recv_wr.num_sge = <span class="number">1</span>;</span><br><span class="line"></span><br><span class="line">ibv_recv_wr* bad_recv_wr = <span class="literal">nullptr</span>;</span><br><span class="line"><span class="built_in">ibv_post_recv</span>(qp, &amp;recv_wr, &amp;bad_recv_wr);</span><br></pre></td></tr></table></figure>
-
-<p>执行 SEND 时：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">远端 SEND message 到达</span><br><span class="line">  → 接收 RNIC 从 QP RQ/SRQ 取出一个 Receive WQE</span><br><span class="line">  → 按 WQE 中的 SGE，把 payload DMA 到 application buffer</span><br><span class="line">  → 生成 Receive CQE</span><br><span class="line">  → CQE.wr_id 帮应用找回是哪个 buffer</span><br><span class="line">  → CQE.byte_len 告诉应用实际收到多少字节</span><br></pre></td></tr></table></figure>
-
-<p>一个可能包含许多网络 packet 的大 SEND message，通常仍只消费一个 Receive WQE。<br>如果 message 大于 Receive WQE 所提供的总 SGE capacity，会得到 local length error，<br>而不是自动拼接多个普通 Receive WQE 来容纳一条 message。</p>
-<p>不同 operation 对远端 RQ 的关系：</p>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>是否消费远端 Receive WQE</th>
-<th>原因</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>SEND / SEND_WITH_IMM</td>
-<td>是</td>
-<td>需要由远端 RQ 指定 payload 落点</td>
-</tr>
-<tr>
-<td>RDMA WRITE</td>
-<td>否</td>
-<td>落点已由 <code>remote_addr+rkey</code> 指定</td>
-</tr>
-<tr>
-<td>RDMA WRITE_WITH_IMM</td>
-<td>通常是</td>
-<td>payload 写 remote MR；Receive WQE 承接 immediate 通知上下文</td>
-</tr>
-<tr>
-<td>RDMA READ</td>
-<td>否</td>
-<td>远端只按 rkey 提供被读取的 MR</td>
-</tr>
-<tr>
-<td>ATOMIC</td>
-<td>否</td>
-<td>直接操作远端 MR 中的地址</td>
-</tr>
-</tbody></table>
-<p>所以增加 <code>max_recv_wr</code> 主要能增加“可提前接收多少条 SEND/Immediate 消息”，不会扩大<br>plain RDMA WRITE 的发送 BDP window。</p>
-<h3 id="3-7-ibv-post-send-到-RNIC-执行的完整流程"><a href="#3-7-ibv-post-send-到-RNIC-执行的完整流程" class="headerlink" title="3.7 ibv_post_send() 到 RNIC 执行的完整流程"></a>3.7 <code>ibv_post_send()</code> 到 RNIC 执行的完整流程</h3><p>下面把“准备描述符 → doorbell → 设备取任务”展开到 WQE 粒度：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line">应用线程</span><br><span class="line">  │</span><br><span class="line">  │ 1. 填 ibv_sge / ibv_send_wr</span><br><span class="line">  │</span><br><span class="line">  ▼</span><br><span class="line">ibv_post_send(qp, first_wr, &amp;bad_wr)</span><br><span class="line">  │</span><br><span class="line">  │ 2. provider 检查/预留 SQ slot</span><br><span class="line">  │ 3. 把 WR 编码为硬件 WQE</span><br><span class="line">  │ 4. 更新 SQ producer index</span><br><span class="line">  │ 5. memory barrier：确保 WQE 内容先于通知对设备可见</span><br><span class="line">  │ 6. 写 doorbell record / MMIO doorbell</span><br><span class="line">  ▼</span><br><span class="line">RNIC</span><br><span class="line">  │</span><br><span class="line">  │ 7. 发现 producer index 前进</span><br><span class="line">  │ 8. 取 WQE，解析 opcode、SGE、key、地址</span><br><span class="line">  │ 9. 检查 QP 状态、权限和资源</span><br><span class="line">  │10. non-inline 发送时 DMA read local payload</span><br><span class="line">  │11. 按 path MTU packetize，维护 PSN、ACK、retry 等状态</span><br><span class="line">  │12. 网络发送；远端 RNIC 执行写入/读取/原子/接收语义</span><br><span class="line">  │13. 达到该 WR 的 transport completion 条件</span><br><span class="line">  │14. 若 signaled 或发生需要报告的错误，向 CQ 写 CQE</span><br><span class="line">  ▼</span><br><span class="line">应用 poll CQ</span><br><span class="line">  │</span><br><span class="line">  │15. 根据 CQE.wr_id 回收 buffer、MR 引用、batch/callback</span><br><span class="line">  ▼</span><br><span class="line">SQ slot/应用资源可安全复用</span><br></pre></td></tr></table></figure>
-
-<p>其中第 3～6 步由 provider 和硬件实现决定。常见实现会把 SQ ring 映射到用户态，<br>避免每次 post 都进入内核；也可能用类似 BlueFlame 的设备专用 MMIO 提交方式把小 WQE<br>直接推给网卡。它们都是优化细节，不能反推成所有 RNIC 都会以完全相同方式“DMA fetch<br>一份 host WQE”。</p>
-<h3 id="3-8-Doorbell-是什么，为什么不能先敲再写完-WQE"><a href="#3-8-Doorbell-是什么，为什么不能先敲再写完-WQE" class="headerlink" title="3.8 Doorbell 是什么，为什么不能先敲再写完 WQE"></a>3.8 Doorbell 是什么，为什么不能先敲再写完 WQE</h3><p>WQE ring 是一排已经分配好的槽位。软件先写槽位，再通知设备“新的 producer index<br>到这里了”：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">SQ ring</span><br><span class="line"></span><br><span class="line">consumer                         producer</span><br><span class="line">   │                                │</span><br><span class="line">   ▼                                ▼</span><br><span class="line">┌──────┬──────┬──────┬──────┬──────┬──────┐</span><br><span class="line">│ done │ done │ WQE2 │ WQE3 │ free │ free │</span><br><span class="line">└──────┴──────┴──────┴──────┴──────┴──────┘</span><br><span class="line">                 新提交范围 ──────┘</span><br><span class="line"></span><br><span class="line">写好 WQE2/WQE3</span><br><span class="line">  → memory barrier</span><br><span class="line">  → doorbell 告诉 RNIC producer 已前进</span><br></pre></td></tr></table></figure>
-
-<p>若设备在 WQE 字段完全可见前就收到 doorbell，理论上可能读取到部分旧值/未完成内容。<br>因此 provider 必须处理正确的内存顺序；应用不应绕过 provider 自己随意写 doorbell。</p>
-<p>一次 <code>ibv_post_send()</code> 可以提交一条 WR linked list。provider 可以在准备一串 WQE 后<br>只做一次或更少的 doorbell 动作，所以 batch posting 能减少：</p>
-<ul>
-<li>API 调用和锁开销；</li>
-<li>producer index 更新；</li>
-<li>MMIO/doorbell 次数；</li>
-<li>每 WQE 的固定提交成本。</li>
-</ul>
-<p>但 batch 并不会把 N 条 WR 自动变成一条 WQE。通常仍是：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">N 个 WR → N 个 WQE → 可以一次 post/doorbell 通知</span><br></pre></td></tr></table></figure>
-
-<p>如果应用想真正提高 <code>bytes/WQE</code>，需要把多个小逻辑对象合并进更大的 buffer/WR，或者<br>在 capability 允许时使用一个带多个 SGE 的 WR。</p>
-<h3 id="3-9-WQE、网络-Packet-和-PCIe-TLP-不是一一对应"><a href="#3-9-WQE、网络-Packet-和-PCIe-TLP-不是一一对应" class="headerlink" title="3.9 WQE、网络 Packet 和 PCIe TLP 不是一一对应"></a>3.9 WQE、网络 Packet 和 PCIe TLP 不是一一对应</h3><p>这是最重要的层次关系之一：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">一个 8 MiB RDMA WRITE WR</span><br><span class="line">        │ provider 编码</span><br><span class="line">        ▼</span><br><span class="line">通常是一条逻辑 Send WQE</span><br><span class="line">        │ RNIC 按 path MTU 拆分</span><br><span class="line">        ▼</span><br><span class="line">许多 RDMA transport packets</span><br><span class="line">        │ 网卡 DMA/PCIe packetization</span><br><span class="line">        ▼</span><br><span class="line">许多 PCIe Read/Write TLP</span><br></pre></td></tr></table></figure>
-
-<p>举一个只用于理解数量级的例子。假设：</p>
-<ul>
-<li>RDMA WRITE payload 为 8 MiB；</li>
-<li>RoCE path MTU 为 4 KiB；</li>
-<li>暂不计算协议 header、分段边界和重传。</li>
-</ul>
-<p>那么网络 packet 数量约为：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">8 MiB / 4 KiB = 2048 packets</span><br></pre></td></tr></table></figure>
-
-<p>但应用仍可能只提交了一条 WR/WQE。RNIC 为读取这 8 MiB local payload 产生的 PCIe<br>Read TLP 数量又受 PCIe Maximum Read Request Size、completion 切分、地址对齐等影响，<br>不会简单等于 2048。</p>
-<p>反过来，一个小 inline WQE 可能把 payload 随 WQE 一起提交，省掉对应用 payload 的<br>额外 DMA read，但 doorbell/MMIO 和网络 packet 仍然存在。</p>
-<p>因此：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">WQE depth        以“工作请求数”计</span><br><span class="line">网络 BDP         以“在途字节数”计</span><br><span class="line">packet rate      以“网络包数/秒”计</span><br><span class="line">PCIe 压力        以 TLP、payload byte、read/write transaction 等计</span><br></pre></td></tr></table></figure>
-
-<p>四种指标不能互相直接替换。</p>
-<h3 id="3-10-WQE-的状态与“outstanding”究竟指什么"><a href="#3-10-WQE-的状态与“outstanding”究竟指什么" class="headerlink" title="3.10 WQE 的状态与“outstanding”究竟指什么"></a>3.10 WQE 的状态与“outstanding”究竟指什么</h3><p>概念生命周期可以画成：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">应用未提交</span><br><span class="line">   ↓</span><br><span class="line">posted：已写入 SQ，producer 已前进</span><br><span class="line">   ↓</span><br><span class="line">fetched/issued：RNIC 已取 WQE，开始 DMA/发包</span><br><span class="line">   ↓</span><br><span class="line">in flight：对应 packet/响应/ACK 尚在推进</span><br><span class="line">   ↓</span><br><span class="line">retired：RNIC 已达到 transport 完成条件</span><br><span class="line">   ↓</span><br><span class="line">CQE visible：signaled WR 的完成记录可被 poll</span><br><span class="line">   ↓</span><br><span class="line">reclaimed：应用/provider 回收 slot 和业务资源</span><br></pre></td></tr></table></figure>
-
-<p>这些名字是帮助理解的概念状态，不是所有 verbs provider 都向应用暴露的正式状态机。<br>“outstanding WQE”在不同文档中也可能指：</p>
-<ol>
-<li>已 post 但尚未由软件回收的 SQ WQE；</li>
-<li>RNIC 已激活但尚未完成的 WQE；</li>
-<li>firmware 某个 transmit work queue 能同时维护的 active WQE；</li>
-<li>某个上层库用 semaphore 允许的 inflight request。</li>
-</ol>
-<p>所以看到 <code>max_send_wr</code>、<code>ACCL_TX_DEPTH</code>、<code>LOG_MAX_OUTSTANDING_WQE</code> 时不能认为它们是<br>同一个变量。更完整的三层窗口已在<br><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/">02c RoCE 拥塞、BDP 与调优</a> 第 3.5 节说明。</p>
-<h3 id="3-11-Queue-Depth-是怎样设置和查询的"><a href="#3-11-Queue-Depth-是怎样设置和查询的" class="headerlink" title="3.11 Queue Depth 是怎样设置和查询的"></a>3.11 Queue Depth 是怎样设置和查询的</h3><p>创建 QP 时，应用请求 capacity：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">ibv_qp_init_attr attr = {};</span><br><span class="line">attr.send_cq = send_cq;</span><br><span class="line">attr.recv_cq = recv_cq;</span><br><span class="line">attr.qp_type = IBV_QPT_RC;</span><br><span class="line"></span><br><span class="line">attr.cap.max_send_wr  = requested_sq_depth;</span><br><span class="line">attr.cap.max_recv_wr  = requested_rq_depth;</span><br><span class="line">attr.cap.max_send_sge = requested_send_sge;</span><br><span class="line">attr.cap.max_recv_sge = requested_recv_sge;</span><br><span class="line">attr.cap.max_inline_data = requested_inline_bytes;</span><br><span class="line"></span><br><span class="line">ibv_qp* qp = <span class="built_in">ibv_create_qp</span>(pd, &amp;attr);</span><br></pre></td></tr></table></figure>
-
-<p>需要区分：</p>
-<table>
-<thead>
-<tr>
-<th>能力/参数</th>
-<th>单位</th>
-<th>回答的问题</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>device <code>max_qp_wr</code></td>
-<td>WR/WQE 数</td>
-<td>单个 QP work queue 的设备能力上限</td>
-</tr>
-<tr>
-<td>QP <code>max_send_wr</code></td>
-<td>Send WR/WQE 数</td>
-<td>这个 QP 实际 SQ capacity</td>
-</tr>
-<tr>
-<td>QP <code>max_recv_wr</code></td>
-<td>Receive WR/WQE 数</td>
-<td>这个 QP 实际 RQ capacity</td>
-</tr>
-<tr>
-<td><code>max_send_sge</code></td>
-<td>SGE/WQE</td>
-<td>一条 Send WQE 最多引用几段本地内存</td>
-</tr>
-<tr>
-<td><code>max_recv_sge</code></td>
-<td>SGE/WQE</td>
-<td>一条 Receive WQE 最多提供几段 buffer</td>
-</tr>
-<tr>
-<td><code>max_inline_data</code></td>
-<td>byte</td>
-<td>最多多少 payload 可 inline</td>
-</tr>
-<tr>
-<td>CQ <code>cqe</code></td>
-<td>CQE 数</td>
-<td>CQ 能容纳多少尚未 poll 的完成记录</td>
-</tr>
-</tbody></table>
-<p>provider 可能对申请值取整或返回实际支持值，所以不能只写配置，不检查创建结果和设备<br>能力。还要保证：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">可能同时产生但尚未 poll 的 CQE 数 &lt; CQ capacity</span><br></pre></td></tr></table></figure>
-
-<p>否则即使 SQ 很深，也可能发生 CQ overrun。</p>
-<h3 id="3-12-Signaled-Unsignaled-改变-CQE-数，不等于不占-WQE"><a href="#3-12-Signaled-Unsignaled-改变-CQE-数，不等于不占-WQE" class="headerlink" title="3.12 Signaled/Unsignaled 改变 CQE 数，不等于不占 WQE"></a>3.12 Signaled/Unsignaled 改变 CQE 数，不等于不占 WQE</h3><p>假设提交 8 条 WR：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">WQE 0  unsignaled</span><br><span class="line">WQE 1  unsignaled</span><br><span class="line">WQE 2  unsignaled</span><br><span class="line">WQE 3  signaled</span><br><span class="line">WQE 4  unsignaled</span><br><span class="line">WQE 5  unsignaled</span><br><span class="line">WQE 6  unsignaled</span><br><span class="line">WQE 7  signaled</span><br></pre></td></tr></table></figure>
-
-<p>所有 8 条仍然：</p>
-<ul>
-<li>占 SQ WQE slot；</li>
-<li>被 RNIC 执行；</li>
-<li>使用本地/远端 key 和 buffer；</li>
-<li>可能产生许多网络 packet；</li>
-<li>完成前都不能随意释放其 non-inline payload。</li>
-</ul>
-<p>区别是正常成功路径通常只为 WQE 3 和 WQE 7 生成可见 CQE。由于同一 RC SQ 的有序<br>推进，应用 poll 到 WQE 7 的成功 completion 后，可以按自身记账规则回收它之前已经<br>被该 completion 覆盖的同 SQ 工作。</p>
-<p>如果一直 post unsignaled WQE 而长期没有 signaled 边界，应用就没有可靠的正常 CQE<br>来推进回收，最终可能把 SQ 填满。这也是为什么 Barex batch 会选择性 signaled 并维护<br>自己的 permit/callback。</p>
-<h3 id="3-13-ibv-post-send-失败时，哪些-WQE-已经进入-SQ"><a href="#3-13-ibv-post-send-失败时，哪些-WQE-已经进入-SQ" class="headerlink" title="3.13 ibv_post_send() 失败时，哪些 WQE 已经进入 SQ"></a>3.13 <code>ibv_post_send()</code> 失败时，哪些 WQE 已经进入 SQ</h3><p>WR linked list：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">WR0 → WR1 → WR2 → WR3 → NULL</span><br></pre></td></tr></table></figure>
-
-<p>调用：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">ibv_send_wr* bad_wr = <span class="literal">nullptr</span>;</span><br><span class="line"><span class="type">int</span> rc = <span class="built_in">ibv_post_send</span>(qp, &amp;wr0, &amp;bad_wr);</span><br></pre></td></tr></table></figure>
-
-<p>若返回非零，<code>bad_wr</code> 指向 provider 未能 post 的第一条 WR。它之前的 WR 可能已经成功<br>进入 SQ，<code>bad_wr</code> 及其后继尚未成功提交。应用不能简单地把整个 batch 当成“全部未发”<br>再次 post，否则可能重复执行前缀中的 RDMA WRITE/ATOMIC。</p>
-<p>因此 batch 封装需要处理：</p>
-<ul>
-<li>已成功前缀的完成和资源生命周期；</li>
-<li>失败后缀是否重试；</li>
-<li>非幂等 operation 是否允许重试；</li>
-<li>callback 是按 WR 还是按 batch 触发；</li>
-<li>permit 应归还多少。</li>
-</ul>
-<p>这正是 Barex <code>WriteBatch</code> 相比“手写一个 <code>for</code> 循环”多承担的部分。</p>
-<h3 id="3-14-结合-Barex：一批-Write-如何变成-WQE"><a href="#3-14-结合-Barex：一批-Write-如何变成-WQE" class="headerlink" title="3.14 结合 Barex：一批 Write 如何变成 WQE"></a>3.14 结合 Barex：一批 Write 如何变成 WQE</h3><p>Barex 的简化链路：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">WriteBatch(items)</span><br><span class="line">  → 为每个 item 准备 ibv_sge</span><br><span class="line">  → 为每个 item 准备 IBV_WR_RDMA_WRITE</span><br><span class="line">  → 用 wr.next 串成 linked list</span><br><span class="line">  → PostSendOrEnqueue(permits = WR 数)</span><br><span class="line">  → ibv_post_send(qp, first_wr, &amp;bad_wr)</span><br><span class="line">  → provider 编码多个 Send WQE</span><br><span class="line">  → RNIC 执行</span><br><span class="line">  → signaled 边界产生 CQE</span><br><span class="line">  → XContextImpl 处理 completion</span><br><span class="line">  → ReleaseAndPostSend 归还 permit、继续软件队列</span><br></pre></td></tr></table></figure>
-
-<p>Barex 中：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">ACCL_TX_DEPTH</span><br><span class="line">  → send_semaphore_ 初值</span><br><span class="line">  → qp_init_attr.cap.max_send_wr</span><br><span class="line"></span><br><span class="line">ACCL_SOFT_TX_DEPTH</span><br><span class="line">  → 尚未获得 permit、还没有 post 到 SQ 的 software task 上限</span><br></pre></td></tr></table></figure>
-
-<p>因此一批 32 个 item 如果通常生成 32 条 WR，就需要 32 个发送 permit；一次<br><code>ibv_post_send()</code> 虽然可以把链表批量提交，但 SQ 里仍会新增约 32 个 WQE，而不是只占<br>一个 WQE。</p>
-<p>Barex 常让 batch 最后一条 WR signaled，再用自己的 <code>x_wr_id</code>、<code>call_once</code> 和 completion<br>处理聚合为一次业务 callback。这里存在三个不同的“批量”：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">业务 batch：      用户希望一组 item 作为一个逻辑操作完成</span><br><span class="line">post batch：      一次 ibv_post_send 提交一条 WR linked list</span><br><span class="line">completion batch：多个 WQE 由较少的 signaled CQE 代表回收边界</span><br></pre></td></tr></table></figure>
-
-<p>三者经常数量相关，但不是同一个概念。</p>
-<h3 id="3-15-常见问题与误区"><a href="#3-15-常见问题与误区" class="headerlink" title="3.15 常见问题与误区"></a>3.15 常见问题与误区</h3><h4 id="误区-1：WQE-就是网络包"><a href="#误区-1：WQE-就是网络包" class="headerlink" title="误区 1：WQE 就是网络包"></a>误区 1：WQE 就是网络包</h4><p>不是。一条大 WQE 可以拆成很多 packet；一个 SEND message 的多个 packet 通常仍匹配<br>一个 Receive WQE。</p>
-<h4 id="误区-2：WQE-里一定装着-payload"><a href="#误区-2：WQE-里一定装着-payload" class="headerlink" title="误区 2：WQE 里一定装着 payload"></a>误区 2：WQE 里一定装着 payload</h4><p>通常 WQE 主要保存地址、长度、key、opcode 等描述符，non-inline payload 仍在 MR 中，<br>由 RNIC DMA 读取。只有 inline 等模式会把小 payload 嵌入提交区域。</p>
-<h4 id="误区-3：ibv-post-send-返回成功就是远端处理完了"><a href="#误区-3：ibv-post-send-返回成功就是远端处理完了" class="headerlink" title="误区 3：ibv_post_send() 返回成功就是远端处理完了"></a>误区 3：<code>ibv_post_send()</code> 返回成功就是远端处理完了</h4><p>它只说明 provider 接受了 WR/WQE。要等待 transport completion 应 poll CQ；要知道远端<br>业务处理完，还需要应用层协议。</p>
-<h4 id="误区-4：Unsignaled-WQE-不占-SQ"><a href="#误区-4：Unsignaled-WQE-不占-SQ" class="headerlink" title="误区 4：Unsignaled WQE 不占 SQ"></a>误区 4：Unsignaled WQE 不占 SQ</h4><p>错误。它只是不要求每条正常成功操作都产生 CQE，WQE、buffer 和设备执行资源仍然存在。</p>
-<h4 id="误区-5：把-SQ-depth-调大就一定能填满-BDP"><a href="#误区-5：把-SQ-depth-调大就一定能填满-BDP" class="headerlink" title="误区 5：把 SQ depth 调大就一定能填满 BDP"></a>误区 5：把 SQ depth 调大就一定能填满 BDP</h4><p>有效窗口还受 Barex permit、RNIC active window、packet/PSN window、MR/pinned-memory<br>资源和拥塞控制限制；而可覆盖的 bytes 还取决于平均 <code>bytes/WQE</code>。</p>
-<h4 id="误区-6：一个-CQE-只能对应一个需要回收的业务对象"><a href="#误区-6：一个-CQE-只能对应一个需要回收的业务对象" class="headerlink" title="误区 6：一个 CQE 只能对应一个需要回收的业务对象"></a>误区 6：一个 CQE 只能对应一个需要回收的业务对象</h4><p>硬件 CQE 对应某个 signaled WR 的完成记录；上层可以利用 SQ ordering，让一个 signaled<br>边界回收此前多个 unsignaled WR，但必须维护准确的软件记账。</p>
-<h3 id="3-16-本节最小心智模型"><a href="#3-16-本节最小心智模型" class="headerlink" title="3.16 本节最小心智模型"></a>3.16 本节最小心智模型</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">WR：应用填写的请求</span><br><span class="line">WQE：provider 为 RNIC 编码的队列元素</span><br><span class="line">SGE：WQE 引用的一段 local registered memory</span><br><span class="line">SQ：主动 operation 的 WQE 队列</span><br><span class="line">RQ/SRQ：为 SEND/Immediate 预先提供 receive context/buffer 的 WQE 队列</span><br><span class="line">Doorbell：告诉 RNIC “producer index 前进了”</span><br><span class="line">CQE：RNIC 写回的完成结果</span><br><span class="line"></span><br><span class="line">一条 WQE ≠ 一条 packet ≠ 一条 PCIe TLP</span><br><span class="line">post success ≠ transport completion ≠ remote application completion</span><br><span class="line">unsignaled ≠ 不占 SQ</span><br><span class="line">SQ depth（WQE）× 平均 bytes/WQE 才能近似换算为 byte window</span><br></pre></td></tr></table></figure>
-
 <h2 id="4-post-成功不等于完成"><a href="#4-post-成功不等于完成" class="headerlink" title="4. post 成功不等于完成"></a>4. post 成功不等于完成</h2><p>三个阶段：</p>
 <table>
 <thead>
@@ -1364,7 +1364,7 @@ mjx-container[display="true"] + br {
 <li><a target="_blank" rel="noopener" href="https://docs.kernel.org/driver-api/infiniband.html">Linux InfiniBand/RDMA interfaces</a></li>
 <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/rdma-aware-networks-programming-user-manual-1-7.pdf">NVIDIA RDMA Aware Networks Programming User Manual</a></li>
 </ul>
-</div><div class="article-licensing box"><div class="licensing-title"><p>02b. RDMA 操作、WR/CQ 完成与可靠性</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">02c. RoCE、拥塞控制、PFC/ECN 与重传</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/"><span class="level-item">03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">59</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-28T00:00:00.000Z">2026-07-28</time></p><p class="title"><a href="/notes/2026/07/28/2026-07-28-kimi%20k3%E3%80%81dspark%E4%B8%8Epd%E5%88%86%E7%A6%BB/">Kimi K3、DSpark 与 PD 分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">31</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+</div><div class="article-licensing box"><div class="licensing-title"><p>02b. RDMA 操作、WR/CQ 完成与可靠性</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">02c. RoCE、拥塞控制、PFC/ECN 与重传</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-04-nccl-topology-and-transport/"><span class="level-item">04. NCCL 拓扑发现与 Transport 选择</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">59</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-28T00:00:00.000Z">2026-07-28</time></p><p class="title"><a href="/notes/2026/07/28/2026-07-28-kimi%20k3%E3%80%81dspark%E4%B8%8Epd%E5%88%86%E7%A6%BB/">Kimi K3、DSpark 与 PD 分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">31</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
             article: {
                 highlight: {
                     clipboard: true,
