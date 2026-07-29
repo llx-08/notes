@@ -823,6 +823,88 @@ wait_layer_ready(0)：条件 ready_ > 0 成立，可以发送 layer 0
 wait_layer_ready(1)：条件 ready_ > 1 不成立，继续等待 layer 1
 ```
 
+`data_signal_` 之所以只用一个整数也能区分 layer，是因为各层严格按
+`0 → 1 → 2 → ...` 的顺序 ready。这里的 `ready_` 不是“最后一个 ready 的
+layer id”，而是：
+
+> 已经连续 ready 的 layer 数量，也就是 ready 区间的右开边界。
+
+对应关系如下：
+
+| `ready_` | 已允许发送的层 | 仍需等待的第一层 |
+|---:|---|---:|
+| 0 | 无 | layer 0 |
+| 1 | layer 0 | layer 1 |
+| 2 | layer 0、1 | layer 2 |
+| 3 | layer 0、1、2 | layer 3 |
+| `num_layers` | 全部层 | 无 |
+
+发送线程等待 layer `i` 时调用：
+
+```cpp
+data_signal_.wait(i);
+```
+
+其放行条件是：
+
+```cpp
+ready_ > i
+```
+
+而 StepGuard 在 layer `i` 的 CUDA Event 完成后发布的是：
+
+```cpp
+const auto next_layer = i + 1;
+step_->notify_layer_ready(next_layer);
+```
+
+注意这里故意传 `i + 1`，正好把 `ready_` 推进到“前 `i + 1` 层已经 ready”。
+例如：
+
+```text
+初始 ready_=0
+
+event[0] complete
+  → notify_layer_ready(1)
+  → ready_=1
+  → wait_layer_ready(0) 通过
+
+event[1] complete
+  → notify_layer_ready(2)
+  → ready_=2
+  → wait_layer_ready(1) 通过
+
+event[2] complete
+  → notify_layer_ready(3)
+  → ready_=3
+  → wait_layer_ready(2) 通过
+```
+
+`release(cond)` 还使用：
+
+```cpp
+if (ready_ < cond) {
+  ready_ = cond;
+}
+```
+
+所以水位只能前进、不能后退。若某个发送线程启动得晚，例如启动时
+`ready_=3`，它调用 `wait_layer_ready(0)`、`wait_layer_ready(1)` 和
+`wait_layer_ready(2)` 都会直接通过，不需要重新接收三次通知。
+
+这个设计的代价是它不能表达“layer 2 ready，但 layer 1 还没 ready”这种有洞的
+状态。blade-kvt 不需要表达这种状态，因为 `StepGuard::wait_layers()` 本身就是
+按 layer 顺序逐个等待：
+
+```cpp
+for (layer_i = 0; layer_i < num_layers; ++layer_i) {
+  wait event[layer_i];
+  notify_layer_ready(layer_i + 1);
+}
+```
+
+因此一个单调 watermark 足够，无需为每层维护 `bool ready[num_layers]`。
+
 因此不是 CUDA Event 直接寻找某个 `send_data()` 线程并唤醒它，而是：
 
 ```text
