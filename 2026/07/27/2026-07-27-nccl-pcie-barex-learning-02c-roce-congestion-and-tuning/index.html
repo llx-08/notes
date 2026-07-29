@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>02c. RoCE、拥塞控制、PFC/ECN 与重传 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="02c. RoCE、拥塞控制、PFC&amp;#x2F;ECN 与重传 0. 先用“排队”理解拥塞 交换机的输出端口像一个收费站。若 8 个输入端口同时各以 100 Gb&amp;#x2F;s 向一个 100 Gb&amp;#x2F;s 输出端口发送，短时间到达速率可达 800 Gb&amp;#x2F;s，而离开速率只有 100 Gb&amp;#x2F;s： 1 进入 800 Gb&amp;#x2F;s → [交换机队列不断增长] → 离开 100 Gb&amp;#x2F;s 队列满后只能： 丢包； 暂停上游； 提前标记"><meta property="og:type" content="blog"><meta property="og:title" content="02c. RoCE、拥塞控制、PFC/ECN 与重传"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="02c. RoCE、拥塞控制、PFC&amp;#x2F;ECN 与重传 0. 先用“排队”理解拥塞 交换机的输出端口像一个收费站。若 8 个输入端口同时各以 100 Gb&amp;#x2F;s 向一个 100 Gb&amp;#x2F;s 输出端口发送，短时间到达速率可达 800 Gb&amp;#x2F;s，而离开速率只有 100 Gb&amp;#x2F;s： 1 进入 800 Gb&amp;#x2F;s → [交换机队列不断增长] → 离开 100 Gb&amp;#x2F;s 队列满后只能： 丢包； 暂停上游； 提前标记"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-28T07:24:42.988Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"},"headline":"02c. RoCE、拥塞控制、PFC/ECN 与重传","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-28T07:24:42.988Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"02c. RoCE、拥塞控制、PFC&#x2F;ECN 与重传 0. 先用“排队”理解拥塞 交换机的输出端口像一个收费站。若 8 个输入端口同时各以 100 Gb&#x2F;s 向一个 100 Gb&#x2F;s 输出端口发送，短时间到达速率可达 800 Gb&#x2F;s，而离开速率只有 100 Gb&#x2F;s： 1 进入 800 Gb&#x2F;s → [交换机队列不断增长] → 离开 100 Gb&#x2F;s 队列满后只能： 丢包； 暂停上游； 提前标记"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>02c. RoCE、拥塞控制、PFC/ECN 与重传 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="02c. RoCE、拥塞控制、PFC&amp;#x2F;ECN 与重传 0. 先用“排队”理解拥塞 交换机的输出端口像一个收费站。若 8 个输入端口同时各以 100 Gb&amp;#x2F;s 向一个 100 Gb&amp;#x2F;s 输出端口发送，短时间到达速率可达 800 Gb&amp;#x2F;s，而离开速率只有 100 Gb&amp;#x2F;s： 1 进入 800 Gb&amp;#x2F;s → [交换机队列不断增长] → 离开 100 Gb&amp;#x2F;s 队列满后只能： 丢包； 暂停上游； 提前标记"><meta property="og:type" content="blog"><meta property="og:title" content="02c. RoCE、拥塞控制、PFC/ECN 与重传"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="02c. RoCE、拥塞控制、PFC&amp;#x2F;ECN 与重传 0. 先用“排队”理解拥塞 交换机的输出端口像一个收费站。若 8 个输入端口同时各以 100 Gb&amp;#x2F;s 向一个 100 Gb&amp;#x2F;s 输出端口发送，短时间到达速率可达 800 Gb&amp;#x2F;s，而离开速率只有 100 Gb&amp;#x2F;s： 1 进入 800 Gb&amp;#x2F;s → [交换机队列不断增长] → 离开 100 Gb&amp;#x2F;s 队列满后只能： 丢包； 暂停上游； 提前标记"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-07-27T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-29T00:03:24.884Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="NCCL"><meta property="article:tag" content="PCIe"><meta property="article:tag" content="RDMA"><meta property="article:tag" content="Barex"><meta property="article:tag" content="blade-kvt"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"},"headline":"02c. RoCE、拥塞控制、PFC/ECN 与重传","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-07-27T00:00:00.000Z","dateModified":"2026-07-29T00:03:24.884Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"02c. RoCE、拥塞控制、PFC&#x2F;ECN 与重传 0. 先用“排队”理解拥塞 交换机的输出端口像一个收费站。若 8 个输入端口同时各以 100 Gb&#x2F;s 向一个 100 Gb&#x2F;s 输出端口发送，短时间到达速率可达 800 Gb&#x2F;s，而离开速率只有 100 Gb&#x2F;s： 1 进入 800 Gb&#x2F;s → [交换机队列不断增长] → 离开 100 Gb&#x2F;s 队列满后只能： 丢包； 暂停上游； 提前标记"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
   (function () {
       function switchTab() {
           if (!location.hash) {
@@ -142,7 +142,7 @@ mjx-container[display="true"] + br {
   display: none;
 }
 </style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
-</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-28T07:24:42.988Z" title="7/28/2026, 7:24:42 AM">2026-07-28</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">12 分钟读完 (大约1731个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">02c. RoCE、拥塞控制、PFC/ECN 与重传</h1><div class="content"><h1 id="02c-RoCE、拥塞控制、PFC-ECN-与重传"><a href="#02c-RoCE、拥塞控制、PFC-ECN-与重传" class="headerlink" title="02c. RoCE、拥塞控制、PFC/ECN 与重传"></a>02c. RoCE、拥塞控制、PFC/ECN 与重传</h1><h2 id="0-先用“排队”理解拥塞"><a href="#0-先用“排队”理解拥塞" class="headerlink" title="0. 先用“排队”理解拥塞"></a>0. 先用“排队”理解拥塞</h2><p>交换机的输出端口像一个收费站。若 8 个输入端口同时各以 100 Gb/s 向一个<br>100 Gb/s 输出端口发送，短时间到达速率可达 800 Gb/s，而离开速率只有<br>100 Gb/s：</p>
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-27T00:00:00.000Z" title="7/27/2026, 12:00:00 AM">2026-07-27</time>发表</span><span class="level-item"><time dateTime="2026-07-29T00:03:24.884Z" title="7/29/2026, 12:03:24 AM">2026-07-29</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></span><span class="level-item">1 小时读完 (大约7322个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">02c. RoCE、拥塞控制、PFC/ECN 与重传</h1><div class="content"><h1 id="02c-RoCE、拥塞控制、PFC-ECN-与重传"><a href="#02c-RoCE、拥塞控制、PFC-ECN-与重传" class="headerlink" title="02c. RoCE、拥塞控制、PFC/ECN 与重传"></a>02c. RoCE、拥塞控制、PFC/ECN 与重传</h1><h2 id="0-先用“排队”理解拥塞"><a href="#0-先用“排队”理解拥塞" class="headerlink" title="0. 先用“排队”理解拥塞"></a>0. 先用“排队”理解拥塞</h2><p>交换机的输出端口像一个收费站。若 8 个输入端口同时各以 100 Gb/s 向一个<br>100 Gb/s 输出端口发送，短时间到达速率可达 800 Gb/s，而离开速率只有<br>100 Gb/s：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">进入 800 Gb/s → [交换机队列不断增长] → 离开 100 Gb/s</span><br></pre></td></tr></table></figure>
 
 <p>队列满后只能：</p>
@@ -159,7 +159,13 @@ mjx-container[display="true"] + br {
 <li><strong>队列深度</strong>：暂时能缓存多少拥塞数据；</li>
 <li><strong>RTT</strong>：拥塞信号传回发送端并生效要多久。</li>
 </ul>
-<p>队列至少要容纳反馈生效前仍在路上的数据，这与 BDP（带宽时延积）直接相关。</p>
+<p>“队列至少要容纳反馈生效前仍在路上的数据”必须指明是哪一种队列：</p>
+<ul>
+<li>对发送吞吐而言，发送端 outstanding window 要能覆盖足够的 BDP；</li>
+<li>对 PFC/ECN 拥塞瞬态而言，拥塞点 buffer/headroom 要吸收反馈生效前继续到达的<br>excess traffic；</li>
+<li>verbs Receive Queue 深度解决的是 SEND/WRITE_WITH_IMM 的 receive credit，<br>不是用来缓存整条路径 BDP，也不是交换机防丢包 buffer。</li>
+</ul>
+<p>三者都受时延影响，但单位、位置和故障表现完全不同。</p>
 <h2 id="1-InfiniBand、RoCE-与-iWARP"><a href="#1-InfiniBand、RoCE-与-iWARP" class="headerlink" title="1. InfiniBand、RoCE 与 iWARP"></a>1. InfiniBand、RoCE 与 iWARP</h2><table>
 <thead>
 <tr>
@@ -200,6 +206,435 @@ mjx-container[display="true"] + br {
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">400 Gbit/s × 10 ms</span><br><span class="line">= 4 Gbit</span><br><span class="line">= 500 MB</span><br></pre></td></tr></table></figure>
 
 <p>反馈回来前可能已有数百 MB 在途。拥塞点 buffer 远小于此值时，会产生 drop、retry、尾延迟和吞吐塌陷。</p>
+<h3 id="3-1-先修正一句表述：RTT-是从-us-级“升到”ms-级"><a href="#3-1-先修正一句表述：RTT-是从-us-级“升到”ms-级" class="headerlink" title="3.1 先修正一句表述：RTT 是从 us 级“升到”ms 级"></a>3.1 先修正一句表述：RTT 是从 us 级“升到”ms 级</h3><p>跨地域或跨长距离网络中，应该说：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">RTT 从微秒级升高到毫秒级</span><br></pre></td></tr></table></figure>
+
+<p>而不是“从 us 级降至 ms 级”。数值和等待时间都增大了。RTT 增大时：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">带宽保持不变</span><br><span class="line">  → BDP 增大</span><br><span class="line">  → 为保持同样吞吐，需要更多 bytes outstanding</span><br><span class="line">  → 对小 WQE，还需要更多 outstanding WQEs</span><br></pre></td></tr></table></figure>
+
+<h3 id="3-2-BDP-不是链路能容纳数据的绝对上限"><a href="#3-2-BDP-不是链路能容纳数据的绝对上限" class="headerlink" title="3.2 BDP 不是链路能容纳数据的绝对上限"></a>3.2 BDP 不是链路能容纳数据的绝对上限</h3><p>BDP 更准确的含义是：</p>
+<blockquote>
+<p>当发送速率等于目标带宽时，一个 RTT 内发送的数据量；也就是让链路持续忙碌所需<br>的典型在途窗口。</p>
+</blockquote>
+<h4 id="BDP-是“数据大小”吗？"><a href="#BDP-是“数据大小”吗？" class="headerlink" title="BDP 是“数据大小”吗？"></a>BDP 是“数据大小”吗？</h4><p><strong>从单位和计算结果来看，是。</strong>BDP 是一个数据量（data amount），通常用 bit、byte、<br>KB、MB 或 GB 表示。因为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">bit/s × s = bit</span><br></pre></td></tr></table></figure>
+
+<p>例如：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">200 Gbit/s × 10 ms</span><br><span class="line">= 200 × 10^9 bit/s × 0.01 s</span><br><span class="line">= 2 × 10^9 bit</span><br><span class="line">= 250 × 10^6 byte</span><br><span class="line">= 250 MB</span><br></pre></td></tr></table></figure>
+
+<p>这里的 250 MB 是一个“窗口大小”的计算结果，不是说网络中存在一个名为 BDP 的<br>250 MB 文件或数据包。它也不是：</p>
+<ul>
+<li>单个 application message 的大小；</li>
+<li>单个 WQE 的 payload 大小；</li>
+<li>单个以太网包或 RoCE 包的大小；</li>
+<li>发送队列或交换机 buffer 的实际硬件容量；</li>
+<li>网络在任何时刻都必定保存的数据量。</li>
+</ul>
+<p>更准确地说，BDP 把“速率”和“反馈时延”转换成了“要维持该速率，反馈返回前需要允许<br>多少数据尚未完成”。可以把链路想象成一根水管：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">带宽 bandwidth：水管每秒最多流过多少水</span><br><span class="line">RTT：放出一滴带标记的水，到确认它到达并收到反馈需要多久</span><br><span class="line">BDP：在这段反馈等待时间内，以目标速率总共可以放出多少水</span><br></pre></td></tr></table></figure>
+
+<p>因此，应区分三个相近但不完全相同的概念：</p>
+<table>
+<thead>
+<tr>
+<th>名称</th>
+<th>含义</th>
+<th>是否一定等于 BDP</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>理论 BDP</td>
+<td>目标带宽 × RTT 得到的数据量</td>
+<td>定义本身</td>
+</tr>
+<tr>
+<td>实际 in-flight bytes</td>
+<td>已发出但尚未被发送端确认完成的数据</td>
+<td>不一定；取决于发送速率、拥塞、重传和窗口</td>
+</tr>
+<tr>
+<td>配置的发送窗口</td>
+<td>软件、SQ、RNIC 允许 outstanding 的数据量</td>
+<td>为跑满链路通常应不小于目标 BDP，但受多层限制</td>
+</tr>
+</tbody></table>
+<p>还要注意“在物理链路上”和“在发送端看来尚未完成”不是完全相同的集合：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">某一个方向的物理路径中正在传播的数据量</span><br><span class="line">  ≈ bandwidth × one-way delay</span><br><span class="line"></span><br><span class="line">可靠发送端为了等到返回的 ACK/响应而需保留的 outstanding window</span><br><span class="line">  ≈ bandwidth × RTT</span><br></pre></td></tr></table></figure>
+
+<p>网络性能调优通常关心第二个量，所以 TCP/RDMA 的发送窗口讨论常用 RTT 计算 BDP。<br>例如请求的数据可能已经到达对端、甚至已经写入内存，但 ACK 尚在返回途中；这时数据<br>不再位于正向物理链路上，发送端却仍把相应请求视为 outstanding。</p>
+<p>例如应用只以 20 Gbit/s 在一条 200 Gbit/s、RTT 10 ms 的链路上发送，则实际在途量<br>大约只有：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">20 Gbit/s × 10 ms = 25 MB</span><br></pre></td></tr></table></figure>
+
+<p>虽然按链路峰值能力计算的 BDP 是 250 MB。反过来，如果已经发生拥塞和排队，实测<br>RTT 会增大，实际 outstanding 数据也可能超过使用“空载 RTT”算出的基础 BDP。</p>
+<p>如果窗口小于 BDP，链路通常“吃不饱”；如果发送端在拥塞点已出现后仍继续高速发送，<br>在途数据加上新到达数据可以超过理想 BDP，多出来的部分会在瓶颈队列排队，或者被<br>PFC/ECN/丢包机制处理。</p>
+<p>单位换算：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">BDP(bits)  = bandwidth(bit/s) × RTT(s)</span><br><span class="line">BDP(bytes) = bandwidth(bit/s) × RTT(s) / 8</span><br></pre></td></tr></table></figure>
+
+<p>例如 200 Gbit/s：</p>
+<table>
+<thead>
+<tr>
+<th>RTT</th>
+<th>BDP</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>100 us</td>
+<td>2.5 MB</td>
+</tr>
+<tr>
+<td>1 ms</td>
+<td>25 MB</td>
+</tr>
+<tr>
+<td>10 ms</td>
+<td>250 MB</td>
+</tr>
+<tr>
+<td>88 ms</td>
+<td>2.2 GB</td>
+</tr>
+</tbody></table>
+<p>RTT 从 100 us 增至 10 ms，是 100 倍；要保持 200 Gbit/s，所需 outstanding bytes<br>也从约 2.5 MB 增至约 250 MB。</p>
+<h3 id="3-3-从-BDP-bytes-推导所需-WQE-数"><a href="#3-3-从-BDP-bytes-推导所需-WQE-数" class="headerlink" title="3.3 从 BDP bytes 推导所需 WQE 数"></a>3.3 从 BDP bytes 推导所需 WQE 数</h3><p>如果每个 WQE 平均承载 <code>S</code> bytes，第一阶估算是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">required_outstanding_WQEs</span><br><span class="line">  ≈ ceil(BDP_bytes / average_payload_bytes_per_WQE)</span><br></pre></td></tr></table></figure>
+
+<p>200 Gbit/s、10 ms RTT 的 BDP 约 250 MB：</p>
+<table>
+<thead>
+<tr>
+<th>每个 WQE 的 payload</th>
+<th>填充 250 MB BDP 约需 WQE 数</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>4 KiB</td>
+<td>61,036</td>
+</tr>
+<tr>
+<td>64 KiB</td>
+<td>3,815</td>
+</tr>
+<tr>
+<td>1 MiB</td>
+<td>239</td>
+</tr>
+</tbody></table>
+<p>这解释了为什么小包/WQE 场景对 WQE window 特别敏感：BDP 以 bytes 计，queue depth<br>却以 WQE 个数计。相同 250 MB：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">1 MiB/WQE 只需约 239 个 WQE</span><br><span class="line">4 KiB/WQE 却需约 6.1 万个 WQE</span><br></pre></td></tr></table></figure>
+
+<p>此外，小 WQE 还有更多 per-message 成本：</p>
+<ul>
+<li>更多 WQE fetch；</li>
+<li>更多 doorbell/post；</li>
+<li>更多 CQE 或 completion bookkeeping；</li>
+<li>更高 packet/message rate；</li>
+<li>更多软件 callback 和对象管理。</li>
+</ul>
+<p>聚合小包的价值不只是减少 syscall/copy，还包括提高 <code>bytes per WQE</code>，让有限 WQE<br>window 能覆盖更多 BDP。</p>
+<p>这个公式是估算，不是硬件能力证明。一个大 WRITE WQE 可以被 RNIC 按 MTU 拆成许多<br>packet，因此还要同时检查 packet/PSN window、firmware outstanding resource、<br>QP SQ capacity、CQ progress 和拥塞控制，而不能只计算 WQE 数。</p>
+<h3 id="3-4-为什么发送窗口不足会限制吞吐"><a href="#3-4-为什么发送窗口不足会限制吞吐" class="headerlink" title="3.4 为什么发送窗口不足会限制吞吐"></a>3.4 为什么发送窗口不足会限制吞吐</h3><p>假设发送端最多允许 <code>N</code> 个 WQE 未完成，每个 WQE 为 <code>S</code> bytes：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">outstanding_bytes = N × S</span><br><span class="line"></span><br><span class="line">window_limited_throughput</span><br><span class="line">  ≈ outstanding_bytes / RTT</span><br><span class="line"></span><br><span class="line">实际吞吐上限</span><br><span class="line">  ≈ min(link_bandwidth, outstanding_bytes / RTT)</span><br></pre></td></tr></table></figure>
+
+<p>例：只有 128 个 outstanding WQE、每个 WQE 4 KiB、RTT 10 ms：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">outstanding_bytes = 128 × 4 KiB = 512 KiB</span><br><span class="line"></span><br><span class="line">throughput ceiling</span><br><span class="line">  ≈ 512 KiB / 10 ms</span><br><span class="line">  ≈ 52.4 MB/s</span><br><span class="line">  ≈ 0.42 Gbit/s</span><br></pre></td></tr></table></figure>
+
+<p>这远低于 200 Gbit/s。典型时间线是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">t0       连续发出 128 个小 WQE</span><br><span class="line">t0+很短  RNIC outstanding window 达上限</span><br><span class="line">         后续 WQE 留在 SQ/software queue</span><br><span class="line">         链路可能出现空闲</span><br><span class="line">t0+RTT   ACK/completion 开始返回，旧 WQE 被回收</span><br><span class="line">         RNIC 才继续发后续 WQE</span><br></pre></td></tr></table></figure>
+
+<p>于是吞吐呈现“发一小段—等待—再发一小段”的 window-limited 行为。</p>
+<p>但要注意：<strong>发送窗口不足本身通常不会直接导致网络丢包</strong>。它首先造成的是：</p>
+<ol>
+<li>RNIC 不能继续把更多 WQE 变成在途数据；</li>
+<li>后续工作停留在 hardware SQ 或应用 software queue；</li>
+<li>链路利用率下降；</li>
+<li>请求排队延迟和尾延迟上升；</li>
+<li>软件队列也满时，提交失败或返回 queue-full；</li>
+<li>如果业务有 TTL，排队太久还会表现为应用 timeout。</li>
+</ol>
+<p>真正“因为容纳不下而丢包”的队列通常是交换机 egress/ingress buffer 或 RNIC<br>packet buffer，而不是发送端 verbs SQ。</p>
+<h3 id="3-5-“发送队列深度”其实还要拆成三层"><a href="#3-5-“发送队列深度”其实还要拆成三层" class="headerlink" title="3.5 “发送队列深度”其实还要拆成三层"></a>3.5 “发送队列深度”其实还要拆成三层</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">业务线程</span><br><span class="line">   │</span><br><span class="line">   ▼</span><br><span class="line">[应用/Barex software send queue]</span><br><span class="line">   │ 获得发送 permit 后</span><br><span class="line">   ▼</span><br><span class="line">[QP Send Queue：已 post 的 WQE ring]</span><br><span class="line">   │ RNIC fetch/issue</span><br><span class="line">   ▼</span><br><span class="line">[RNIC active outstanding WQE / packet / PSN window]</span><br><span class="line">   │</span><br><span class="line">   ▼</span><br><span class="line">网络</span><br></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>层次</th>
+<th>常见单位</th>
+<th>满时会怎样</th>
+<th>与 BDP 的关系</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Barex software queue</td>
+<td>task/request</td>
+<td>等待；再满则 <code>BAREX_ERR_QUEUE_FULL</code></td>
+<td>只存还没 post 的业务，不会增加真实 in-flight bytes</td>
+</tr>
+<tr>
+<td>QP SQ <code>max_send_wr</code></td>
+<td>WQE</td>
+<td>不能继续安全 post；provider/app 必须等待 completion</td>
+<td>决定最多能挂多少未回收 WR</td>
+</tr>
+<tr>
+<td>RNIC firmware active window</td>
+<td>outstanding WQE/packet/PSN</td>
+<td>RNIC 延迟发后续 WQE</td>
+<td>直接限制能变成在途数据的窗口</td>
+</tr>
+<tr>
+<td>network switch queue</td>
+<td>byte/cell</td>
+<td>ECN、PFC 或 drop</td>
+<td>吸收拥塞反馈生效前的 excess traffic</td>
+</tr>
+</tbody></table>
+<p><code>ibv_create_qp()</code> 的 <code>max_send_wr</code> 是应用请求的“SQ 中最大 outstanding WR 数”；<br>创建完成后 provider 会写回实际能力。它还受 device <code>max_qp_wr</code> 等能力上限约束。</p>
+<p><code>LOG_MAX_OUTSTANDING_WQE</code> 则是 ConnectX firmware/NV configuration 层的另一个<br>限制。该字段的设备说明通常是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">单个 Transmit Work Queue 可持有的最大 outstanding/uncompleted WQE 数的 log2</span><br></pre></td></tr></table></figure>
+
+<p>所以值 <code>L</code> 表示的量级通常是 <code>2^L</code> 个 WQE；超过 active window 的附加 WQE 会被<br>延后，直到已有 WQE 完成。它不是 Barex 环境变量，也不等于 verbs 的<br><code>max_recv_wr</code>。具体设备/firmware 对合法值、默认值、是否需要重启生效的定义，必须以<br>本机 <code>mlxconfig</code> 查询结果和对应 firmware 文档为准。</p>
+<p>有效窗口是多重上限共同作用的结果，可以用下面的心智模型：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">effective outstanding window</span><br><span class="line">  ≤ min(</span><br><span class="line">      应用/Barex tx permit,</span><br><span class="line">      QP max_send_wr,</span><br><span class="line">      device max_qp_wr,</span><br><span class="line">      firmware LOG_MAX_OUTSTANDING_WQE 对应窗口,</span><br><span class="line">      packet/PSN window,</span><br><span class="line">      operation-specific credits</span><br><span class="line">    )</span><br></pre></td></tr></table></figure>
+
+<p>只把 <code>ACCL_TX_DEPTH</code> 调很大，而 firmware active window 仍很小，WQE 可能只是更多<br>地堆在 SQ 中；反过来只调大 firmware window，但 QP <code>max_send_wr</code> 或 Barex permit<br>仍为 128，也无法得到更大的业务 outstanding。</p>
+<h3 id="3-6-在-Barex-中会具体发生什么"><a href="#3-6-在-Barex-中会具体发生什么" class="headerlink" title="3.6 在 Barex 中会具体发生什么"></a>3.6 在 Barex 中会具体发生什么</h3><p>当前 Barex RDMA 实现中：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">send_semaphore_ = config_.tx_depth;</span><br><span class="line"></span><br><span class="line">qp_init_attr.cap.max_send_wr = config_.tx_depth;</span><br><span class="line">qp_init_attr.cap.max_recv_wr = config_.rx_depth;</span><br></pre></td></tr></table></figure>
+
+<p>对应环境变量：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">ACCL_TX_DEPTH</span><br><span class="line">ACCL_SOFT_TX_DEPTH</span><br><span class="line">ACCL_RX_DEPTH</span><br></pre></td></tr></table></figure>
+
+<p>每次发送前 <code>PostSendOrEnqueue(permits, send)</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">send_semaphore_ 足够</span><br><span class="line">  → 扣除 permits</span><br><span class="line">  → 调用 ibv_post_send</span><br><span class="line"></span><br><span class="line">send_semaphore_ 不足</span><br><span class="line">  → 放进 Barex send_queue_</span><br><span class="line"></span><br><span class="line">send_queue_.size() &gt;= soft_tx_depth</span><br><span class="line">  → callback 返回 BAREX_ERR_QUEUE_FULL</span><br></pre></td></tr></table></figure>
+
+<p>completion 被处理后，<code>ReleaseAndPostSend()</code> 归还 permit，再从 software queue<br>继续取任务。因此长 RTT 下，completion/ACK 返回变慢会延长 permit 占用时间：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">RTT 增大</span><br><span class="line">  → 同一发送速率下未完成 WQE 增多</span><br><span class="line">  → send_semaphore_ 更容易耗尽</span><br><span class="line">  → Barex software queue depth 增长</span><br><span class="line">  → 再满时 BAREX_ERR_QUEUE_FULL</span><br></pre></td></tr></table></figure>
+
+<p>这条路径解释的是“发送端为什么卡住”。它和远端 RQ 是否充足是两个独立问题。</p>
+<h3 id="3-7-为什么不是优先调接收队列深度"><a href="#3-7-为什么不是优先调接收队列深度" class="headerlink" title="3.7 为什么不是优先调接收队列深度"></a>3.7 为什么不是优先调接收队列深度</h3><p>verbs RQ 存放的是 Receive WQE，也就是“接收端为某些 operation 预先准备的接收<br>描述符”。它不是交换机 packet buffer，也不是通用的 RNIC ingress byte buffer。</p>
+<p>不同 operation 是否消费 RQ：</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>是否消费远端 Receive WQE</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>SEND / SEND_WITH_IMM</td>
+<td>是</td>
+</tr>
+<tr>
+<td>RDMA WRITE</td>
+<td>否</td>
+</tr>
+<tr>
+<td>RDMA WRITE_WITH_IMM</td>
+<td>是，主要用于产生带 immediate 的 receive completion</td>
+</tr>
+<tr>
+<td>RDMA READ</td>
+<td>否</td>
+</tr>
+<tr>
+<td>Atomic</td>
+<td>否</td>
+</tr>
+</tbody></table>
+<p>所以如果跨域 bulk path 使用普通 RDMA WRITE，远端 <code>rx_depth</code> 再大也不会增加 WRITE<br>的 in-flight window，因为 WRITE 根本不从 RQ 取 Receive WQE。</p>
+<p>即使是 SEND，一个 Receive WQE 通常对应一条 message/WR 的接收 buffer，而不是“每个<br>网络 packet 一个 WQE”。一个大 SEND 被拆成多个 packet 后，仍是同一个 message<br>匹配一个 Receive WQE。RQ depth 以“可接收 message 数”衡量，不以“可缓存多少 BDP<br>bytes”衡量。</p>
+<p>RQ 太浅的真实故障是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">SEND/WRITE_WITH_IMM 到达</span><br><span class="line">  → 没有 Receive WQE</span><br><span class="line">  → responder 返回 RNR NAK</span><br><span class="line">  → RC sender 按 min_rnr_timer/rnr_retry 重试</span><br><span class="line">  → 重试耗尽后 IBV_WC_RNR_RETRY_EXC_ERR</span><br></pre></td></tr></table></figure>
+
+<p>这是 Receiver Not Ready，不是交换机 buffer overflow 导致的 packet drop。</p>
+<p>因此：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">调大 TX/outstanding window</span><br><span class="line">  → 解决“没有足够未完成工作填满长 RTT 链路”</span><br><span class="line"></span><br><span class="line">调大 RX depth、加快 repost Receive</span><br><span class="line">  → 解决“SEND/WRITE_WITH_IMM 到达时没有 receive credit”</span><br><span class="line"></span><br><span class="line">调大/正确配置 switch buffer、PFC headroom、ECN/DCQCN</span><br><span class="line">  → 解决“拥塞反馈生效前 packet 仍持续到达”</span><br></pre></td></tr></table></figure>
+
+<p>三者不能互相替代。</p>
+<h3 id="3-8-接收队列更深为什么不能阻止一般意义的丢包"><a href="#3-8-接收队列更深为什么不能阻止一般意义的丢包" class="headerlink" title="3.8 接收队列更深为什么不能阻止一般意义的丢包"></a>3.8 接收队列更深为什么不能阻止一般意义的丢包</h3><p>一条包到达接收主机前，可能经过：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">sender SQ</span><br><span class="line">  → sender RNIC egress buffer</span><br><span class="line">  → 多级 switch ingress/egress queues</span><br><span class="line">  → receiver RNIC packet/reorder buffer</span><br><span class="line">  → PCIe/DMA</span><br><span class="line">  → application receive buffer</span><br></pre></td></tr></table></figure>
+
+<p>verbs RQ 只影响最后阶段中 SEND 类 operation 是否有合法 destination buffer。它不能<br>扩大前面交换机的 egress queue，也不能改变 ECN threshold、PFC headroom、链路误码<br>或路由拥塞。</p>
+<p>你说的“接收端队列越大越不容易丢包”在传统 socket/NIC RX ring 语境里有一定直觉，<br>但那个 RX descriptor ring、socket receive buffer、switch buffer 与 RDMA QP RQ<br>不是同一个对象。即使某些实现中它们最终都消耗内存，也不能把参数直接等同。</p>
+<h3 id="3-9-“队列要容纳反馈生效前的数据”到底是哪一个-buffer"><a href="#3-9-“队列要容纳反馈生效前的数据”到底是哪一个-buffer" class="headerlink" title="3.9 “队列要容纳反馈生效前的数据”到底是哪一个 buffer"></a>3.9 “队列要容纳反馈生效前的数据”到底是哪一个 buffer</h3><p>这句话用在拥塞控制/PFC 时，通常指拥塞点的 byte buffer/headroom。</p>
+<h4 id="ECN-CNP"><a href="#ECN-CNP" class="headerlink" title="ECN/CNP"></a>ECN/CNP</h4><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">switch queue 超过阈值</span><br><span class="line">  → 标记 CE</span><br><span class="line">  → packet 到 receiver</span><br><span class="line">  → receiver 产生 CNP</span><br><span class="line">  → CNP 回到 sender RNIC</span><br><span class="line">  → sender 降速</span><br></pre></td></tr></table></figure>
+
+<p>从首次拥塞到 sender 真正减速有反馈延迟。在这段时间，多个 sender 仍可能继续注入<br>数据。拥塞点需要吸收的不是机械地等于“一整条链路 BDP”，更精确的近似是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">queue growth</span><br><span class="line">  ≈ Σ(max(sender_rate_i - bottleneck_share_i, 0))</span><br><span class="line">    × feedback_delay</span><br></pre></td></tr></table></figure>
+
+<p>incast 时多个发送端的 excess rate 会叠加，所以增长可能非常快。</p>
+<h4 id="PFC"><a href="#PFC" class="headerlink" title="PFC"></a>PFC</h4><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">buffer 达到 XOFF</span><br><span class="line">  → 发 pause frame</span><br><span class="line">  → pause 沿当前 hop 传播</span><br><span class="line">  → 上游端口真正停止</span><br></pre></td></tr></table></figure>
+
+<p>从 XOFF 到 upstream 停止之间仍有在途 packet 到达，因此需要 lossless headroom。<br>这个 headroom 与端口速率、MTU、线缆/传播时延等有关。它是 switch/NIC port 的<br>packet buffer 配置，不是 verbs <code>rx_depth</code>。</p>
+<h3 id="3-10-增大-outstanding-window-的收益与风险"><a href="#3-10-增大-outstanding-window-的收益与风险" class="headerlink" title="3.10 增大 outstanding window 的收益与风险"></a>3.10 增大 outstanding window 的收益与风险</h3><p>收益：</p>
+<ul>
+<li>长 RTT 下减少 link idle；</li>
+<li>提高 bytes in flight；</li>
+<li>小 WQE workload 可以显著提高吞吐；</li>
+<li>减少任务长期停留在 Barex software queue。</li>
+</ul>
+<p>风险：</p>
+<ul>
+<li>一个 flow 可以更快注入更大的 burst；</li>
+<li>incast 时交换机 queue、PFC 和 drop 压力上升；</li>
+<li>RNIC 要维护更多 retry/completion/WQE state；</li>
+<li>SQ/CQ 和 host memory 占用增加；</li>
+<li>出错时可能一次 flush 更多 WR；</li>
+<li>排队更深可能提高 tail latency；</li>
+<li>CQ polling 不够快时，增大 SQ 只是在掩盖 progress bottleneck。</li>
+</ul>
+<p>因此 <code>LOG_MAX_OUTSTANDING_WQE</code>、<code>ACCL_TX_DEPTH</code> 不应该无条件设为最大值。合理方法是：</p>
+<ol>
+<li>计算目标带宽与实测 RTT 的 BDP；</li>
+<li>统计实际 <code>bytes/WQE</code> 分布，而不是只看 packet MTU；</li>
+<li>估算所需 WQE window；</li>
+<li>核对 QP <code>max_send_wr</code>、device <code>max_qp_wr</code>、firmware window；</li>
+<li>逐级增加 TX depth，观察吞吐是否随之上升并最终平台化；</li>
+<li>同时观察 ECN/CNP、PFC、drop、retry、CQ backlog 与尾延迟；</li>
+<li>SEND/WRITE_WITH_IMM 测试再独立扫描 RX depth；</li>
+<li>用业务并发和 incast 复测，不能只看单流带宽。</li>
+</ol>
+<p>perftest 可以帮助区分：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">ib_write_bw ... -t &lt;tx-depth&gt;</span><br><span class="line">  → 普通 WRITE，不依赖远端 RQ</span><br><span class="line">  → 适合观察 TX/outstanding window</span><br><span class="line"></span><br><span class="line">ib_send_bw ... -t &lt;tx-depth&gt; -r &lt;rx-depth&gt;</span><br><span class="line">  → SEND 同时依赖 TX window 和 RX credits</span><br><span class="line">  → 可以分别扫描 -t 与 -r</span><br></pre></td></tr></table></figure>
+
+<p>如果提高 <code>-t</code> 后吞吐上升，而 RNR/retry/drop counters 基本不变，说明原先更像<br>TX/window 限制。如果出现 <code>RNR_RETRY_EXC_ERR</code>，才优先检查 RX depth、Receive repost<br>速度和远端 progress。如果 switch queue/drop/PFC/CNP 同时上升，则已经进入网络拥塞<br>问题，继续增加 outstanding window 可能适得其反。</p>
+<h3 id="3-11-“调整-BDP”与“调整窗口以覆盖-BDP”不是一回事"><a href="#3-11-“调整-BDP”与“调整窗口以覆盖-BDP”不是一回事" class="headerlink" title="3.11 “调整 BDP”与“调整窗口以覆盖 BDP”不是一回事"></a>3.11 “调整 BDP”与“调整窗口以覆盖 BDP”不是一回事</h3><p>BDP 没有一个可以直接写入网卡的 <code>BDP=500MB</code> 参数。它是路径属性：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">BDP = end-to-end bottleneck bandwidth × RTT</span><br></pre></td></tr></table></figure>
+
+<p>所以真正改变 BDP 只有两类办法：</p>
+<ol>
+<li>改变带宽：更换链路、聚合更多端口、修改限速，或者因为拥塞导致可用带宽变化；</li>
+<li>改变 RTT：改变物理距离、路由、交换层级、主机路径，或者因为排队导致 RTT 变化。</li>
+</ol>
+<p>其中“通过拥塞排队把 RTT 和 BDP 做大”不是优化。更合理的目标通常是：</p>
+<blockquote>
+<p>测出业务路径的 bandwidth 与 RTT，计算目标 BDP，然后调整发送窗口，使其能够覆盖<br>这个 BDP。</p>
+</blockquote>
+<h4 id="可调的是哪些“窗口旋钮”"><a href="#可调的是哪些“窗口旋钮”" class="headerlink" title="可调的是哪些“窗口旋钮”"></a>可调的是哪些“窗口旋钮”</h4><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">应用并发/批大小</span><br><span class="line">  ↓</span><br><span class="line">Barex ACCL_TX_DEPTH 与 ACCL_SOFT_TX_DEPTH</span><br><span class="line">  ↓</span><br><span class="line">QP max_send_wr</span><br><span class="line">  ↓</span><br><span class="line">设备 max_qp_wr</span><br><span class="line">  ↓</span><br><span class="line">固件 active outstanding WQE window</span><br><span class="line">  ↓</span><br><span class="line">operation-specific credits，例如 RDMA READ credits</span><br><span class="line">  ↓</span><br><span class="line">网络 ECN/PFC/queue/retry</span><br></pre></td></tr></table></figure>
+
+<p>有效窗口由其中最小的一层决定。主要限制包括：</p>
+<ul>
+<li>QP 创建时请求的 <code>max_send_wr</code>；</li>
+<li><code>ibv_query_device()</code> 报告的 <code>max_qp_wr</code>；</li>
+<li>ConnectX 固件的 active outstanding WQE 上限；</li>
+<li>单 WQE payload 大小以及 scatter/gather 能力；</li>
+<li>RDMA READ/Atomic 的 responder resources 和 outstanding read credits；</li>
+<li>CQ 容量和 completion 消费速度；</li>
+<li>RNIC SRAM/状态、host memory、MR 与 pinned memory；</li>
+<li>PCIe、NUMA、GPU/CPU memory controller 的 DMA 路径；</li>
+<li>单 QP/多 QP 是否能使用 LAG 的全部物理端口；</li>
+<li>对端能力、交换机 buffer、ECN/PFC 和业务 incast。</li>
+</ul>
+<h4 id="target-p-的实机结果"><a href="#target-p-的实机结果" class="headerlink" title="target_p 的实机结果"></a><code>target_p</code> 的实机结果</h4><p>2026-07-28 在 <code>target_p</code> 上做了只读检查，没有修改配置。数据面拓扑如下：</p>
+<table>
+<thead>
+<tr>
+<th>逻辑 RDMA 设备</th>
+<th>Linux bond</th>
+<th>物理端口</th>
+<th>PCI domain</th>
+<th>NUMA</th>
+<th>端口/聚合速率</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>mlx5_bond_0</code></td>
+<td><code>bond0</code></td>
+<td><code>reth0,reth1</code></td>
+<td><code>0000</code></td>
+<td>0</td>
+<td>2×200G / 400G</td>
+</tr>
+<tr>
+<td><code>mlx5_bond_1</code></td>
+<td><code>bond1</code></td>
+<td><code>reth2,reth3</code></td>
+<td><code>0002</code></td>
+<td>0</td>
+<td>2×200G / 400G</td>
+</tr>
+<tr>
+<td><code>mlx5_bond_2</code></td>
+<td><code>bond2</code></td>
+<td><code>reth4,reth5</code></td>
+<td><code>0010</code></td>
+<td>1</td>
+<td>2×200G / 400G</td>
+</tr>
+<tr>
+<td><code>mlx5_bond_3</code></td>
+<td><code>bond3</code></td>
+<td><code>reth6,reth7</code></td>
+<td><code>0012</code></td>
+<td>1</td>
+<td>2×200G / 400G</td>
+</tr>
+</tbody></table>
+<p>四组均为：</p>
+<ul>
+<li>ConnectX-7，firmware <code>28.46.3048</code>；</li>
+<li>802.3ad/LACP，<code>layer3+4</code> hash；</li>
+<li>每张卡 PCIe 5.0（32 GT/s）×16，当前和最大宽度均为 ×16；</li>
+<li>verbs <code>max_qp_wr=32768</code>；</li>
+<li><code>max_qp_rd_atom=16</code>。</li>
+</ul>
+<p>机器没有直接暴露“机头/机尾”这个软件标签。若现场把 NUMA 0 一侧的 <code>bond0/1</code><br>称为机头、NUMA 1 一侧的 <code>bond2/3</code> 称为机尾，则两侧 RNIC 的 verbs 上限、固件和<br>链路规格是对称的；差别主要是本地性：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">NUMA 0 CPU/memory 上的任务 → 优先 bond0/1</span><br><span class="line">NUMA 1 CPU/memory 上的任务 → 优先 bond2/3</span><br></pre></td></tr></table></figure>
+
+<p>如果 CPU thread、host buffer 或与 GPU 相关的 DMA 路径位于另一侧 NUMA，访问可能<br>跨 NUMA interconnect。网络公式算出的 BDP 没有因此改变，但主机侧可达到的 goodput、<br>提交/完成延迟和抖动可能变差，最终测得的 bandwidth/RTT 也会改变。因此网卡亲和性<br>是“能否兑现目标 BDP”的条件，不是给机头、机尾分别写入不同 BDP 值。</p>
+<h4 id="400G-bond-的-BDP-不能无条件按单-QP-400G-计算"><a href="#400G-bond-的-BDP-不能无条件按单-QP-400G-计算" class="headerlink" title="400G bond 的 BDP 不能无条件按单 QP 400G 计算"></a>400G bond 的 BDP 不能无条件按单 QP 400G 计算</h4><p>每个 bond 由两个 200G 端口组成。400G 是聚合容量，不等于任意一条 QP/flow 都必然<br>获得 400G：</p>
+<ul>
+<li>legacy RoCE LAG 可能按 QP affinity 选择端口；</li>
+<li>hash LAG 可以按 packet header/steering 分散流量，但依赖驱动、固件与配置；</li>
+<li>交换机侧 LACP hash、RoCE flow label/UDP source port entropy 也会影响分布；</li>
+<li>多个 QP 更容易把流量分散到两条成员链路；</li>
+<li>是否真正聚合应看 <code>reth*</code> 的 per-port counters 和实测吞吐，不能只看 <code>bond</code> 显示<br>的 400000 Mbit/s。</li>
+</ul>
+<p>因此至少要分别计算两种预算：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">保守的单成员路径：200 Gbit/s × RTT</span><br><span class="line">确认可聚合后的 bond 总路径：400 Gbit/s × RTT</span><br></pre></td></tr></table></figure>
+
+<p>以 RTT 10 ms 为例：</p>
+<table>
+<thead>
+<tr>
+<th>目标带宽</th>
+<th>BDP</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>单个 200G 成员</td>
+<td>250 MB</td>
+</tr>
+<tr>
+<td>400G bond 聚合</td>
+<td>500 MB</td>
+</tr>
+</tbody></table>
+<p>若每个 WQE 只有 4 KiB：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">200G 需要约 250 MB / 4 KiB ≈ 61,036 WQE</span><br><span class="line">400G 需要约 500 MB / 4 KiB ≈ 122,071 WQE</span><br></pre></td></tr></table></figure>
+
+<p>二者都超过 <code>target_p</code> 单 QP 报告的 <code>max_qp_wr=32768</code>。这时不能通过把单 QP 的<br><code>tx_depth</code> 无限增大来解决，而应考虑：</p>
+<ul>
+<li>合并小请求，增大平均 <code>bytes/WQE</code>；</li>
+<li>使用多个 QP，并验证 LAG 端口分布；</li>
+<li>让多条 QP 合计 outstanding bytes 覆盖 BDP；</li>
+<li>核对固件 active WQE window，不能只看 verbs <code>max_qp_wr</code>；</li>
+<li>检查 CQ polling、doorbell、PCIe、NUMA 与 memory bandwidth 是否成为新瓶颈。</li>
+</ul>
+<p>例如单 QP 允许 32768 个 WQE 时：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">4 KiB/WQE  → 约 128 MiB window</span><br><span class="line">64 KiB/WQE → 约 2 GiB window</span><br></pre></td></tr></table></figure>
+
+<p>所以“网卡最多 32768 个 WQE”不等于“只能覆盖固定大小的 BDP”；可覆盖的数据量还<br>取决于每个 WQE 携带多少数据。</p>
+<h4 id="推荐的实测流程"><a href="#推荐的实测流程" class="headerlink" title="推荐的实测流程"></a>推荐的实测流程</h4><ol>
+<li>分别绑定 <code>mlx5_bond_0..3</code> 测空载 RTT 和带宽；</li>
+<li>固定 message size，扫描 <code>tx_depth</code>，找到吞吐不再上升的平台点；</li>
+<li>固定 <code>tx_depth</code>，扫描 message size/post list，观察聚合收益；</li>
+<li>同时读取 <code>reth0..7</code> counters，确认两个 LAG member 是否都承载流量；</li>
+<li>把进程、host memory 和 GPU workload 绑定到对应 NUMA 一侧后复测；</li>
+<li>分别做单 QP、多 QP，以及 200G 保守预算、400G 聚合预算；</li>
+<li>监控 retry、CNP/ECN、PFC、drop、CQ backlog 和 tail latency；</li>
+<li>选择刚好能稳定覆盖目标 BDP 的窗口，并预留适度余量，而不是直接使用最大值。</li>
+</ol>
 <h2 id="4-PFC：逐优先级暂停"><a href="#4-PFC：逐优先级暂停" class="headerlink" title="4. PFC：逐优先级暂停"></a>4. PFC：逐优先级暂停</h2><p>Priority Flow Control（802.1Qbb）按 priority 暂停上游发送：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">queue 达 XOFF</span><br><span class="line">  → 发 PFC pause</span><br><span class="line">  → 上游停止该 priority</span><br><span class="line">queue 降到 XON</span><br><span class="line">  → 恢复</span><br></pre></td></tr></table></figure>
 
@@ -301,6 +736,21 @@ mjx-container[display="true"] + br {
 <td>过小易失败，过大卡很久</td>
 </tr>
 <tr>
+<td><code>ACCL_TX_DEPTH</code></td>
+<td>Barex permit 与 QP <code>max_send_wr</code></td>
+<td>过小无法覆盖 BDP，过大增加资源/拥塞压力</td>
+</tr>
+<tr>
+<td><code>ACCL_SOFT_TX_DEPTH</code></td>
+<td>TX permit 耗尽后的软件等待队列</td>
+<td>过小 queue-full，过大掩盖拥塞并增加尾延迟</td>
+</tr>
+<tr>
+<td><code>ACCL_RX_DEPTH</code></td>
+<td>QP <code>max_recv_wr</code> / receive credit</td>
+<td>过小导致 SEND/WRITE_WITH_IMM RNR；对普通 WRITE BDP 无帮助</td>
+</tr>
+<tr>
 <td><code>ACCL_RNR_RETRY</code></td>
 <td>RNR retry</td>
 <td>recv starvation 时行为</td>
@@ -316,6 +766,7 @@ mjx-container[display="true"] + br {
 <td>接收端爆发拥塞</td>
 </tr>
 </tbody></table>
+<p><code>LOG_MAX_OUTSTANDING_WQE</code> 不属于 Barex 参数；它是特定 ConnectX<br>device/firmware configuration。修改这类 NV configuration 之前必须先确认设备型号、<br>firmware 说明、生效方式、回滚方法和端到端压测结果。</p>
 <h2 id="11-NCCL-与-Barex-共网"><a href="#11-NCCL-与-Barex-共网" class="headerlink" title="11. NCCL 与 Barex 共网"></a>11. NCCL 与 Barex 共网</h2><p>若 NCCL collective 与 blade-kvt 同时使用 RoCE：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">NCCL NET flows + Barex KV Write flows</span><br><span class="line">  → 同一 NIC/QP set</span><br><span class="line">  → 同一 priority/ECN/PFC pool</span><br><span class="line">  → 同一 fabric bottleneck</span><br></pre></td></tr></table></figure>
 
@@ -363,10 +814,16 @@ mjx-container[display="true"] + br {
 <li>Barex incast avoidance 与 DCQCN 为什么不能互相替代？</li>
 </ol>
 <h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h2><ul>
-<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/networking-ethernet-software/cumulus-linux/Layer-1-and-Switch-Ports/Quality-of-Service/RDMA-over-Converged-Ethernet-RoCE/">NVIDIA Cumulus Linux RoCE</a></li>
-<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/networking/display/mlnxofedv24070610/rdma%2Bover%2Bconverged%2Bethernet%2B%28roce%29">NVIDIA RoCE documentation</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/networking-ethernet-software/cumulus-linux-44/Layer-1-and-Switch-Ports/Quality-of-Service/RDMA-over-Converged-Ethernet-RoCE/">NVIDIA Cumulus Linux 4.4：RDMA over Converged Ethernet (RoCE)</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/networking-ethernet-software/cumulus-linux-43/Layer-1-and-Switch-Ports/Buffer-and-Queue-Management/">NVIDIA Cumulus：PFC buffer、XOFF/XON 与传播期间继续到达的数据</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/networking-ethernet-software/cumulus-linux-43/Layer-2/Bonding-Link-Aggregation/">NVIDIA Cumulus：Bonding、LAG 与 hash</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/networking/display/nvidia-mlnx-ofed-documentation-v24-10-0-7-0-0-november-2024-ga-release.0%20%28November%202024%20GA%20Release%29.pdf">NVIDIA MLNX_OFED 24.10 文档（PDF，RoCE 章节）</a></li>
+<li><a target="_blank" rel="noopener" href="https://man7.org/linux/man-pages/man3/ibv_create_qp.3.html"><code>ibv_create_qp(3)</code>：<code>max_send_wr</code> 与 <code>max_recv_wr</code></a></li>
+<li><a target="_blank" rel="noopener" href="https://man7.org/linux/man-pages/man3/ibv_query_device.3.html"><code>ibv_query_device(3)</code>：device <code>max_qp_wr</code></a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/linux-rdma/perftest">linux-rdma perftest：<code>--tx-depth</code>、<code>--rx-depth</code> 与 post list</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/mellanox/mlx5/core/lib/nv_param.c">Linux mlx5 NV parameter source：<code>log_max_outstanding_wqe</code></a></li>
 </ul>
-</div><div class="article-licensing box"><div class="licensing-title"><p>02c. RoCE、拥塞控制、PFC/ECN 与重传</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-28</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">02b. RDMA 操作、WR/CQ 完成与可靠性</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/"><span class="level-item">03. NCCL 架构：从 API 到 GPU Kernel 与 Proxy</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">59</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-28T00:00:00.000Z">2026-07-28</time></p><p class="title"><a href="/notes/2026/07/28/2026-07-28-kimi%20k3%E3%80%81dspark%E4%B8%8Epd%E5%88%86%E7%A6%BB/">Kimi K3、DSpark 与 PD 分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">31</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+</div><div class="article-licensing box"><div class="licensing-title"><p>02c. RoCE、拥塞控制、PFC/ECN 与重传</p><p><a href="https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/">https://llx-08.github.io/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-27</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NCCL/">NCCL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PCIe/">PCIe</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/RDMA/">RDMA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/blade-kvt/">blade-kvt</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">02a. RDMA Verbs 对象模型：从 Device 到 QP/MR/CQ</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/"><span class="level-item">02b. RDMA 操作、WR/CQ 完成与可靠性</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">59</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">2</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">12</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-28T00:00:00.000Z">2026-07-28</time></p><p class="title"><a href="/notes/2026/07/28/2026-07-28-kimi%20k3%E3%80%81dspark%E4%B8%8Epd%E5%88%86%E7%A6%BB/">Kimi K3、DSpark 与 PD 分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-ep-learning-00-beginner-primer/">00 · 零基础导读：从 token、矩阵到 MoE 与 Expert Parallelism</a></p><p class="categories"><a href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">EP 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-00-hardware-network-primer/">00. 零基础导读：CPU、内存、PCIe、DMA、网络与 GPU 通信</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/">01. PCIe 基础：从 Lane 到 TLP</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-27T00:00:00.000Z">2026-07-27</time></p><p class="title"><a href="/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/">02. GPU、NIC、PCIe 拓扑与 DMA</a></p><p class="categories"><a href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">NCCL、PCIe 与 Barex 学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">31</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
             article: {
                 highlight: {
                     clipboard: true,
