@@ -202,33 +202,225 @@ GPU allocation export/import
 
 ## 3. StepTasks：按目标聚合
 
-`KvTransferClient::submit_req_send`：
-
-1. 创建 `RequestInfo`；
-2. `add_send_task`；
-3. 放入 `targets_tasks_buf_`；
-4. 未到 last token 的 request 还保存在 `reqs_`，供 delta send 复用。
-
-`start_send`：
-
-1. 创建 `Step` 与 `StepGuard`；
-2. 交换出 `targets_tasks_buf_`；
-3. 交给 `TargetMgr::submit`；
-4. 单独线程等待每层 CUDA event/barrier，然后 `notify_layer_ready`。
-
-源码：`kvtransfer/src/client.cpp:256-410`、`:463-513`。
-
-## 4. TargetMgr：并发与同目标串行
-
-`TargetMgr::do_submit` 按：
+这里的 **target 不是一台物理机器的模糊概念**，而是精确的二元组：
 
 ```text
-InstanceId → WorkerId → BatchSendTask
+target = (dst_inst_id, dst_worker_id)
 ```
 
-遍历任务，为每个目标取得或创建一个 `KvSendStub`，再投递到 Barex `XThreadpool`。
+- `dst_inst_id`：目标推理实例；
+- `dst_worker_id`：该实例中的目标 worker（通常对应某个 TP worker/GPU 进程）；
+- 同一实例的两个 worker 是两个不同 target；
+- 两个 request 只要二元组相同，就可以进入同一个 `BatchSendTask`。
 
-同一个 target 使用稳定 `thread_hint`，目的是让发送批次落到一致 worker，降低同目标状态并发风险。见 `client.cpp:72-108`。
+### 3.1 `StepTasks` 的真实容器结构
+
+`kvtransfer/include/client.h` 中的定义是：
+
+```cpp
+struct StepTasks {
+  // InstanceId -> [(WorkerId, BatchSendTask)]
+  std::unordered_map<
+      InstanceId,
+      std::vector<std::pair<WorkerId, BatchSendTask>>> tasks;
+
+  size_t stepid = 0;
+  uint32_t substepid = 0;
+  const Timepoint send_ts;
+};
+```
+
+可以把它画成：
+
+```text
+StepTasks(step=100, substep=0)
+├─ instance "decode-A"
+│  ├─ worker 0 → BatchSendTask[request r1, request r2]
+│  └─ worker 1 → BatchSendTask[request r3]
+└─ instance "decode-B"
+   └─ worker 0 → BatchSendTask[request r4]
+```
+
+这不是四次独立的 target 调度，而是三个 `(instance, worker)` 分组：
+
+```text
+("decode-A", 0) → {r1, r2}
+("decode-A", 1) → {r3}
+("decode-B", 0) → {r4}
+```
+
+### 3.2 `add_send_task` 如何完成分组
+
+`KvTransferClient::submit_req_send` 先构造 `RequestInfo`，然后调用
+`add_send_task`。后者的核心代码位于 `kvtransfer/src/client.cpp`：
+
+```cpp
+auto& workers_task = steptasks.tasks[req->dst_inst_id];
+
+for (auto& worker_task : workers_task) {
+  if (worker_task.first == req->dst_worker_id) {
+    worker_task_p = &worker_task.second;
+    break;
+  }
+}
+
+if (worker_task_p == nullptr) {
+  auto& ret =
+      workers_task.emplace_back(req->dst_worker_id, BatchSendTask());
+  worker_task_p = &ret.second;
+}
+
+worker_task_p->tasks.emplace_back(
+    std::move(req), seen, new_tokens, has_last);
+```
+
+逐句理解：
+
+1. `tasks[dst_inst_id]` 先按实例找到一个 worker 列表；实例第一次出现时，
+   `unordered_map::operator[]` 会创建空列表。
+2. 在线性列表中寻找相同 `dst_worker_id`。
+3. 没找到就创建 `(worker_id, BatchSendTask)`。
+4. 把当前 request 对应的 `ReqSendTask` 追加到该 batch。
+
+所以，分组依据来自每个 request 自己携带的 `dst_inst_id` 和
+`dst_worker_id`，不是 round-robin，也不是根据 GPU 拓扑临时猜测。
+`unordered_map` 的遍历顺序本身没有稳定保证，因此不能依赖不同 instance
+之间的提交先后顺序。
+
+未到 last token 的 request 还会保存在 `reqs_` 中，后续
+`submit_delta_send` 可以沿用其目标和 block 映射，继续把增量 token 放进对应
+target 的 batch。
+
+### 3.3 `start_send` 如何“封存”本轮任务
+
+`submit_req_send` 阶段只是向 `targets_tasks_buf_` 累积任务。调用
+`start_send(stepid, sched_tokens)` 后：
+
+```cpp
+StepTasks tmp_tasks;
+tmp_tasks.swap(targets_tasks_buf_);
+
+if (!tmp_tasks.empty()) {
+  mgr_.submit(step, std::move(tmp_tasks));
+}
+```
+
+`swap` 很重要：它把当前 step 已积累的任务整体移走，形成一个不再被后续
+`submit_req_send` 修改的批次，同时让 `targets_tasks_buf_` 重新变空。随后
+`TargetMgr::submit` 把整个 `StepTasks` 移交给 manager 线程。
+
+完整关系是：
+
+```text
+多次 submit_req_send
+  │
+  ├─ 按 (dst_inst_id, dst_worker_id) 追加到 targets_tasks_buf_
+  │
+start_send
+  │
+  ├─ swap：封存本 step 的 StepTasks
+  ├─ 创建 Step / StepGuard
+  └─ TargetMgr::submit
+       └─ manager 单线程执行 do_submit
+```
+
+`start_send_substep` 使用 `create_step_tasks` 对传入的 `ReqMeta` 做同样的分组，
+只是它会设置相应的 `substepid`，再附加到已有 step 或暂存到
+`pending_step_metas_`。
+
+## 4. TargetMgr：从目标分组到发送线程
+
+### 4.1 为什么有两层线程池
+
+`TargetMgr` 不是直接在调用线程里发数据，它使用两类线程：
+
+```text
+调用线程
+  │ TargetMgr::submit
+  ▼
+mgr_thd_（只有 1 个线程）
+  │ do_submit：维护 target_map_、LRU、创建/查找 Target
+  ▼
+target_thdpool_（BLLM_KVTRANS_SEND_TPSIZE 个线程）
+  │ 每个 target batch 是一个任务
+  ▼
+Target::stub->send_batch(...)
+```
+
+manager 线程只有一个，因而 `target_map_`、`targets_` LRU 链表和
+`KvSendStub` 的创建都被串行化，不需要让多个调用线程直接并发修改这些结构。
+真正可能耗时的解析、等待 layer ready、channel 发送和 flush 则放入
+`target_thdpool_`。
+
+### 4.2 `do_submit` 怎样按 target 分发
+
+`TargetMgr::do_submit` 对前一节形成的两级容器做两层遍历：
+
+```cpp
+for (auto& [inst_id, workers_task] : steptasks.tasks) {
+  for (auto& [worker_id, worker_tasks] : workers_task) {
+    worker_tasks.step = step;
+    worker_tasks.substepid = substepid;
+    worker_tasks.send_ts = submit_ts;
+
+    auto* target =
+        create_or_get(worker_tasks.tasks.front().req());
+
+    auto cnt = target->inflycnt.fetch_add(1);
+    if (cnt == 0) {
+      target->thread_hint = ++thread_hint_;
+    }
+
+    target_thdpool_->Submit(
+        [target, batch = std::move(worker_tasks)]() mutable {
+          target->stub->send_batch(std::move(batch));
+          target->inflycnt.fetch_sub(1);
+        },
+        target->thread_hint);
+  }
+}
+```
+
+每个 `(instance, worker)` 分组只向 target thread pool 提交一个 closure。这个
+closure 内的 `BatchSendTask` 可以包含多个 request。因此：
+
+```text
+一个 ReqSendTask       ≠ 一个线程池任务
+一个 BatchSendTask     = 一个 target 在一个 step/substep 中的一批 request
+一个线程池任务         = 调用一次该 target 的 send_batch(batch)
+```
+
+`create_or_get` 以 `(dst_inst_id, dst_worker_id)` 在缓存中查找 `Target`：
+
+```text
+Target
+├─ inflycnt       当前已提交但尚未退出的 batch 数
+├─ thread_hint    建议使用的发送线程
+└─ stub           面向该远端 worker 的 KvSendStub / channel 状态
+```
+
+没有找到时才通过 `stub_factory_` 创建新的 `KvSendStub`；找到时会把它移到 LRU
+链表头部继续复用。因此，目标分发最终不是“把 instance id 交给网卡”，而是先将
+二元组解析成一个长期复用的 target/stub，再由 stub 建立或复用到该 worker 的
+具体 TCP/RDMA channel。
+
+### 4.3 `thread_hint` 能否等同于“严格串行”
+
+当某 target 的 `inflycnt` 从 0 变成 1 时，代码给它分配新的
+`thread_hint`；只要还有任务 in flight，后续 batch 就继续携带相同 hint。
+设计意图是让同一 target 的任务具有线程亲和性，避免多个线程同时使用其中
+可变的 `KvSendStub::TaskContext`。
+
+但 `/usr/include/accl/barex/xthreadpool.h` 对这个参数的契约明确写的是：
+
+> `thread_hint` 是“建议的线程号”，是否采纳取决于底层实现；实现可能使用
+> `thread_hint % thread_count`。
+
+因此从公开接口能严格得出的结论是“同 target 使用相同的线程提示”，不能仅凭
+这段头文件宣称任意 Barex `XThreadpool` 实现都保证同 target 严格串行。当前
+blade-kvt 的 `KvSendStub::TaskContext` 是可变复用状态，实际部署所链接的
+XThreadpool 实现需要满足这种串行/亲和假设；若替换线程池实现，这一点必须重新
+验证。
 
 ## 5. KvSendStub：数据布局决策
 
@@ -276,6 +468,155 @@ GPU forward layer i 完成并 record event
   → send stub 提交 layer i KV
   → GPU 继续算后续 layer
 ```
+
+### 6.1 `notify_event_record(step_id)` 到底通知了什么
+
+Python `blade_kvt/kv_transfer_impl.py` 的代码是：
+
+```python
+def record_event(self, layer_id: int, stream=None):
+    if self._cur_step_id is None:
+        return
+    self._events[layer_id].record(stream)
+    notify_event_record(self._cur_step_id)
+```
+
+这里有两个容易混淆的动作：
+
+1. `event.record(stream)`：在指定 CUDA stream（未指定时是当前 stream）中
+   **入队一个 event 标记**。这个标记排在此前提交到该 stream 的 kernel 后面。
+   host 调用 record 返回，不代表 GPU 已经运行到 event。
+2. `notify_event_record(step_id)`：通过 pybind 进入
+   `KvTransferClient::notify_event_record`，告诉 C++“当前 step 又有一个 layer
+   event 已经完成 record 动作，可以开始等待它了”。
+
+pybind 没有添加额外语义，只是原样转发：
+
+```cpp
+void notify_event_record(size_t step_id) {
+  KV_CLIENT->notify_event_record(step_id);
+}
+```
+
+C++ client 先用 `step_id` 防止旧 step 或错误 step 的通知串进来，然后：
+
+```cpp
+last_step_guard_->after_record_one();
+```
+
+而 `after_record_one()` 只是：
+
+```cpp
+record_signal_.release();
+```
+
+也就是说，`step_id` 的职责是**定位并校验当前 StepGuard**，不是编码 layer。
+`notify_event_record` 也没有传递“第 17 层”这样的信息。第几层由下面两个事实
+共同确定：
+
+- Python 用 `layer_id` 选择 `_events[layer_id]`；
+- C++ `StepGuard::wait_layers()` 固定按 `layer_i = 0, 1, 2, ...` 消费通知。
+
+因此这套实现依赖 `record_event(0)`、`record_event(1)`……按模型层顺序调用。
+如果乱序调用，C++ 收到的只是一张“又 record 了一个 event”的票据，无法从
+`step_id` 反推出究竟是哪一层，可能等待到错误/上一轮的 event 状态。
+
+### 6.2 三个不同的等待对象
+
+`start_send` 创建 `Step` 和 `StepGuard` 后，在 `single_thd_` 的后台线程运行：
+
+```cpp
+step_guard->wait_layers();
+```
+
+其核心逻辑是：
+
+```cpp
+for (uint32_t layer_i = 0; layer_i < num_layers; ++layer_i) {
+  record_signal_.wait(layer_i);       // A
+  cu_barrier_->wait(layer_i);         // B: cudaEventSynchronize
+  step_->notify_layer_ready(layer_i + 1); // C
+}
+```
+
+与此同时，每个 target 的发送线程在 `KvSendStub::TaskContext::do_send` 中运行：
+
+```cpp
+for (auto i = start_layer; i < num_layers; ++i) {
+  batch.step->wait_layer_ready(i);    // D
+  ch->send_data(i);
+}
+```
+
+这四个位置的含义不同：
+
+| 位置 | 谁在等待 | 等待什么 | 实现 |
+|---|---|---|---|
+| A | `single_thd_` 的 step waiter | Python 是否已对下一层调用 event record | `SyncSemaphore`：mutex + condition variable |
+| B | 同一个 step waiter CPU 线程 | GPU 是否真正执行到该层 event | `cudaEventSynchronize(event[layer_i])` |
+| C | waiter 发信号 | 宣布该层数据现在可安全读取 | `Step::data_signal_.release(...)` |
+| D | target thread pool 的发送线程 | 当前 layer 是否已被 C 放行 | `SyncSemaphore`：mutex + condition variable |
+
+所以，“notify 到达之前一直被 CUDA event 阻塞”并不准确：
+
+- **notify 到达之前**：step waiter 阻塞在 CPU condition variable
+  `record_signal_`，它甚至还没有调用 `cudaEventSynchronize`；
+- **notify 已到达、但 GPU 尚未算到 event**：step waiter 才阻塞在
+  `cudaEventSynchronize`；
+- **发送线程过早走到该层**：它阻塞在另一个 CPU condition variable
+  `data_signal_`；
+- **模型 CUDA stream**：不会被上述 host 等待反向阻塞，仍按 stream 中的
+  kernel/event 顺序继续执行；
+- **Python 主线程**：`event.record` 与 `notify_event_record` 都很短，不会在
+  这里等待该 CUDA event 完成。
+
+这里使用的是 host 侧 `cudaEventSynchronize`，不是向另一个 CUDA stream 插入
+`cudaStreamWaitEvent`。因此真正睡眠的是一个 blade-kvt 后台 CPU 线程。
+
+### 6.3 一层数据从计算到发送的完整时序
+
+```text
+Python / model thread       CUDA compute stream       step waiter CPU       target send CPU
+        │                          │                         │                      │
+kernel(layer i) 入队 ─────────────►│ 执行前面工作            │                      │
+event[i].record() 入队 ───────────►│ event 排在 kernel 后     │                      │
+notify(step_id) ───────────────────────────────────────────►│ record_signal +1     │
+        │                          │                         │ cudaEventSynchronize │
+        │ 返回、继续 host 工作     │ 完成 kernel(layer i)     │      等待            │
+        │                          │ 到达 event[i] ─────────►│                      │
+        │                          │                         │ release layer i ─────►│
+        │                          │ 继续后续 layer kernel    │                      │ send_data(i)
+        │                          │                         │                      │ （通常异步提交）
+        │                          │                         │                      │
+```
+
+这确实形成 compute/communication pipeline，但“每层放行”发生在两个阶段：
+
+```text
+已 record（CPU 已把 event 放进 stream）
+  ≠ 已 ready（GPU 已执行到 event）
+```
+
+`notify_event_record` 只证明第一件事；`cudaEventSynchronize` 返回才证明第二件事。
+发送线程必须等第二件事，才能避免 RNIC 或 copy kernel 读到仍在写入的 KV cache。
+
+### 6.4 `flush_send_step` 在这套状态机中的作用
+
+Python 最后调用 `flush_send_step()`，C++ 的 `flush_send` 会执行：
+
+```cpp
+last_step_guard_->layer_ready_all();
+```
+
+这里函数名容易误导。它实际调用 `after_record_all()`，把
+`record_signal_` 一次释放到 `num_layers`，相当于把“event 已经 record”的 CPU
+侧 gate 全部打开。这里仍然要求调用方此前已经按约定对本 step 的各层 event
+执行过 record；它不是对漏 record 的补救。waiter 对每层仍会执行 B 中的
+`cudaEventSynchronize(event[layer_i])`，并不是直接绕过 CUDA event。
+
+此外还要与第 10 节的完成语义区分：这里解决的是“允许各层开始发送”的门控；
+每个 channel 自己的 `flush` 才等待该 batch 的数据面 completion，而公共
+`KvTransferClient::flush_send` 当前没有 join 所有 target task。
 
 ## 7. Barex context 与 GPU MR 初始化
 
