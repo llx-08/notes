@@ -79,6 +79,8 @@ index_generator:
 default_category: uncategorized
 category_map:
 tag_map:
+category_generator:
+  order_by: title
 
 # Metadata elements
 ## https://developer.mozilla.org/en-US/docs/Web/HTML/Element/meta
