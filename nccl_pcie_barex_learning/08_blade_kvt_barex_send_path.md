@@ -462,7 +462,100 @@ GPU forward layer i 完成并 record event
   → GPU 继续算后续 layer
 ```
 
-### 6.1 `notify_event_record(step_id)` 到底通知了什么
+### 6.1 vLLM 在哪里把 event 排到 attention 之后
+
+对本文固定的 vLLM 版本
+`058f6b130e789096ab685c58fe90fdb97c149774`，调用入口在
+`vllm/attention/utils/kv_transfer_utils.py` 的
+`maybe_transfer_kv_layer` 装饰器：
+
+```python
+@wraps(func)
+def wrapper(*args, **kwargs):
+    ...
+    # 进入 attention 前：需要时等待远端 KV load
+    connector.wait_for_layer_load(layer_name)
+
+    # 执行这一层 attention
+    result = func(*args, **kwargs)
+
+    # attention 函数返回后，通知 connector 保存/发送这一层 KV
+    connector.save_kv_layer(layer_name, kv_cache, attn_metadata)
+    return result
+```
+
+这个装饰器应用在 `vllm/attention/layer.py` 的：
+
+- `unified_attention`；
+- `unified_attention_with_output`；
+- `unified_mla_attention`；
+- `unified_mla_attention_with_output`。
+
+例如普通 attention 的被装饰函数最终调用：
+
+```python
+output = self.impl.forward(
+    self, query, key, value, kv_cache, attn_metadata
+)
+```
+
+`connector.save_kv_layer` 随后经过：
+
+```text
+HybridConnector.save_kv_layer
+  → HybridWorker.save_kv_layer
+  → PBackend.async_save_kv_layer
+  → blade-kvt KVTransferClient.record_event
+```
+
+`vllm/v1/hybrid_connector/kvtbackend.py` 中最后一段是：
+
+```python
+def async_save_kv_layer(self, layer_name, kv_layer, m):
+    layer_idx = extract_layer_index(layer_name)
+    if self.is_hybrid:
+        if layer_idx in self.hybrid_model_send_layer:
+            idx = self.hybrid_model_send_layer.index(layer_idx)
+            self._bladkv_cli.record_event(
+                idx, torch.cuda.current_stream()
+            )
+    else:
+        self._bladkv_cli.record_event(
+            layer_idx, torch.cuda.current_stream()
+        )
+    return None
+```
+
+这里不能理解为“attention 开始时创建/插入一个 event，attention 完成时再手工
+把它标记为 ready”。准确语义是：
+
+```text
+CPU 调用 attention forward
+  → attention/KV-cache-write CUDA 工作进入 current stream
+  → attention 的 Python/C++ host 调用返回
+  → event.record(current_stream) 进入同一 stream
+
+CUDA stream 中的实际顺序：
+  attention kernel / KV cache write
+    → event marker
+    → 后续 kernel
+```
+
+CUDA kernel launch 通常是异步的，因此 `func(...)` 在 CPU 上返回时，GPU
+不一定已经完成 attention。此时调用 `event.record(stream)` 只是把 event marker
+排到当前 stream 已有工作之后；等 GPU 真正执行到 marker，event 才自动变为
+complete/ready，不存在另一次由 vLLM 执行的“标记完成”调用。
+
+这套正确性依赖 attention 对 KV cache 的写入与 event 位于同一 current stream，
+或者其他工作流已经把跨 stream 依赖同步回该 stream。否则，只等待这个 event
+不能覆盖另一个未同步 stream 上的 KV 写入。
+
+在更外层，`KVConnectorModelRunnerMixin.maybe_setup_kv_connector` 会在 model
+forward 前绑定 metadata；`PBackend.bind_backend_metadata` 调用
+`start_send_step`，先启动 blade-kvt 的 step/target 后台任务。于是发送线程可以
+提前进入 `wait_layer_ready(i)`，并随着每层 attention event ready 被逐层放行。
+
+### 6.2 `notify_event_record(step_id)` 到底通知了什么
 
 Python `blade_kvt/kv_transfer_impl.py` 的代码是：
 
@@ -514,7 +607,7 @@ record_signal_.release();
 如果乱序调用，C++ 收到的只是一张“又 record 了一个 event”的票据，无法从
 `step_id` 反推出究竟是哪一层，可能等待到错误/上一轮的 event 状态。
 
-### 6.2 三个不同的等待对象
+### 6.3 三个不同的等待对象
 
 `start_send` 创建 `Step` 和 `StepGuard` 后，在 `single_thd_` 的后台线程运行：
 
@@ -566,7 +659,7 @@ for (auto i = start_layer; i < num_layers; ++i) {
 这里使用的是 host 侧 `cudaEventSynchronize`，不是向另一个 CUDA stream 插入
 `cudaStreamWaitEvent`。因此真正睡眠的是一个 blade-kvt 后台 CPU 线程。
 
-### 6.3 一层数据从计算到发送的完整时序
+### 6.4 一层数据从计算到发送的完整时序
 
 ```text
 Python / model thread       CUDA compute stream       step waiter CPU       target send CPU
@@ -593,7 +686,7 @@ notify(step_id) ─────────────────────�
 `notify_event_record` 只证明第一件事；`cudaEventSynchronize` 返回才证明第二件事。
 发送线程必须等第二件事，才能避免 RNIC 或 copy kernel 读到仍在写入的 KV cache。
 
-### 6.4 `flush_send_step` 在这套状态机中的作用
+### 6.5 `flush_send_step` 在这套状态机中的作用
 
 Python 最后调用 `flush_send_step()`，C++ 的 `flush_send` 会执行：
 
