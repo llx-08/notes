@@ -751,8 +751,350 @@ RDMA WRITE 没有远端 receive CQE，必须由上层协议明确通知边界。
 
 ## 3. WR、WQE 与 SGE
 
-WQE 是 **Work Queue Element**，中文可译为“工作队列元素”。要真正理解它，先把几个
-名字分层：
+不要一上来就看 `ibv_post_send()` 代码。先把三个缩写逐个定义清楚：
+
+```text
+WR  = Work Request
+WQE = Work Queue Element
+SGE = Scatter/Gather Element
+```
+
+它们分别处于不同层次：
+
+```text
+SGE：描述“一段本地内存”
+  ↓ 一个或多个 SGE 被 WR 引用
+WR：描述“应用希望执行的一次逻辑操作”
+  ↓ post 后由 provider 编码
+WQE：描述“RNIC 可以从硬件队列取走并执行的一项工作”
+```
+
+### 3.1 先逐个定义：全称、含义与用途
+
+#### 3.1.1 WR：Work Request
+
+**英文全称：Work Request。中文可译为“工作请求”。**
+
+这里的 `Work` 是“要网卡完成的一项工作”，不是特指 WRITE；`Request` 表示它是应用
+提交给 verbs/provider 的软件请求。
+
+定义：
+
+> WR 是应用在软件接口层构造的请求对象，用来表达“我希望这个 QP 执行什么操作、
+> 使用哪些本地内存、是否需要 completion，以及该 operation 的专用参数是什么”。
+
+libibverbs 中主要有两类 WR：
+
+```text
+ibv_send_wr
+  用于提交到 SQ
+  可表达 SEND、RDMA WRITE、RDMA READ、ATOMIC 等主动操作
+
+ibv_recv_wr
+  用于提交到 RQ/SRQ
+  表达“下一条 SEND/Immediate 到达时，可以使用哪些本地 receive buffer”
+```
+
+WR 的用途是把一次逻辑操作的参数交给 provider。以 `ibv_send_wr` 为例，重要字段包括：
+
+| 字段 | 用途 |
+| --- | --- |
+| `wr_id` | 应用自定义的 64-bit cookie；CQE 会带回来，便于找回 request/buffer/callback |
+| `next` | 把多条 WR 串成 linked list，一次 `ibv_post_send()` 批量提交 |
+| `sg_list` | 指向 SGE 数组，描述本地数据从哪里读或写到哪里 |
+| `num_sge` | 本 WR 使用多少个 SGE |
+| `opcode` | 操作类型，如 `IBV_WR_SEND`、`IBV_WR_RDMA_WRITE` |
+| `send_flags` | 是否 signaled、inline、fence 等 |
+| `wr.rdma.remote_addr` | READ/WRITE 的远端 virtual address |
+| `wr.rdma.rkey` | 访问该远端地址所需的 rkey |
+| `imm_data` | WITH_IMM 操作携带的 32-bit immediate data |
+
+一条 WR 的例子：
+
+```cpp
+ibv_send_wr wr = {};
+wr.wr_id      = request_id;
+wr.opcode     = IBV_WR_RDMA_WRITE;
+wr.send_flags = IBV_SEND_SIGNALED;
+wr.sg_list    = &local_sge;
+wr.num_sge    = 1;
+wr.wr.rdma.remote_addr = remote_address;
+wr.wr.rdma.rkey        = remote_rkey;
+```
+
+此时它仍然只是 CPU 进程内存中的 C 结构体：
+
+```text
+构造 WR
+  ≠ 已经进入 SQ
+  ≠ RNIC 已经看到
+  ≠ 数据已经发送
+```
+
+只有调用 `ibv_post_send()` 或 `ibv_post_recv()` 后，provider 才接受并转换这个请求。
+
+WR 的创建者和读取者：
+
+```text
+应用/通信库创建 WR
+       ↓
+libibverbs provider 在 post 调用中读取 WR
+       ↓
+provider 将其编码成硬件 WQE
+```
+
+所以 WR 是 **portable verbs API 层对象**；不同 RNIC 仍使用相同的
+`ibv_send_wr/ibv_recv_wr` 接口。
+
+#### 3.1.2 WQE：Work Queue Element
+
+**英文全称：Work Queue Element。中文可译为“工作队列元素”。**
+
+拆开理解：
+
+```text
+Work Queue = 设备工作队列
+Element    = 队列中的一个元素/槽位
+```
+
+定义：
+
+> WQE 是 provider 根据 WR 编码出的、放入 QP 的 SQ/RQ、可由 RNIC 直接解释和执行的
+> 硬件工作描述符。
+
+WQE 的用途是把软件请求变成设备可执行格式。例如一条 RDMA WRITE WQE 需要让 RNIC
+知道：
+
+```text
+执行哪种 opcode
+从哪些 local registered memory 读取
+一共传多少字节
+使用哪个 local lkey
+写到哪个 remote address
+使用哪个 remote rkey
+是否 inline/signaled/fenced
+完成后是否需要写 CQE
+```
+
+两类最常见的 WQE：
+
+```text
+Send WQE
+  位于 QP Send Queue
+  RNIC 主动执行 SEND/WRITE/READ/ATOMIC
+
+Receive WQE
+  位于 QP Receive Queue 或 SRQ
+  RNIC 收到 SEND/Immediate 时取出，用来决定本地 receive buffer/context
+```
+
+WQE 的创建者和读取者：
+
+```text
+provider 创建/编码 WQE
+       ↓
+WQE 被写入 SQ 或 RQ
+       ↓
+doorbell 通知 RNIC
+       ↓
+RNIC 取出并执行 WQE
+```
+
+与 WR 不同，WQE 的真实二进制布局通常是 **provider/RNIC 专用格式**。应用不能假设：
+
+- 所有网卡的 WQE 字段顺序相同；
+- 一条 WQE 固定是多少字节；
+- WR 中的 C 字段可以原样 memcpy 给任意 RNIC；
+- 可以绕过 provider 直接按某台网卡格式操作另一台网卡。
+
+“一条 WR 通常对应一条逻辑 WQE”适合建立心智模型，但精确编码、分段、padding、
+inline layout 和特殊 opcode 仍由 provider/硬件决定。
+
+WQE 主要是**描述符**，通常不保存完整 non-inline payload。它保存 payload 的本地
+地址、长度和 lkey；RNIC 执行时再 DMA 访问实际 buffer。只有 inline 等模式会把小
+payload 直接编码到 WQE/提交区域。
+
+#### 3.1.3 SGE：Scatter/Gather Element
+
+**英文全称：Scatter/Gather Element。中文可译为“分散/聚集元素”或“散布/聚集项”。**
+
+定义：
+
+> SGE 是对“一段本地已注册内存”的描述，由本地地址、长度和 lkey 组成。一个 WR 可以
+> 引用一个或多个 SGE。
+
+libibverbs 的核心结构：
+
+```cpp
+struct ibv_sge {
+    uint64_t addr;    // 本地 virtual address
+    uint32_t length;  // 这段内存的字节数
+    uint32_t lkey;    // 证明本地 RNIC 有权访问该内存
+};
+```
+
+三个字段分别回答：
+
+```text
+addr   ：从本机哪一个 virtual address 开始？
+length ：连续访问多少字节？
+lkey   ：这段本地地址是否已注册，RNIC 是否有权限 DMA？
+```
+
+SGE 的用途由 operation 方向决定：
+
+| WR 类型 | SGE 描述的本地内存角色 |
+| --- | --- |
+| SEND | 本地 source；RNIC 从这里 DMA read 后发送 |
+| Receive | 本地 destination；RNIC 把收到的 SEND payload DMA write 到这里 |
+| RDMA WRITE | 本地 source；写到 WR 单独指定的远端地址 |
+| RDMA READ | 本地 destination；远端读回的数据写到这里 |
+| ATOMIC | 本地 result buffer；保存远端原子操作返回的旧值 |
+
+最容易混淆的一点是：
+
+> **SGE 只描述本地内存，不描述远端内存。**
+
+例如 RDMA WRITE 同时需要：
+
+```text
+本地 source：
+  SGE.addr + SGE.length + SGE.lkey
+
+远端 destination：
+  WR.wr.rdma.remote_addr + WR.wr.rdma.rkey
+```
+
+远端地址/rkey 属于 operation-specific WR 字段，不是 SGE。
+
+为什么叫 Scatter/Gather：
+
+```text
+Gather（发送侧聚集）
+  SGE[0] header
+  SGE[1] metadata
+  SGE[2] payload
+       ↓ RNIC 按顺序读取
+  形成一条逻辑发送消息
+
+Scatter（接收侧分散）
+  一条收到的逻辑消息
+       ↓ RNIC 按 Receive SGE 顺序写入
+  SGE[0] buffer A
+  SGE[1] buffer B
+  SGE[2] buffer C
+```
+
+SGE 本身不是 queue element：
+
+```text
+错误理解：SGE 和 WQE 都是 SQ 中并列的任务
+
+正确理解：WQE 是队列任务；
+          SGE 是该任务内部引用的本地 memory segment 描述
+```
+
+#### 3.1.4 三者一张表对比
+
+| 对象 | 英文全称 | 所在层次 | 谁创建 | 谁读取/使用 | 核心用途 |
+| --- | --- | --- | --- | --- | --- |
+| WR | Work Request | libibverbs API/应用软件层 | 应用或通信库 | provider | 表达一次逻辑 operation |
+| WQE | Work Queue Element | QP SQ/RQ 硬件工作队列层 | provider | RNIC | 让设备执行这项工作 |
+| SGE | Scatter/Gather Element | WR 的本地 memory 描述层；随后编码进 WQE | 应用或通信库 | provider 编码，RNIC 按编码访问 | 描述一段 local registered memory |
+
+再加两个后文经常出现的对象：
+
+| 对象 | 英文全称 | 用途 |
+| --- | --- | --- |
+| WQ | Work Queue | 保存 WQE 的工作队列；常见为 SQ/RQ |
+| CQE | Completion Queue Element | RNIC 写入 CQ 的完成结果，带 status、opcode、wr_id 等 |
+
+#### 3.1.5 三者的包含和转换关系
+
+假设应用要把两段离散 local buffer 写到一个连续 remote range：
+
+```text
+local header  = 地址 A，64 B
+local payload = 地址 B，4032 B
+remote target = 地址 R，4096 B
+```
+
+应用首先构造两个 SGE：
+
+```cpp
+ibv_sge sges[2] = {};
+
+sges[0].addr   = reinterpret_cast<uintptr_t>(header);
+sges[0].length = 64;
+sges[0].lkey   = header_mr->lkey;
+
+sges[1].addr   = reinterpret_cast<uintptr_t>(payload);
+sges[1].length = 4032;
+sges[1].lkey   = payload_mr->lkey;
+```
+
+然后构造一条引用它们的 WR：
+
+```cpp
+ibv_send_wr wr = {};
+wr.wr_id      = request_id;
+wr.opcode     = IBV_WR_RDMA_WRITE;
+wr.send_flags = IBV_SEND_SIGNALED;
+wr.sg_list    = sges;
+wr.num_sge    = 2;
+wr.wr.rdma.remote_addr = remote_target;
+wr.wr.rdma.rkey        = remote_rkey;
+```
+
+最后 post：
+
+```cpp
+ibv_send_wr* bad_wr = nullptr;
+int rc = ibv_post_send(qp, &wr, &bad_wr);
+```
+
+转换链：
+
+```text
+SGE[0] ─┐
+        ├─→ WR
+SGE[1] ─┘    opcode=RDMA_WRITE
+             remote_addr=R
+             rkey=...
+                │
+                │ ibv_post_send()
+                ▼
+        provider 编码 Send WQE
+          ├─ control/opcode
+          ├─ remote address/rkey
+          ├─ local data segment 0（来自 SGE[0]）
+          └─ local data segment 1（来自 SGE[1]）
+                │
+                │ doorbell
+                ▼
+        RNIC 执行 WQE
+          ├─ DMA read 地址 A 的 64 B
+          ├─ DMA read 地址 B 的 4032 B
+          ├─ 在网络上按序发送 4096 B
+          └─ 远端 RNIC 写入从地址 R 开始的连续 range
+                │
+                ▼
+        signaled completion → CQE(wr_id=request_id)
+```
+
+这一例子把三者的职责完全分开了：
+
+```text
+SGE 回答：本地字节在哪里？
+WR 回答：这些字节要执行什么逻辑操作？
+WQE 回答：如何把该请求表示成这块 RNIC 能执行的队列任务？
+```
+
+接下来再进入 Work Queue、具体 WQE 字段和构造/执行流程。
+
+### 3.2 Work Queue、SQ、RQ 与 WQE
+
+要理解 WQE 放在哪里，先看完整层次：
 
 ```text
 应用想做的事情
@@ -784,8 +1126,6 @@ CQE（Completion Queue Element）
 `ibv_send_wr`、`ibv_recv_wr` 和 `ibv_sge`，由 provider 按具体网卡格式编码 WQE。
 因此不要在应用代码中假设所有 RNIC 的 WQE 都有相同字节数或字段偏移。
 
-### 3.1 Work Queue、SQ、RQ 与 WQE
-
 QP（Queue Pair）之所以叫“队列对”，是因为它通常包含：
 
 ```text
@@ -815,7 +1155,7 @@ QP
 注意，“Send Queue”不只执行 SEND opcode。RDMA WRITE、READ、ATOMIC 也都通过
 `ibv_post_send()` 提交到 SQ；这里的 send 更接近“本端主动发起”。
 
-### 3.2 WR 与 WQE 为什么不是同一个对象
+### 3.3 WR 与 WQE 为什么不是同一个对象
 
 应用构造的是通用 verbs WR：
 
@@ -857,7 +1197,7 @@ MR / lkey               → WQE 完成前必须继续有效
 若 `IBV_SEND_INLINE` 成功使用，payload 已在 post 路径被复制进 WQE/设备提交区域，
 原 payload buffer 通常在 `ibv_post_send()` 返回后即可复用；后文第 6 节会继续解释。
 
-### 3.3 一个 Send WQE 概念上包含什么
+### 3.4 一个 Send WQE 概念上包含什么
 
 WQE 的确切二进制 layout 是 provider/硬件相关的，但可以用下面的逻辑结构理解：
 
@@ -894,7 +1234,7 @@ Send WQE
 
 这里的表是语义视图，不等于硬件 WQE 中一定按这个顺序排列。
 
-### 3.4 SGE：一个 WQE 可以引用多段本地内存
+### 3.5 SGE：一个 WQE 可以引用多段本地内存
 
 SGE 是 **Scatter/Gather Element**：
 
@@ -933,7 +1273,7 @@ max_recv_sge   一条 Receive WR/WQE 最多可引用多少 SGE
 - SGE 数太多会增大 WQE、增加地址处理和 DMA 碎片化成本；
 - 一个 WQE 的总 payload 是各有效 SGE length 之和，不是“一个 SGE 就是一条 packet”。
 
-### 3.5 Receive WQE 保存的是数据，还是 buffer 描述符
+### 3.6 Receive WQE 保存的是数据，还是 buffer 描述符
 
 Receive WQE 不是收到的 packet 本身，它是接收端预先交给 RNIC 的“空 buffer 清单”：
 
@@ -980,7 +1320,7 @@ ibv_post_recv(qp, &recv_wr, &bad_recv_wr);
 所以增加 `max_recv_wr` 主要能增加“可提前接收多少条 SEND/Immediate 消息”，不会扩大
 plain RDMA WRITE 的发送 BDP window。
 
-### 3.6 `ibv_post_send()` 到 RNIC 执行的完整流程
+### 3.7 `ibv_post_send()` 到 RNIC 执行的完整流程
 
 下面把“准备描述符 → doorbell → 设备取任务”展开到 WQE 粒度：
 
@@ -1021,7 +1361,7 @@ SQ slot/应用资源可安全复用
 直接推给网卡。它们都是优化细节，不能反推成所有 RNIC 都会以完全相同方式“DMA fetch
 一份 host WQE”。
 
-### 3.7 Doorbell 是什么，为什么不能先敲再写完 WQE
+### 3.8 Doorbell 是什么，为什么不能先敲再写完 WQE
 
 WQE ring 是一排已经分配好的槽位。软件先写槽位，再通知设备“新的 producer index
 到这里了”：
@@ -1062,7 +1402,7 @@ N 个 WR → N 个 WQE → 可以一次 post/doorbell 通知
 如果应用想真正提高 `bytes/WQE`，需要把多个小逻辑对象合并进更大的 buffer/WR，或者
 在 capability 允许时使用一个带多个 SGE 的 WR。
 
-### 3.8 WQE、网络 Packet 和 PCIe TLP 不是一一对应
+### 3.9 WQE、网络 Packet 和 PCIe TLP 不是一一对应
 
 这是最重要的层次关系之一：
 
@@ -1109,7 +1449,7 @@ PCIe 压力        以 TLP、payload byte、read/write transaction 等计
 
 四种指标不能互相直接替换。
 
-### 3.9 WQE 的状态与“outstanding”究竟指什么
+### 3.10 WQE 的状态与“outstanding”究竟指什么
 
 概念生命周期可以画成：
 
@@ -1141,7 +1481,7 @@ reclaimed：应用/provider 回收 slot 和业务资源
 同一个变量。更完整的三层窗口已在
 [02c RoCE 拥塞、BDP 与调优](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/) 第 3.5 节说明。
 
-### 3.10 Queue Depth 是怎样设置和查询的
+### 3.11 Queue Depth 是怎样设置和查询的
 
 创建 QP 时，应用请求 capacity：
 
@@ -1181,7 +1521,7 @@ provider 可能对申请值取整或返回实际支持值，所以不能只写�
 
 否则即使 SQ 很深，也可能发生 CQ overrun。
 
-### 3.11 Signaled/Unsignaled 改变 CQE 数，不等于不占 WQE
+### 3.12 Signaled/Unsignaled 改变 CQE 数，不等于不占 WQE
 
 假设提交 8 条 WR：
 
@@ -1212,7 +1552,7 @@ WQE 7  signaled
 来推进回收，最终可能把 SQ 填满。这也是为什么 Barex batch 会选择性 signaled 并维护
 自己的 permit/callback。
 
-### 3.12 `ibv_post_send()` 失败时，哪些 WQE 已经进入 SQ
+### 3.13 `ibv_post_send()` 失败时，哪些 WQE 已经进入 SQ
 
 WR linked list：
 
@@ -1241,7 +1581,7 @@ int rc = ibv_post_send(qp, &wr0, &bad_wr);
 
 这正是 Barex `WriteBatch` 相比“手写一个 `for` 循环”多承担的部分。
 
-### 3.13 结合 Barex：一批 Write 如何变成 WQE
+### 3.14 结合 Barex：一批 Write 如何变成 WQE
 
 Barex 的简化链路：
 
@@ -1285,7 +1625,7 @@ completion batch：多个 WQE 由较少的 signaled CQE 代表回收边界
 
 三者经常数量相关，但不是同一个概念。
 
-### 3.14 常见问题与误区
+### 3.15 常见问题与误区
 
 #### 误区 1：WQE 就是网络包
 
@@ -1316,7 +1656,7 @@ completion batch：多个 WQE 由较少的 signaled CQE 代表回收边界
 硬件 CQE 对应某个 signaled WR 的完成记录；上层可以利用 SQ ordering，让一个 signaled
 边界回收此前多个 unsignaled WR，但必须维护准确的软件记账。
 
-### 3.15 本节最小心智模型
+### 3.16 本节最小心智模型
 
 ```text
 WR：应用填写的请求
