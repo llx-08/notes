@@ -733,6 +733,60 @@ PyTorch 的 `torch.cuda.Event` 默认参数是 `blocking=False`。因此理解�
 某个 CPU 中断把一个休眠线程唤醒。具体 driver/GPU 中断与轮询实现并不是
 blade-kvt 的接口契约。
 
+这里的 `blocking=False` 非常容易被误读成“CPU 不会等待”。它真正区分的是
+**调用同步等待的那个 CPU 线程采用什么等待策略**，而不是把同步 API
+`cudaEventSynchronize` 变成异步 API：
+
+```text
+torch.cuda.Event(blocking=False)
+  + cudaEventSynchronize(event)
+  → 调用者仍然必须等到 event complete 才能从函数返回
+  → 但等待期间通常采用 busy-wait，而不是 blocking sleep
+
+torch.cuda.Event(blocking=True)
+  + cudaEventSynchronize(event)
+  → 调用者同样要等到 event complete 才返回
+  → CUDA 可以把这个调用线程挂起，完成后再恢复
+```
+
+两种模式的依赖关系和正确性相同，区别主要是等待时的 CPU 使用方式与可能的唤醒
+开销：
+
+```text
+blocking=False：可能占用更多 CPU，通常避免睡眠/唤醒路径
+blocking=True ：更容易让出 CPU，但涉及阻塞和恢复线程
+```
+
+还必须区分“线程”和“进程”。当前 blade-kvt 与 vLLM 位于同一个 worker
+进程，但这个进程内有多个线程：
+
+| 执行者 | 调用 | 是否在这里等待 |
+|---|---|---|
+| vLLM/Python model 主线程 | `event.record(stream)`、`notify_event_record(step_id)` | 不等待 event complete，继续 launch 后续 forward |
+| blade-kvt `single_thd_` 中的 step waiter | `cudaEventSynchronize(event)` | 会停在这里；当前默认 event 下可能 busy-wait |
+| `target_thdpool_` 中的发送线程 | `Step::wait_layer_ready(layer)` | 等 C++ condition variable，不直接等待 CUDA Event |
+| CUDA compute stream | 执行 kernel 和 event marker | 按 stream 顺序继续执行，不会因 host waiter 而停止 |
+
+所以更准确的说法是：
+
+> `cudaEventSynchronize` 只卡住调用它的 blade-kvt step-waiter 线程，不会把
+> 整个 vLLM worker 进程或 Python model 主线程停住；target 发送线程则被另一套
+> condition variable 门控。busy-wait 仍可能消耗一个 CPU core，从资源竞争角度
+> 间接影响进程，但它不是全进程同步屏障。
+
+代码中执行 `cudaEventSynchronize` 的不是每个 target 自己的发送线程，而是
+`start_send` 投递到 `single_thd_` 的 step waiter：
+
+```cpp
+single_thd_.spawn([step_guard]() {
+  step_guard->wait_layers();
+});
+```
+
+使用一个公共 waiter 的好处是：它只需等待每层 event 一次，event ready 后再用
+`notify_all()` 扇出给该 step 的所有 target；否则多个 target 线程可能对同一个
+event 重复做 host synchronization。
+
 第二段则完全能从 blade-kvt 源码确定。`SyncSemaphore::release(cond)`：
 
 ```cpp
