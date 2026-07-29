@@ -20,6 +20,7 @@ from pathlib import Path
 IMAGE_SOURCE_DIRS = (
     Path("imgs"),
     Path("nccl_pcie_barex_learning") / "imgs",
+    Path("cuda_cute_nvidia_learning") / "imgs",
 )
 
 

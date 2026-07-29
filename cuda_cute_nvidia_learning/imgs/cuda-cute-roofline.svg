@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">Roofline 性能模型</title>
+  <desc id="desc">横轴为算术强度，纵轴为性能；带宽斜线与计算峰值水平线共同形成性能上界。</desc>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#a9c5d2"/></marker></defs>
+  <rect width="1200" height="700" rx="26" fill="#071522"/>
+  <text x="600" y="52" text-anchor="middle" fill="white" font-family="sans-serif" font-size="30" font-weight="700">Roofline：性能上界 = min（计算峰值，算术强度 × 带宽）</text>
+  <g font-family="sans-serif">
+    <line x1="145" y1="590" x2="1090" y2="590" stroke="#a9c5d2" stroke-width="3" marker-end="url(#a)"/>
+    <line x1="145" y1="590" x2="145" y2="105" stroke="#a9c5d2" stroke-width="3" marker-end="url(#a)"/>
+    <text x="620" y="647" text-anchor="middle" fill="#d7e5eb" font-size="18">Arithmetic Intensity（FLOP / byte，对数轴）</text>
+    <text x="56" y="360" transform="rotate(-90 56 360)" text-anchor="middle" fill="#d7e5eb" font-size="18">Performance（FLOP/s，对数轴）</text>
+    <line x1="175" y1="560" x2="670" y2="190" stroke="#62d0ff" stroke-width="5"/>
+    <line x1="670" y1="190" x2="1060" y2="190" stroke="#68e3aa" stroke-width="5"/>
+    <circle cx="670" cy="190" r="8" fill="#fff" stroke="#64d6e8" stroke-width="3"/>
+    <text x="408" y="328" transform="rotate(-37 408 328)" fill="#82ddff" font-size="20" font-weight="700">Bandwidth roof：P = AI × BW</text>
+    <text x="860" y="168" text-anchor="middle" fill="#83efbc" font-size="20" font-weight="700">Compute roof：Peak FLOP/s</text>
+    <line x1="670" y1="190" x2="670" y2="590" stroke="#608091" stroke-width="2" stroke-dasharray="7 7"/>
+    <text x="690" y="565" fill="#b8ccd5" font-size="15">ridge point</text>
+
+    <circle cx="300" cy="480" r="12" fill="#ffcc66"/>
+    <text x="300" y="450" text-anchor="middle" fill="#ffda83" font-size="17" font-weight="700">向量加</text>
+    <text x="300" y="522" text-anchor="middle" fill="#ffe8b5" font-size="14">低 AI，通常 bandwidth-bound</text>
+
+    <circle cx="530" cy="340" r="12" fill="#c6aaff"/>
+    <text x="530" y="310" text-anchor="middle" fill="#d5c1ff" font-size="17" font-weight="700">未充分复用 GEMM</text>
+    <text x="530" y="382" text-anchor="middle" fill="#e2d5ff" font-size="14">tile / cache 可继续提高 AI</text>
+
+    <circle cx="880" cy="245" r="12" fill="#66e1a9"/>
+    <text x="880" y="285" text-anchor="middle" fill="#8bf0bf" font-size="17" font-weight="700">高复用 Tensor Core GEMM</text>
+    <text x="880" y="315" text-anchor="middle" fill="#c8f5dc" font-size="14">可能接近 compute-bound</text>
+
+    <rect x="785" y="415" width="310" height="115" rx="15" fill="#162d3e" stroke="#47768a"/>
+    <text x="810" y="450" fill="#9bdcf5" font-size="16" font-weight="700">使用时必须注明 byte 来自哪一级</text>
+    <text x="810" y="481" fill="white" font-size="15">HBM / L2 / L1-shared roofline 不同</text>
+    <text x="810" y="508" fill="#b9d3dd" font-size="14">峰值也要匹配 SKU、dtype、dense/sparse</text>
+  </g>
+</svg>

@@ -8,6 +8,8 @@ Sources:
      (``ep_learning/README.md`` → slug ``ep-learning``).
   3) ``nccl_pcie_barex_learning/*.md`` series → posts with slug prefix
      ``nccl-pcie-barex-learning-`` (its ``README.md`` is the series index).
+  4) ``cuda_cute_nvidia_learning/*.md`` series → posts with slug prefix
+     ``cuda-cute-nvidia-learning-`` (its ``README.md`` is the series index).
 
 Convention:
   - Root ``foo_bar.md`` → slug ``foo-bar``.
@@ -51,6 +53,20 @@ SERIES = (
         "slug_prefix": "nccl-pcie-barex-learning",
         "category": "NCCL、PCIe 与 Barex 学习笔记",
         "tags": ["NCCL", "PCIe", "RDMA", "Barex", "blade-kvt", "学习笔记"],
+    },
+    {
+        "directory": "cuda_cute_nvidia_learning",
+        "slug_prefix": "cuda-cute-nvidia-learning",
+        "category": "CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记",
+        "tags": [
+            "CUDA",
+            "CuTe DSL",
+            "CUTLASS",
+            "GPU",
+            "Tensor Core",
+            "NVIDIA",
+            "学习笔记",
+        ],
     },
 )
 

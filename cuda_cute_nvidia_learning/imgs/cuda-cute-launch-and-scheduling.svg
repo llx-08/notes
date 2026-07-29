@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">CUDA 异步 launch 与 SM 调度流程</title>
+  <desc id="desc">CPU 将 kernel launch 入队到 stream，GPU front-end 分派 block，SM 调度 ready warp，event 完成后主机才能确认。</desc>
+  <defs>
+    <marker id="ar" markerWidth="11" markerHeight="11" refX="10" refY="3" orient="auto"><path d="M0 0L11 3 0 6Z" fill="#63d1ff"/></marker>
+  </defs>
+  <rect width="1200" height="650" rx="26" fill="#071522"/>
+  <text x="600" y="52" text-anchor="middle" fill="#f8fdff" font-size="30" font-family="sans-serif" font-weight="700">Kernel launch 返回 ≠ GPU 计算完成</text>
+  <g font-family="sans-serif">
+    <text x="64" y="112" fill="#8bdcff" font-size="20" font-weight="700">Host / CPU</text>
+    <text x="64" y="283" fill="#b9aaff" font-size="20" font-weight="700">CUDA Stream</text>
+    <text x="64" y="454" fill="#7bf0b7" font-size="20" font-weight="700">Device / GPU</text>
+    <line x1="210" y1="105" x2="1130" y2="105" stroke="#315064"/>
+    <line x1="210" y1="276" x2="1130" y2="276" stroke="#413d67"/>
+    <line x1="210" y1="447" x2="1130" y2="447" stroke="#315b4d"/>
+    <line x1="240" y1="82" x2="240" y2="570" stroke="#385569" stroke-dasharray="6 8"/>
+    <line x1="1130" y1="82" x2="1130" y2="570" stroke="#385569" stroke-dasharray="6 8"/>
+    <text x="240" y="604" text-anchor="middle" fill="#8ca6b4">时间早</text>
+    <text x="1130" y="604" text-anchor="middle" fill="#8ca6b4">时间晚</text>
+
+    <rect x="270" y="135" width="190" height="82" rx="13" fill="#17435d" stroke="#66cbff"/>
+    <text x="365" y="167" text-anchor="middle" fill="white" font-size="17">准备参数与 launch</text>
+    <text x="365" y="194" text-anchor="middle" fill="#b8e7fa" font-size="14">CPU API 返回</text>
+    <path d="M390 219 V300" stroke="#63d1ff" stroke-width="3" marker-end="url(#ar)"/>
+
+    <rect x="360" y="310" width="180" height="70" rx="12" fill="#342f61" stroke="#a899ff"/>
+    <text x="450" y="340" text-anchor="middle" fill="white" font-size="16">Kernel A command</text>
+    <text x="450" y="363" text-anchor="middle" fill="#d4ccff" font-size="13">保持 stream 顺序</text>
+    <rect x="565" y="310" width="145" height="70" rx="12" fill="#342f61" stroke="#a899ff"/>
+    <text x="637" y="340" text-anchor="middle" fill="white" font-size="16">Event record</text>
+    <text x="637" y="363" text-anchor="middle" fill="#d4ccff" font-size="13">排在 A 之后</text>
+    <line x1="540" y1="345" x2="555" y2="345" stroke="#a899ff" stroke-width="3" marker-end="url(#ar)"/>
+
+    <path d="M450 382 V468" stroke="#63d1ff" stroke-width="3" marker-end="url(#ar)"/>
+    <rect x="370" y="478" width="205" height="82" rx="13" fill="#205241" stroke="#64e7a7"/>
+    <text x="472" y="509" text-anchor="middle" fill="white" font-size="17">Front-end 分派 Blocks</text>
+    <text x="472" y="536" text-anchor="middle" fill="#bef5d8" font-size="14">SM 资源允许才驻留</text>
+
+    <rect x="610" y="478" width="230" height="82" rx="13" fill="#205241" stroke="#64e7a7"/>
+    <text x="725" y="509" text-anchor="middle" fill="white" font-size="17">Warp scheduler 选 ready warp</text>
+    <text x="725" y="536" text-anchor="middle" fill="#bef5d8" font-size="14">发射到不同执行管线</text>
+    <line x1="577" y1="519" x2="600" y2="519" stroke="#64e7a7" stroke-width="3" marker-end="url(#ar)"/>
+
+    <rect x="875" y="478" width="180" height="82" rx="13" fill="#205241" stroke="#64e7a7"/>
+    <text x="965" y="509" text-anchor="middle" fill="white" font-size="17">Kernel A 完成</text>
+    <text x="965" y="536" text-anchor="middle" fill="#bef5d8" font-size="14">Event 状态 complete</text>
+    <line x1="842" y1="519" x2="865" y2="519" stroke="#64e7a7" stroke-width="3" marker-end="url(#ar)"/>
+
+    <path d="M965 476 V215" stroke="#63d1ff" stroke-width="3" marker-end="url(#ar)"/>
+    <rect x="900" y="135" width="185" height="82" rx="13" fill="#17435d" stroke="#66cbff"/>
+    <text x="992" y="167" text-anchor="middle" fill="white" font-size="17">Event synchronize 返回</text>
+    <text x="992" y="194" text-anchor="middle" fill="#b8e7fa" font-size="14">Host 此时确认完成</text>
+  </g>
+</svg>

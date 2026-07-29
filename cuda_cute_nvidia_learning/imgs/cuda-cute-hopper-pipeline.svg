@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">Hopper TMA 与 WGMMA 多 stage 流水</title>
+  <desc id="desc">Producer warp 发起 TMA 将 A/B tile 搬到 shared memory，consumer warpgroup 等待 barrier 后执行 WGMMA。</desc>
+  <defs><marker id="a" markerWidth="11" markerHeight="11" refX="10" refY="3" orient="auto"><path d="M0 0L11 3 0 6Z" fill="#62d0ff"/></marker></defs>
+  <rect width="1200" height="700" rx="26" fill="#071522"/>
+  <text x="600" y="52" text-anchor="middle" fill="white" font-family="sans-serif" font-size="30" font-weight="700">Hopper GEMM：TMA producer 与 WGMMA consumer 重叠</text>
+  <g font-family="sans-serif">
+    <rect x="60" y="105" width="180" height="470" rx="20" fill="#59431f" stroke="#ffd066"/>
+    <text x="150" y="145" text-anchor="middle" fill="#ffdb82" font-size="22" font-weight="700">HBM</text>
+    <text x="150" y="183" text-anchor="middle" fill="white" font-size="16">A / B tiles</text>
+    <text x="150" y="215" text-anchor="middle" fill="#ffe8b4" font-size="14">K0, K1, K2...</text>
+
+    <rect x="300" y="105" width="230" height="470" rx="20" fill="#173f59" stroke="#65d0ff"/>
+    <text x="415" y="145" text-anchor="middle" fill="#82dcff" font-size="22" font-weight="700">Producer warp</text>
+    <rect x="330" y="190" width="170" height="75" rx="12" fill="#245571"/>
+    <text x="415" y="220" text-anchor="middle" fill="white" font-size="16">发起 TMA</text>
+    <text x="415" y="245" text-anchor="middle" fill="#c4ebfa" font-size="14">tensor descriptor</text>
+    <rect x="330" y="305" width="170" height="75" rx="12" fill="#245571"/>
+    <text x="415" y="335" text-anchor="middle" fill="white" font-size="16">mbarrier</text>
+    <text x="415" y="360" text-anchor="middle" fill="#c4ebfa" font-size="14">empty / ready phase</text>
+    <text x="415" y="465" text-anchor="middle" fill="#bce7f7" font-size="15">少量线程发起搬运</text>
+    <text x="415" y="493" text-anchor="middle" fill="#bce7f7" font-size="15">不逐元素等待 load</text>
+
+    <rect x="590" y="105" width="230" height="470" rx="20" fill="#21493e" stroke="#68e3aa"/>
+    <text x="705" y="145" text-anchor="middle" fill="#84efbd" font-size="22" font-weight="700">Shared stages</text>
+    <rect x="620" y="188" width="170" height="90" rx="12" fill="#306753"/>
+    <text x="705" y="222" text-anchor="middle" fill="white" font-size="17">Stage 0</text>
+    <text x="705" y="250" text-anchor="middle" fill="#c9f6de" font-size="14">A[K0] / B[K0]</text>
+    <rect x="620" y="302" width="170" height="90" rx="12" fill="#2b5e4d"/>
+    <text x="705" y="336" text-anchor="middle" fill="white" font-size="17">Stage 1</text>
+    <text x="705" y="364" text-anchor="middle" fill="#c9f6de" font-size="14">A[K1] / B[K1]</text>
+    <rect x="620" y="416" width="170" height="90" rx="12" fill="#285646"/>
+    <text x="705" y="450" text-anchor="middle" fill="white" font-size="17">Stage 2...</text>
+    <text x="705" y="478" text-anchor="middle" fill="#c9f6de" font-size="14">循环复用</text>
+
+    <rect x="880" y="105" width="260" height="470" rx="20" fill="#332f5a" stroke="#ad9eff"/>
+    <text x="1010" y="145" text-anchor="middle" fill="#c7bbff" font-size="22" font-weight="700">Consumer warpgroup</text>
+    <rect x="920" y="190" width="180" height="75" rx="12" fill="#48417b"/>
+    <text x="1010" y="220" text-anchor="middle" fill="white" font-size="16">wait ready</text>
+    <text x="1010" y="245" text-anchor="middle" fill="#ddd7ff" font-size="14">不能提前读 stage</text>
+    <rect x="920" y="305" width="180" height="75" rx="12" fill="#48417b"/>
+    <text x="1010" y="335" text-anchor="middle" fill="white" font-size="16">WGMMA async</text>
+    <text x="1010" y="360" text-anchor="middle" fill="#ddd7ff" font-size="14">4 warps 协作</text>
+    <rect x="920" y="420" width="180" height="75" rx="12" fill="#48417b"/>
+    <text x="1010" y="450" text-anchor="middle" fill="white" font-size="16">release stage</text>
+    <text x="1010" y="475" text-anchor="middle" fill="#ddd7ff" font-size="14">允许 producer 覆盖</text>
+    <g stroke="#62d0ff" stroke-width="3" marker-end="url(#a)">
+      <path d="M242 230 H318"/>
+      <path d="M532 230 H608"/>
+      <path d="M822 230 H908"/>
+      <path d="M908 458 H822"/>
+    </g>
+    <text x="600" y="625" text-anchor="middle" fill="#d8eaf1" font-size="17">目标：计算 K0 时搬 K1；barrier 的职责是保护“数据到达”和“stage 可复用”两个依赖</text>
+    <text x="600" y="660" text-anchor="middle" fill="#8faab6" font-size="14">图为职责关系；具体 warp 数、stage 数、tile/layout 由 kernel 配置决定</text>
+  </g>
+</svg>

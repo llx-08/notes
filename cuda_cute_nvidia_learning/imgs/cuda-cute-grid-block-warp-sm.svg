@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">CUDA 软件层次映射到 GPU SM</title>
+  <desc id="desc">Grid 包含多个 Block，Block 被划分为 Warp，Warp 的线程在 SM 上调度。</desc>
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#55c2ff"/></marker>
+    <pattern id="threads" width="27" height="27" patternUnits="userSpaceOnUse"><rect width="22" height="22" rx="4" fill="#9adfff"/></pattern>
+  </defs>
+  <rect width="1200" height="720" rx="26" fill="#081522"/>
+  <text x="600" y="52" text-anchor="middle" fill="white" font-size="30" font-family="sans-serif" font-weight="700">软件层次不是硬件部件：Block 会被调度到 SM</text>
+  <g font-family="sans-serif">
+    <rect x="55" y="100" width="435" height="530" rx="20" fill="#102b40" stroke="#4bbcff" stroke-width="2"/>
+    <text x="83" y="140" fill="#72ceff" font-size="23" font-weight="700">CUDA 软件视角</text>
+    <rect x="90" y="175" width="360" height="400" rx="16" fill="#173d57" stroke="#78d4ff"/>
+    <text x="110" y="208" fill="white" font-size="20" font-weight="700">Grid</text>
+    <g fill="#28597a" stroke="#90ddff">
+      <rect x="115" y="235" width="140" height="130" rx="12"/>
+      <rect x="285" y="235" width="140" height="130" rx="12"/>
+      <rect x="115" y="395" width="140" height="130" rx="12"/>
+      <rect x="285" y="395" width="140" height="130" rx="12"/>
+    </g>
+    <g fill="#e8f8ff" font-size="16" text-anchor="middle">
+      <text x="185" y="260">Block 0</text><text x="355" y="260">Block 1</text>
+      <text x="185" y="420">Block 2</text><text x="355" y="420">Block 3</text>
+    </g>
+    <g>
+      <rect x="132" y="280" width="106" height="54" fill="url(#threads)"/>
+      <rect x="302" y="280" width="106" height="54" fill="url(#threads)"/>
+      <rect x="132" y="440" width="106" height="54" fill="url(#threads)"/>
+      <rect x="302" y="440" width="106" height="54" fill="url(#threads)"/>
+    </g>
+    <text x="270" y="608" text-anchor="middle" fill="#b8def0" font-size="16">每个 Block 内 thread 按线性编号每 32 个组成一个 warp</text>
+
+    <rect x="700" y="100" width="445" height="530" rx="20" fill="#252443" stroke="#a899ff" stroke-width="2"/>
+    <text x="728" y="140" fill="#c1b6ff" font-size="23" font-weight="700">GPU 硬件视角</text>
+    <g fill="#353262" stroke="#b9afff">
+      <rect x="735" y="180" width="175" height="175" rx="16"/>
+      <rect x="935" y="180" width="175" height="175" rx="16"/>
+      <rect x="735" y="385" width="175" height="175" rx="16"/>
+      <rect x="935" y="385" width="175" height="175" rx="16"/>
+    </g>
+    <g fill="white" font-size="19" font-weight="700" text-anchor="middle">
+      <text x="822" y="215">SM 0</text><text x="1022" y="215">SM 1</text>
+      <text x="822" y="420">SM 2</text><text x="1022" y="420">SM 3</text>
+    </g>
+    <g fill="#d8d3ff" font-size="15" text-anchor="middle">
+      <text x="822" y="250">warp scheduler</text><text x="822" y="279">register / shared</text><text x="822" y="308">execution pipelines</text>
+      <text x="1022" y="250">warp scheduler</text><text x="1022" y="279">register / shared</text><text x="1022" y="308">execution pipelines</text>
+      <text x="822" y="455">多个 resident Blocks</text><text x="822" y="484">多个 active Warps</text>
+      <text x="1022" y="455">warp 发射指令</text><text x="1022" y="484">CUDA/Tensor Core 执行</text>
+    </g>
+    <text x="922" y="608" text-anchor="middle" fill="#d5d0ff" font-size="16">一个 Block 只驻留在一个 SM；一个 SM 可并驻多个 Block</text>
+  </g>
+  <g stroke="#55c2ff" stroke-width="4" fill="none" marker-end="url(#a)">
+    <path d="M488 280 C575 255 610 240 694 240"/>
+    <path d="M488 445 C585 465 610 480 694 480"/>
+  </g>
+  <text x="600" y="226" text-anchor="middle" fill="#79cefb" font-size="16" font-family="sans-serif">调度</text>
+  <text x="600" y="680" text-anchor="middle" fill="#93afbd" font-size="15" font-family="sans-serif">warp=32 threads 是执行/调度的关键粒度；thread 并不各自拥有一颗“CUDA Core”</text>
+</svg>
