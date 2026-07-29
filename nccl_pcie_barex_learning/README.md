@@ -39,7 +39,7 @@ KVT_ROOT=~/codes/blade-kvt
 | 1 | [01 PCIe 基础](01_pcie_fundamentals.md) | PCIe 如何寻址、组包、流控和计算带宽？ |
 | 2 | [02 GPU 拓扑与 DMA](02_pcie_gpu_topology_and_dma.md) | GPU/NIC 如何绕过 CPU copy？拓扑为什么决定性能？ |
 | 2a | [02a RDMA Verbs 对象模型](02a_rdma_verbs_object_model.md) | Device/PD/MR/QP/CQ 如何组成一条 RDMA 连接？ |
-| 2b | [02b RDMA 操作与完成](02b_rdma_operations_completion_and_reliability.md) | SEND/WRITE/READ、WR/CQ、RNR/retry 的精确语义是什么？ |
+| 2b | [02b RDMA 操作与完成](02b_rdma_operations_completion_and_reliability.md) | WR/WQE/SGE 如何组成任务，SEND/WRITE/READ、CQE 与 retry 如何使用它们？ |
 | 2c | [02c RoCE 与拥塞](02c_roce_congestion_and_tuning.md) | PFC、ECN/DCQCN、BDP 与重传如何影响 GPU 通信？ |
 | 3 | [03 NCCL 架构](03_nccl_architecture.md) | communicator、channel、kernel、proxy 各做什么？ |
 | 3a | [03a 通信组生命周期](03a_communication_group_lifecycle.md) | PyTorch/NCCL/DeepEP 怎样建组？成员能否 grow、shrink 或热加入？ |

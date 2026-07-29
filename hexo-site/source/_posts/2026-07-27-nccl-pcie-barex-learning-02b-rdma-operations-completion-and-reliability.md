@@ -737,7 +737,7 @@ reclaimed：应用/provider 回收 slot 和业务资源
 
 所以看到 `max_send_wr`、`ACCL_TX_DEPTH`、`LOG_MAX_OUTSTANDING_WQE` 时不能认为它们是
 同一个变量。更完整的三层窗口已在
-[02c RoCE 拥塞、BDP 与调优](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/) 第 3.5 节说明。
+[02c RoCE 拥塞、BDP 与调优](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/) 第 8.5 节说明。
 
 ### 1.11 Queue Depth 是怎样设置和查询的
 

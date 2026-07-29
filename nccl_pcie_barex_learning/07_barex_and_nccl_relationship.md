@@ -1,28 +1,6 @@
 # 07. Barex 如何与 NCCL 结合：证据与结论
 
-## 1. 结论先行
-
-对当前 `accl-barex-v1.5.3-1` 与 blade-kvt 版本：
-
-> **没有发现 Barex 作为 NCCL transport/plugin、被 NCCL 调用、或在 blade-kvt 数据路径中调用 NCCL 的证据。**
-
-更准确的关系是：
-
-```text
-                    CUDA / GPU memory
-                         │
-                PCIe / NVLink / NIC
-                  ┌──────┴──────┐
-                  │             │
-                NCCL          Barex
-          collective/P2P     async RPC/RDMA
-                  │             │
-          training/inference  blade-kvt KV transfer
-```
-
-它们共享硬件与部分配置习惯，但当前代码中是并列通信栈。
-
-## 2. 什么才叫 NCCL Net Plugin
+## 1. 什么才叫 NCCL Net Plugin
 
 NCCL Net Plugin 需要实现并导出 NCCL ABI，例如版本化的：
 
@@ -46,6 +24,28 @@ Send / WriteSingle / WriteBatch / ReadBatch / WriteBySgList
 ```
 
 接口形状和生命周期都不相同。
+
+## 2. 基于当前代码的结论
+
+对当前 `accl-barex-v1.5.3-1` 与 blade-kvt 版本：
+
+> **没有发现 Barex 作为 NCCL transport/plugin、被 NCCL 调用、或在 blade-kvt 数据路径中调用 NCCL 的证据。**
+
+更准确的关系是：
+
+```text
+                    CUDA / GPU memory
+                         │
+                PCIe / NVLink / NIC
+                  ┌──────┴──────┐
+                  │             │
+                NCCL          Barex
+          collective/P2P     async RPC/RDMA
+                  │             │
+          training/inference  blade-kvt KV transfer
+```
+
+它们共享硬件与部分配置习惯，但当前代码中是并列通信栈。
 
 ## 3. 代码证据矩阵
 

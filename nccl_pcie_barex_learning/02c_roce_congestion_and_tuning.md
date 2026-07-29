@@ -60,7 +60,127 @@ Ethernet
 
 RoCE 数据常绕过普通 kernel network stack，因此普通 `netstat`/socket counters 未必能看到完整流量；应看 RDMA/NIC hardware counters。
 
-## 3. 为什么低丢包仍重要
+## 3. MTU
+
+常见 RoCE MTU 需同时考虑：
+
+- Ethernet interface MTU；
+- RDMA port active MTU；
+- 路径中所有 switch；
+- VLAN/tunnel overhead。
+
+MTU 不一致可能表现为：
+
+- 小消息可用，大消息失败；
+- retry/timeout；
+- fragment/路由异常；
+- 性能明显低于预期。
+
+Barex `ACCL_IBV_MTU` 最终用于 QP path MTU；不能只改应用变量而忽略 fabric。
+
+## 4. Traffic Class、PCP、DSCP
+
+RoCE QoS 映射链：
+
+```text
+application traffic class
+  → IP DSCP/ECN
+  → switch priority/traffic class
+  → ECN threshold + PFC priority + ETS bandwidth
+```
+
+每跳 trust mode 必须一致。常见事故：
+
+- host 标 DSCP，但 switch trust PCP；
+- RoCE data 与 CNP 进了同一拥塞队列；
+- 一侧开启 PFC priority 3，另一侧映射到 priority 4；
+- Barex 与 NCCL 使用不同 traffic class，争抢或落入 lossy queue。
+
+## 5. PFC：逐优先级暂停
+
+Priority Flow Control（802.1Qbb）按 priority 暂停上游发送：
+
+```text
+queue 达 XOFF
+  → 发 PFC pause
+  → 上游停止该 priority
+queue 降到 XON
+  → 恢复
+```
+
+优点：在 buffer 快耗尽时避免 drop。
+
+代价：
+
+- Head-of-Line blocking；
+- pause propagation；
+- incast 时多端同时被停；
+- 错误配置可造成 PFC storm/deadlock；
+- 长距离下需要按 cable/RTT 预留更多 headroom。
+
+PFC 是 hop-by-hop，不是端到端 transport ACK。
+
+## 6. ECN 与 DCQCN
+
+先展开缩写：
+
+```text
+ECN   = Explicit Congestion Notification，显式拥塞通知
+DCQCN = Data Center Quantized Congestion Notification，
+        面向数据中心 RoCEv2 的端到端拥塞控制方案
+CE    = Congestion Experienced，ECN 字段中的“已经历拥塞”标记
+CNP   = Congestion Notification Packet，接收端返回的拥塞通知包
+```
+
+ECN 在真正丢包前标记拥塞；DCQCN 使用 ECN/CNP 反馈调节发送端 RNIC rate：
+
+```text
+Switch queue 超过 ECN threshold
+  → 标记 CE
+  → receiver 生成 CNP
+  → sender RNIC 降低 rate
+  → 无拥塞后逐步恢复
+```
+
+DCQCN 将 ECN/CNP 反馈与发送端 rate control 结合。
+
+分工：
+
+- ECN/DCQCN：尽早减速，控制持续拥塞。
+- PFC：最后的无损保护，吸收短时 microburst。
+- RC retry：链路/网络仍丢包时的可靠性兜底。
+
+理想状态不是“大量 PFC pause 但 0 drop”，而是 ECN 把队列控制住，PFC 只偶尔触发。
+
+## 7. Incast
+
+多个发送端同时写一个接收端：
+
+```text
+P0 ─┐
+P1 ─┼──► D0/NIC/PCIe/GPU
+P2 ─┤
+P3 ─┘
+```
+
+瓶颈可能在：
+
+- ToR egress；
+- receiver NIC；
+- PCIe uplink；
+- CQ/poll CPU；
+- GPU memory write path。
+
+Barex 提供 `ACCL_INCAST_AVOID/COUNT/THRESHOLD`，大消息 metadata 到达后可限制同时进入 phase 2/3 的数量。见：
+
+```text
+xcontext_impl.cc:1165-1168
+xcontext_impl.cc:1237-1249
+```
+
+它解决的是 endpoint/application admission，不替代 fabric ECN/PFC。
+
+## 8. 为什么低丢包仍重要
 
 RC 对丢包会 retry，但高带宽长 RTT 网络的 BDP 很大：
 
@@ -78,7 +198,7 @@ BDP = bandwidth × RTT
 
 反馈回来前可能已有数百 MB 在途。拥塞点 buffer 远小于此值时，会产生 drop、retry、尾延迟和吞吐塌陷。
 
-### 3.1 先修正一句表述：RTT 是从 us 级“升到”ms 级
+### 8.1 先修正一句表述：RTT 是从 us 级“升到”ms 级
 
 跨地域或跨长距离网络中，应该说：
 
@@ -95,7 +215,7 @@ RTT 从微秒级升高到毫秒级
   → 对小 WQE，还需要更多 outstanding WQEs
 ```
 
-### 3.2 BDP 不是链路能容纳数据的绝对上限
+### 8.2 BDP 不是链路能容纳数据的绝对上限
 
 BDP 更准确的含义是：
 
@@ -194,7 +314,7 @@ BDP(bytes) = bandwidth(bit/s) × RTT(s) / 8
 RTT 从 100 us 增至 10 ms，是 100 倍；要保持 200 Gbit/s，所需 outstanding bytes
 也从约 2.5 MB 增至约 250 MB。
 
-### 3.3 从 BDP bytes 推导所需 WQE 数
+### 8.3 从 BDP bytes 推导所需 WQE 数
 
 如果每个 WQE 平均承载 `S` bytes，第一阶估算是：
 
@@ -234,7 +354,7 @@ window 能覆盖更多 BDP。
 packet，因此还要同时检查 packet/PSN window、firmware outstanding resource、
 QP SQ capacity、CQ progress 和拥塞控制，而不能只计算 WQE 数。
 
-### 3.4 为什么发送窗口不足会限制吞吐
+### 8.4 为什么发送窗口不足会限制吞吐
 
 假设发送端最多允许 `N` 个 WQE 未完成，每个 WQE 为 `S` bytes：
 
@@ -284,7 +404,7 @@ t0+RTT   ACK/completion 开始返回，旧 WQE 被回收
 真正“因为容纳不下而丢包”的队列通常是交换机 egress/ingress buffer 或 RNIC
 packet buffer，而不是发送端 verbs SQ。
 
-### 3.5 “发送队列深度”其实还要拆成三层
+### 8.5 “发送队列深度”其实还要拆成三层
 
 ```text
 业务线程
@@ -342,7 +462,7 @@ effective outstanding window
 地堆在 SQ 中；反过来只调大 firmware window，但 QP `max_send_wr` 或 Barex permit
 仍为 128，也无法得到更大的业务 outstanding。
 
-### 3.6 在 Barex 中会具体发生什么
+### 8.6 在 Barex 中会具体发生什么
 
 当前 Barex RDMA 实现中：
 
@@ -388,7 +508,7 @@ RTT 增大
 
 这条路径解释的是“发送端为什么卡住”。它和远端 RQ 是否充足是两个独立问题。
 
-### 3.7 为什么不是优先调接收队列深度
+### 8.7 为什么不是优先调接收队列深度
 
 verbs RQ 存放的是 Receive WQE，也就是“接收端为某些 operation 预先准备的接收
 描述符”。它不是交换机 packet buffer，也不是通用的 RNIC ingress byte buffer。
@@ -438,7 +558,7 @@ SEND/WRITE_WITH_IMM 到达
 
 三者不能互相替代。
 
-### 3.8 接收队列更深为什么不能阻止一般意义的丢包
+### 8.8 接收队列更深为什么不能阻止一般意义的丢包
 
 一条包到达接收主机前，可能经过：
 
@@ -459,7 +579,7 @@ verbs RQ 只影响最后阶段中 SEND 类 operation 是否有合法 destination
 但那个 RX descriptor ring、socket receive buffer、switch buffer 与 RDMA QP RQ
 不是同一个对象。即使某些实现中它们最终都消耗内存，也不能把参数直接等同。
 
-### 3.9 “队列要容纳反馈生效前的数据”到底是哪一个 buffer
+### 8.9 “队列要容纳反馈生效前的数据”到底是哪一个 buffer
 
 这句话用在拥塞控制/PFC 时，通常指拥塞点的 byte buffer/headroom。
 
@@ -498,7 +618,7 @@ buffer 达到 XOFF
 这个 headroom 与端口速率、MTU、线缆/传播时延等有关。它是 switch/NIC port 的
 packet buffer 配置，不是 verbs `rx_depth`。
 
-### 3.10 增大 outstanding window 的收益与风险
+### 8.10 增大 outstanding window 的收益与风险
 
 收益：
 
@@ -545,7 +665,7 @@ TX/window 限制。如果出现 `RNR_RETRY_EXC_ERR`，才优先检查 RX depth�
 速度和远端 progress。如果 switch queue/drop/PFC/CNP 同时上升，则已经进入网络拥塞
 问题，继续增加 outstanding window 可能适得其反。
 
-### 3.11 “调整 BDP”与“调整窗口以覆盖 BDP”不是一回事
+### 8.11 “调整 BDP”与“调整窗口以覆盖 BDP”不是一回事
 
 BDP 没有一个可以直接写入网卡的 `BDP=500MB` 参数。它是路径属性：
 
@@ -690,53 +810,7 @@ NUMA 1 CPU/memory 上的任务 → 优先 bond2/3
 7. 监控 retry、CNP/ECN、PFC、drop、CQ backlog 和 tail latency；
 8. 选择刚好能稳定覆盖目标 BDP 的窗口，并预留适度余量，而不是直接使用最大值。
 
-## 4. PFC：逐优先级暂停
-
-Priority Flow Control（802.1Qbb）按 priority 暂停上游发送：
-
-```text
-queue 达 XOFF
-  → 发 PFC pause
-  → 上游停止该 priority
-queue 降到 XON
-  → 恢复
-```
-
-优点：在 buffer 快耗尽时避免 drop。
-
-代价：
-
-- Head-of-Line blocking；
-- pause propagation；
-- incast 时多端同时被停；
-- 错误配置可造成 PFC storm/deadlock；
-- 长距离下需要按 cable/RTT 预留更多 headroom。
-
-PFC 是 hop-by-hop，不是端到端 transport ACK。
-
-## 5. ECN 与 DCQCN
-
-ECN 在真正丢包前标记拥塞：
-
-```text
-Switch queue 超过 ECN threshold
-  → 标记 CE
-  → receiver 生成 CNP
-  → sender RNIC 降低 rate
-  → 无拥塞后逐步恢复
-```
-
-DCQCN 将 ECN/CNP 反馈与发送端 rate control 结合。
-
-分工：
-
-- ECN/DCQCN：尽早减速，控制持续拥塞。
-- PFC：最后的无损保护，吸收短时 microburst。
-- RC retry：链路/网络仍丢包时的可靠性兜底。
-
-理想状态不是“大量 PFC pause 但 0 drop”，而是 ECN 把队列控制住，PFC 只偶尔触发。
-
-## 6. Lossy RoCE 不等于不能用
+## 9. Lossy RoCE 不等于不能用
 
 现代 NIC/switch 可以在：
 
@@ -746,70 +820,6 @@ DCQCN 将 ECN/CNP 反馈与发送端 rate control 结合。
 - 支持 OOO/选择性重传的 lossy fabric
 
 等模式运行。可行性取决于硬件、固件和端到端配置。不能把“RoCE 必须绝对无损”写成永久定律；但对不支持现代恢复能力的 RC 路径，drop 代价仍可能很高。
-
-## 7. Incast
-
-多个发送端同时写一个接收端：
-
-```text
-P0 ─┐
-P1 ─┼──► D0/NIC/PCIe/GPU
-P2 ─┤
-P3 ─┘
-```
-
-瓶颈可能在：
-
-- ToR egress；
-- receiver NIC；
-- PCIe uplink；
-- CQ/poll CPU；
-- GPU memory write path。
-
-Barex 提供 `ACCL_INCAST_AVOID/COUNT/THRESHOLD`，大消息 metadata 到达后可限制同时进入 phase 2/3 的数量。见：
-
-```text
-xcontext_impl.cc:1165-1168
-xcontext_impl.cc:1237-1249
-```
-
-它解决的是 endpoint/application admission，不替代 fabric ECN/PFC。
-
-## 8. MTU
-
-常见 RoCE MTU 需同时考虑：
-
-- Ethernet interface MTU；
-- RDMA port active MTU；
-- 路径中所有 switch；
-- VLAN/tunnel overhead。
-
-MTU 不一致可能表现为：
-
-- 小消息可用，大消息失败；
-- retry/timeout；
-- fragment/路由异常；
-- 性能明显低于预期。
-
-Barex `ACCL_IBV_MTU` 最终用于 QP path MTU；不能只改应用变量而忽略 fabric。
-
-## 9. Traffic Class、PCP、DSCP
-
-RoCE QoS 映射链：
-
-```text
-application traffic class
-  → IP DSCP/ECN
-  → switch priority/traffic class
-  → ECN threshold + PFC priority + ETS bandwidth
-```
-
-每跳 trust mode 必须一致。常见事故：
-
-- host 标 DSCP，但 switch trust PCP；
-- RoCE data 与 CNP 进了同一拥塞队列；
-- 一侧开启 PFC priority 3，另一侧映射到 priority 4；
-- Barex 与 NCCL 使用不同 traffic class，争抢或落入 lossy queue。
 
 ## 10. Barex 参数如何对应网络
 
@@ -896,6 +906,8 @@ NCCL NET flows + Barex KV Write flows
 ## 参考
 
 - [NVIDIA Cumulus Linux 4.4：RDMA over Converged Ethernet (RoCE)](https://docs.nvidia.com/networking-ethernet-software/cumulus-linux-44/Layer-1-and-Switch-Ports/Quality-of-Service/RDMA-over-Converged-Ethernet-RoCE/)
+- [NVIDIA：Explicit Congestion Notification (ECN)](https://docs.nvidia.com/networking/display/mlnxofedv586042lts/explicit%2Bcongestion%2Bnotification%2B%28ecn%29)
+- [Microsoft Research：DCQCN / Congestion Control for Large-Scale RDMA Deployments](https://www.microsoft.com/en-us/research/project/dcqcn-data-center-qcn/)
 - [NVIDIA Cumulus：PFC buffer、XOFF/XON 与传播期间继续到达的数据](https://docs.nvidia.com/networking-ethernet-software/cumulus-linux-43/Layer-1-and-Switch-Ports/Buffer-and-Queue-Management/)
 - [NVIDIA Cumulus：Bonding、LAG 与 hash](https://docs.nvidia.com/networking-ethernet-software/cumulus-linux-43/Layer-2/Bonding-Link-Aggregation/)
 - [NVIDIA MLNX_OFED 24.10 文档（PDF，RoCE 章节）](https://docs.nvidia.com/networking/display/nvidia-mlnx-ofed-documentation-v24-10-0-7-0-0-november-2024-ga-release.0%20%28November%202024%20GA%20Release%29.pdf)

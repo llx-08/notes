@@ -13,8 +13,14 @@ tags: [NCCL, PCIe, RDMA, Barex, blade-kvt, 学习笔记]
 
 - 资源创建、权限和内存注册是 slow path，仍由内核 RDMA 子系统管理；
 - 数据发送/接收是 fast path，`libibverbs` provider 通常把 queue/doorbell 映射到用户态；
-- 应用写 WQE、敲 doorbell，RNIC DMA 数据；
-- 完成通过 CQE 返回，应用 polling 或事件驱动消费。
+- 应用提交 WR（Work Request），provider 将其编码为 WQE（Work Queue Element）并敲
+  doorbell，RNIC 再执行 DMA；
+- 完成通过 CQE（Completion Queue Element）返回，应用 polling 或事件驱动消费。
+
+本章先建立 Device/PD/MR/QP/CQ 的对象关系；WR/WQE/SGE 的完整定义、字段和构造过程
+放在下一章
+[02b RDMA 操作与完成](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/)，避免在对象
+尚未建立前展开硬件描述符细节。
 
 Linux 官方文档明确说明：用户态通过 `/dev/infiniband/uverbsN` 创建资源，fast path 通常直接写 mmap 的硬件寄存器，不需要每个操作都 system call。
 

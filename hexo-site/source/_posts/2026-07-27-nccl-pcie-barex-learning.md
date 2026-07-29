@@ -46,7 +46,7 @@ KVT_ROOT=~/codes/blade-kvt
 | 1 | [01 PCIe 基础](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-01-pcie-fundamentals/) | PCIe 如何寻址、组包、流控和计算带宽？ |
 | 2 | [02 GPU 拓扑与 DMA](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02-pcie-gpu-topology-and-dma/) | GPU/NIC 如何绕过 CPU copy？拓扑为什么决定性能？ |
 | 2a | [02a RDMA Verbs 对象模型](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02a-rdma-verbs-object-model/) | Device/PD/MR/QP/CQ 如何组成一条 RDMA 连接？ |
-| 2b | [02b RDMA 操作与完成](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/) | SEND/WRITE/READ、WR/CQ、RNR/retry 的精确语义是什么？ |
+| 2b | [02b RDMA 操作与完成](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/) | WR/WQE/SGE 如何组成任务，SEND/WRITE/READ、CQE 与 retry 如何使用它们？ |
 | 2c | [02c RoCE 与拥塞](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02c-roce-congestion-and-tuning/) | PFC、ECN/DCQCN、BDP 与重传如何影响 GPU 通信？ |
 | 3 | [03 NCCL 架构](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03-nccl-architecture/) | communicator、channel、kernel、proxy 各做什么？ |
 | 3a | [03a 通信组生命周期](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-03a-communication-group-lifecycle/) | PyTorch/NCCL/DeepEP 怎样建组？成员能否 grow、shrink 或热加入？ |

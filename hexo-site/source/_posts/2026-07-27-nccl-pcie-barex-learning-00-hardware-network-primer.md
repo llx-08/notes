@@ -297,6 +297,16 @@ time = data / bandwidth
 
 #### 六个阶段各自在做什么
 
+先给出这一段会使用的四个 verbs 缩写；详细结构和代码放在
+[02b RDMA 操作与完成](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-02b-rdma-operations-completion-and-reliability/)：
+
+```text
+WR  = Work Request：应用提交的一次软件工作请求
+WQE = Work Queue Element：provider 编码后放入设备工作队列的元素
+SGE = Scatter/Gather Element：描述一段 local memory 的 addr/length/lkey
+CQE = Completion Queue Element：RNIC 写回完成队列的结果记录
+```
+
 | 阶段 | 典型工作 | 主要执行者 | 常见可变因素 |
 |---|---|---|---|
 | 准备描述符 | 生成 WR/WQE/SGE，写地址、长度、lkey/rkey、opcode、flags | 应用、通信库、驱动 | 是否分配内存、是否批量、锁竞争 |
