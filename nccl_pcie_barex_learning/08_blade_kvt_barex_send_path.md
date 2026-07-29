@@ -802,6 +802,136 @@ void SyncSemaphore::wait(uint32_t cond) {
 }
 ```
 
+#### 6.5.1 `wait(cond)` 的逐行含义
+
+这里的 `wait` 不是“从 semaphore 取走一个许可”，它是：
+
+> 等待共享水位 `ready_` 严格大于给定条件 `cond`。
+
+逐行理解：
+
+```cpp
+std::unique_lock<std::mutex> lock(c_mutex_);
+```
+
+先取得互斥锁，保证读取 `ready_` 与另一线程修改 `ready_` 不会产生 data race。
+
+```cpp
+if (ready_ <= cond) {
+```
+
+若水位还没有越过等待条件，就必须等待；若已经满足 `ready_ > cond`，函数立即
+返回，线程不会睡眠。
+
+```cpp
+cv_.wait(lock, [this, &cond] {
+  return ready_ > cond;
+});
+```
+
+`condition_variable::wait` 会：
+
+1. 原子地释放 `c_mutex_`，让发布线程能够进入 `release` 修改 `ready_`；
+2. 等待 `notify_all()`，期间该 target 线程不继续执行 `send_data`；
+3. 被通知后重新取得 `c_mutex_`；
+4. 再检查 `ready_ > cond`；
+5. 条件仍不成立就继续等待，成立才返回。
+
+最后的 predicate 检查很重要：`notify_all` 会叫醒等待不同 layer 的线程，而且
+condition variable 允许 spurious wakeup。被叫醒不等于一定可以通过，必须重新
+检查自己的 layer 条件。
+
+对 `data_signal_` 而言，调用是：
+
+```cpp
+data_signal_.wait(layer_i);
+```
+
+所以 `wait` 的参数确实是“这个发送线程想发送的 layer id”：
+
+```text
+wait(0)：等待 ready_ > 0
+wait(1)：等待 ready_ > 1
+wait(2)：等待 ready_ > 2
+```
+
+`wait` 返回后不会把 `ready_` 减一，也不会消耗状态。因此多个 target 线程都能
+通过同一个 `ready_=1` 去发送各自的 layer 0 数据。
+
+#### 6.5.2 `release(cond)` 的逐行含义
+
+带参数的 `release` 是：
+
+```cpp
+uint32_t SyncSemaphore::release(uint32_t cond) {
+  std::unique_lock<std::mutex> lock(c_mutex_);
+  if (ready_ < cond) {
+    ready_ = cond;
+    cv_.notify_all();
+  }
+  return ready_;
+}
+```
+
+它也不是传统含义的“归还一个许可”，而是：
+
+> 把共享水位至少推进到 `cond`，然后通知所有 waiter 重新检查条件。
+
+等价伪代码是：
+
+```text
+ready_ = max(ready_, cond)
+if ready_ 确实向前移动:
+    唤醒所有 waiter
+return ready_
+```
+
+这里最容易被参数名误导。`Step` 的包装函数写成：
+
+```cpp
+uint32_t Step::notify_layer_ready(uint32_t layer_i) {
+  return data_signal_.release(layer_i);
+}
+```
+
+但在真正调用处，传入的不是“刚完成的 layer id”，而是：
+
+```cpp
+const auto next_layer = layer_i + 1;
+step_->notify_layer_ready(next_layer);
+```
+
+所以对 `release` 来说，这个数的准确含义是：
+
+```text
+ready layer count
+= ready 区间 [0, cond) 的右边界
+= 下一层尚未 ready 的 layer id
+```
+
+若为了教学重新命名，这两个接口更像：
+
+```cpp
+wait_until_layer_ready(layer_id);
+advance_ready_layer_count(ready_count);
+```
+
+而不是两个参数含义完全对称的 `wait(layer_i)` / `release(layer_i)`。
+
+此外 `SyncSemaphore` 还有一个无参数重载：
+
+```cpp
+void SyncSemaphore::release() {
+  ready_++;
+  cv_.notify_all();
+}
+```
+
+它用于 `StepGuard::record_signal_`：每收到一次
+`notify_event_record(step_id)`，record 计数加一。`data_signal_` 的 layer-ready
+路径主要使用带参数的 `release(cond)`，直接把水位推进到指定右边界。两者不要
+混淆。
+
 假设 `event[0]` 完成，StepGuard 调用：
 
 ```cpp
