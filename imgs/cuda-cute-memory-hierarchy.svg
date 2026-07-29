@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">GPU 内存层次</title>
+  <desc id="desc">从线程寄存器、SM shared/L1、全 GPU L2 到 HBM，以及主机内存的层次和典型数据流。</desc>
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#69d2ff"/></marker>
+    <linearGradient id="fast" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#65f0b0"/><stop offset="1" stop-color="#64cfff"/></linearGradient>
+  </defs>
+  <rect width="1200" height="760" rx="26" fill="#071522"/>
+  <text x="600" y="52" text-anchor="middle" fill="white" font-family="sans-serif" font-size="30" font-weight="700">GPU 内存层次：越靠近执行管线，容量通常越小、延迟越低</text>
+  <g font-family="sans-serif">
+    <path d="M185 122 H1015 L915 650 H285 Z" fill="#102b3d" stroke="#5dccf9" stroke-width="2"/>
+    <rect x="445" y="135" width="310" height="78" rx="14" fill="#245443" stroke="#69e3aa"/>
+    <text x="600" y="168" text-anchor="middle" fill="#82f0bb" font-size="21" font-weight="700">Register</text>
+    <text x="600" y="194" text-anchor="middle" fill="white" font-size="15">per-thread，最快；过多会限 occupancy，spill → local</text>
+
+    <rect x="375" y="245" width="450" height="86" rx="14" fill="#24435e" stroke="#69d2ff"/>
+    <text x="600" y="279" text-anchor="middle" fill="#8dddff" font-size="21" font-weight="700">Shared Memory / L1</text>
+    <text x="600" y="306" text-anchor="middle" fill="white" font-size="15">per-SM；CTA tile、数据复用、bank / barrier</text>
+
+    <rect x="305" y="365" width="590" height="86" rx="14" fill="#393560" stroke="#ad9cff"/>
+    <text x="600" y="399" text-anchor="middle" fill="#c9bdff" font-size="21" font-weight="700">L2 Cache</text>
+    <text x="600" y="426" text-anchor="middle" fill="white" font-size="15">全 GPU 共享；SM、copy engine、peer/PCIe 请求的重要汇合层</text>
+
+    <rect x="245" y="485" width="710" height="96" rx="14" fill="#59431e" stroke="#ffd166"/>
+    <text x="600" y="521" text-anchor="middle" fill="#ffda7b" font-size="21" font-weight="700">HBM / Global Memory</text>
+    <text x="600" y="550" text-anchor="middle" fill="white" font-size="15">GPU attached DRAM，大容量、高带宽；global 是 CUDA 地址空间概念</text>
+
+    <rect x="90" y="650" width="1020" height="65" rx="14" fill="#373f4c" stroke="#aab9c6"/>
+    <text x="600" y="678" text-anchor="middle" fill="#e4edf2" font-size="20" font-weight="700">Host DRAM / Peer GPU / NIC</text>
+    <text x="600" y="701" text-anchor="middle" fill="#bccbd5" font-size="14">通过 PCIe / NVLink / coherent fabric；pinned memory 可被 DMA，仍不是 GPU 本地 HBM</text>
+
+    <path d="M1045 145 V570" stroke="url(#fast)" stroke-width="8" marker-end="url(#a)"/>
+    <text x="1070" y="220" fill="#78e9b2" font-size="15">低延迟</text>
+    <text x="1070" y="525" fill="#7bd8ff" font-size="15">大容量</text>
+    <text x="80" y="184" fill="#9bd8f2" font-size="15">显式/隐式移动</text>
+    <path d="M150 205 V560" fill="none" stroke="#69d2ff" stroke-width="3" marker-end="url(#a)"/>
+    <text x="53" y="280" fill="#b4dcec" font-size="14">load/store</text>
+    <text x="53" y="330" fill="#b4dcec" font-size="14">cp.async</text>
+    <text x="53" y="380" fill="#b4dcec" font-size="14">TMA</text>
+    <text x="53" y="430" fill="#b4dcec" font-size="14">DMA</text>
+  </g>
+</svg>

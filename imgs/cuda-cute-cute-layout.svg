@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">CuTe Layout 是坐标到地址偏移的映射</title>
+  <desc id="desc">同一个二乘三逻辑矩阵，通过 row-major、column-major 和 padded row 三种 stride 映射到不同 offset。</desc>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#66d1ff"/></marker></defs>
+  <rect width="1200" height="700" rx="26" fill="#071522"/>
+  <text x="600" y="52" text-anchor="middle" fill="white" font-family="sans-serif" font-size="30" font-weight="700">CuTe Layout：逻辑坐标 → 线性 offset</text>
+  <g font-family="sans-serif">
+    <rect x="60" y="110" width="300" height="230" rx="18" fill="#173e57" stroke="#64ceff"/>
+    <text x="210" y="148" text-anchor="middle" fill="#82dcff" font-size="21" font-weight="700">逻辑坐标域 shape=(2,3)</text>
+    <g fill="#255a79" stroke="#87ddff">
+      <rect x="90" y="180" width="75" height="55"/><rect x="165" y="180" width="75" height="55"/><rect x="240" y="180" width="75" height="55"/>
+      <rect x="90" y="235" width="75" height="55"/><rect x="165" y="235" width="75" height="55"/><rect x="240" y="235" width="75" height="55"/>
+    </g>
+    <g fill="white" font-size="15" text-anchor="middle">
+      <text x="127" y="213">(0,0)</text><text x="202" y="213">(0,1)</text><text x="277" y="213">(0,2)</text>
+      <text x="127" y="268">(1,0)</text><text x="202" y="268">(1,1)</text><text x="277" y="268">(1,2)</text>
+    </g>
+
+    <rect x="450" y="90" width="700" height="150" rx="18" fill="#253255" stroke="#9e9cff"/>
+    <text x="480" y="128" fill="#c7c2ff" font-size="21" font-weight="700">Row-major stride=(3,1)</text>
+    <text x="480" y="161" fill="white" font-size="17">offset(i,j) = 3i + j</text>
+    <g fill="#474479" stroke="#b8b0ff">
+      <rect x="720" y="120" width="55" height="50"/><rect x="775" y="120" width="55" height="50"/><rect x="830" y="120" width="55" height="50"/>
+      <rect x="885" y="120" width="55" height="50"/><rect x="940" y="120" width="55" height="50"/><rect x="995" y="120" width="55" height="50"/>
+    </g>
+    <g fill="white" font-size="16" text-anchor="middle"><text x="747" y="151">0</text><text x="802" y="151">1</text><text x="857" y="151">2</text><text x="912" y="151">3</text><text x="967" y="151">4</text><text x="1022" y="151">5</text></g>
+
+    <rect x="450" y="270" width="700" height="150" rx="18" fill="#20493e" stroke="#68e1aa"/>
+    <text x="480" y="308" fill="#83efbc" font-size="21" font-weight="700">Column-major stride=(1,2)</text>
+    <text x="480" y="341" fill="white" font-size="17">offset(i,j) = i + 2j</text>
+    <g fill="#326856" stroke="#8cedbd">
+      <rect x="720" y="300" width="55" height="50"/><rect x="775" y="300" width="55" height="50"/><rect x="830" y="300" width="55" height="50"/>
+      <rect x="885" y="300" width="55" height="50"/><rect x="940" y="300" width="55" height="50"/><rect x="995" y="300" width="55" height="50"/>
+    </g>
+    <g fill="white" font-size="16" text-anchor="middle"><text x="747" y="331">0</text><text x="802" y="331">1</text><text x="857" y="331">2</text><text x="912" y="331">3</text><text x="967" y="331">4</text><text x="1022" y="331">5</text></g>
+    <text x="805" y="385" fill="#c9f5dd" font-size="14">地址 0..5 的坐标顺序变为：(0,0),(1,0),(0,1),(1,1),(0,2),(1,2)</text>
+
+    <rect x="450" y="450" width="700" height="150" rx="18" fill="#56411f" stroke="#ffd065"/>
+    <text x="480" y="488" fill="#ffdc83" font-size="21" font-weight="700">Padded row stride=(4,1)</text>
+    <text x="480" y="521" fill="white" font-size="17">offset(i,j) = 4i + j</text>
+    <g fill="#745b2f" stroke="#ffe09a">
+      <rect x="720" y="480" width="55" height="50"/><rect x="775" y="480" width="55" height="50"/><rect x="830" y="480" width="55" height="50"/>
+      <rect x="885" y="480" width="55" height="50" fill="#3c3d43" stroke-dasharray="4 3"/><rect x="940" y="480" width="55" height="50"/><rect x="995" y="480" width="55" height="50"/><rect x="1050" y="480" width="55" height="50"/>
+    </g>
+    <g fill="white" font-size="16" text-anchor="middle"><text x="747" y="511">0</text><text x="802" y="511">1</text><text x="857" y="511">2</text><text x="912" y="511">pad</text><text x="967" y="511">4</text><text x="1022" y="511">5</text><text x="1077" y="511">6</text></g>
+    <path d="M362 225 H438" stroke="#66d1ff" stroke-width="3" marker-end="url(#a)"/>
+    <text x="400" y="206" text-anchor="middle" fill="#a6e2fa" font-size="15">Layout</text>
+    <text x="600" y="652" text-anchor="middle" fill="#9ab4bf" font-size="15">Tensor = Engine（pointer/storage）+ Layout；只改变 Layout/view 通常不搬运 payload</text>
+  </g>
+</svg>

@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>09. CuTe DSL：Copy、MMA 与 GEMM 流水线 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="09. CuTe DSL：Copy、MMA 与 GEMM 流水线 上一章解决“元素在哪里”；这一章解决： 哪些线程把哪些元素从 HBM 搬到 shared memory？ 哪些线程以什么 fragment 调用 Tensor Core？ 为什么高性能 GEMM 会同时出现 TiledCopy、TiledMMA、pipeline 和 epilogue？ 1. 从 GEMM 伪代码开始 1 C[M,N"><meta property="og:type" content="blog"><meta property="og:title" content="09. CuTe DSL：Copy、MMA 与 GEMM 流水线"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-09-cute-dsl-gemm-pipeline/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="09. CuTe DSL：Copy、MMA 与 GEMM 流水线 上一章解决“元素在哪里”；这一章解决： 哪些线程把哪些元素从 HBM 搬到 shared memory？ 哪些线程以什么 fragment 调用 Tensor Core？ 为什么高性能 GEMM 会同时出现 TiledCopy、TiledMMA、pipeline 和 epilogue？ 1. 从 GEMM 伪代码开始 1 C[M,N"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-hopper-pipeline.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-blackwell-pipeline.svg"><meta property="article:published_time" content="2026-07-29T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-29T13:03:13.804Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="CUDA"><meta property="article:tag" content="CuTe DSL"><meta property="article:tag" content="CUTLASS"><meta property="article:tag" content="GPU"><meta property="article:tag" content="Tensor Core"><meta property="article:tag" content="NVIDIA"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/cuda-cute-hopper-pipeline.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-09-cute-dsl-gemm-pipeline/"},"headline":"09. CuTe DSL：Copy、MMA 与 GEMM 流水线","image":[],"datePublished":"2026-07-29T00:00:00.000Z","dateModified":"2026-07-29T13:03:13.804Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"09. CuTe DSL：Copy、MMA 与 GEMM 流水线 上一章解决“元素在哪里”；这一章解决： 哪些线程把哪些元素从 HBM 搬到 shared memory？ 哪些线程以什么 fragment 调用 Tensor Core？ 为什么高性能 GEMM 会同时出现 TiledCopy、TiledMMA、pipeline 和 epilogue？ 1. 从 GEMM 伪代码开始 1 C[M,N"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-09-cute-dsl-gemm-pipeline/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-29T00:00:00.000Z" title="7/29/2026, 12:00:00 AM">2026-07-29</time>发表</span><span class="level-item"><time dateTime="2026-07-29T13:03:13.804Z" title="7/29/2026, 1:03:13 PM">2026-07-29</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></span><span class="level-item">16 分钟读完 (大约2339个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">09. CuTe DSL：Copy、MMA 与 GEMM 流水线</h1><div class="content"><h1 id="09-CuTe-DSL：Copy、MMA-与-GEMM-流水线"><a href="#09-CuTe-DSL：Copy、MMA-与-GEMM-流水线" class="headerlink" title="09. CuTe DSL：Copy、MMA 与 GEMM 流水线"></a>09. CuTe DSL：Copy、MMA 与 GEMM 流水线</h1><p>上一章解决“元素在哪里”；这一章解决：</p>
+<blockquote>
+<p>哪些线程把哪些元素从 HBM 搬到 shared memory？<br>哪些线程以什么 fragment 调用 Tensor Core？<br>为什么高性能 GEMM 会同时出现 TiledCopy、TiledMMA、pipeline 和 epilogue？</p>
+</blockquote>
+<h2 id="1-从-GEMM-伪代码开始"><a href="#1-从-GEMM-伪代码开始" class="headerlink" title="1. 从 GEMM 伪代码开始"></a>1. 从 GEMM 伪代码开始</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">C[M,N] = A[M,K] × B[K,N]</span><br></pre></td></tr></table></figure>
+
+<p>朴素实现中，每个 <code>C[m,n]</code> 都从 global memory 重复读取 A/B。高性能版本分 tile：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">for each CTA tile (M_tile, N_tile):</span><br><span class="line">    accumulator = 0</span><br><span class="line">    for k_tile in K:</span><br><span class="line">        global A/B → shared A/B</span><br><span class="line">        shared A/B → register/Tensor Core operand</span><br><span class="line">        accumulator += A_tile × B_tile</span><br><span class="line">    epilogue(accumulator) → global C</span><br></pre></td></tr></table></figure>
+
+<p>CuTe 将其中两类协作显式建模：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">搬运：Copy Atom → TiledCopy</span><br><span class="line">计算：MMA Atom  → TiledMMA</span><br></pre></td></tr></table></figure>
+
+<h2 id="2-Atom-是什么"><a href="#2-Atom-是什么" class="headerlink" title="2. Atom 是什么"></a>2. Atom 是什么</h2><p>Atom 可理解为“最小硬件操作 + 完成它所需的数据/线程布局约束”的封装。</p>
+<p>它不一定等于一条源代码语句，也不保证永远只对应一条最终 SASS；应以生成代码为准。</p>
+<h3 id="2-1-Copy-Atom"><a href="#2-1-Copy-Atom" class="headerlink" title="2.1 Copy Atom"></a>2.1 Copy Atom</h3><p>描述一次底层搬运能力，例如：</p>
+<ul>
+<li>普通 scalar/vector load/store；</li>
+<li><code>cp.async</code> 类 global→shared copy；</li>
+<li>Hopper/Blackwell TMA；</li>
+<li>register↔shared 的特定重排。</li>
+</ul>
+<p>Atom 同时关心：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">source address space</span><br><span class="line">destination address space</span><br><span class="line">element/vector type</span><br><span class="line">参与线程</span><br><span class="line">每个线程持有的 value</span><br><span class="line">硬件操作限制</span><br></pre></td></tr></table></figure>
+
+<h3 id="2-2-MMA-Atom"><a href="#2-2-MMA-Atom" class="headerlink" title="2.2 MMA Atom"></a>2.2 MMA Atom</h3><p>描述某种硬件矩阵乘累加操作及 operand/accumulator fragment 的线程映射，例如：</p>
+<ul>
+<li>Ampere <code>mma.sync</code>；</li>
+<li>Hopper <code>wgmma.mma_async</code>；</li>
+<li>Blackwell <code>tcgen05.mma</code>。</li>
+</ul>
+<p>不要把 Atom 只理解为矩阵 shape。相同 <code>m×n×k</code> 仍可能因 dtype、layout、CTA group、<br>accumulator 类型不同而是不同操作。</p>
+<h2 id="3-TiledCopy：把-Copy-Atom-铺到更大的-tile"><a href="#3-TiledCopy：把-Copy-Atom-铺到更大的-tile" class="headerlink" title="3. TiledCopy：把 Copy Atom 铺到更大的 tile"></a>3. TiledCopy：把 Copy Atom 铺到更大的 tile</h2><p>假设 Copy Atom 每次协作覆盖较小片段，而 CTA 要搬 <code>128×K_tile</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">Copy Atom</span><br><span class="line">  × thread arrangement</span><br><span class="line">  × value arrangement</span><br><span class="line">  → TiledCopy</span><br></pre></td></tr></table></figure>
+
+<p>TiledCopy 回答：</p>
+<ul>
+<li>CTA 中哪些 thread/lane 参加；</li>
+<li>thread <code>t</code> 负责 source tile 的哪些坐标；</li>
+<li>destination tile 对应哪些坐标；</li>
+<li>每次能否使用 16 B 等向量搬运；</li>
+<li>如何遍历还未覆盖的 remainder。</li>
+</ul>
+<p>代码阅读时常见步骤是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">构造 TiledCopy</span><br><span class="line">  → 为某个 thread 取得 thread_slice</span><br><span class="line">  → partition_S(source tensor)</span><br><span class="line">  → partition_D(destination tensor)</span><br><span class="line">  → copy(...)</span><br></pre></td></tr></table></figure>
+
+<p><code>partition_S/D</code> 不是立刻搬运，而是根据布局切出“当前线程应该看到的 source/dest<br>view”。实际 <code>copy</code> 才表达搬运。</p>
+<h2 id="4-TiledMMA：把-MMA-Atom-铺到-CTA-tile"><a href="#4-TiledMMA：把-MMA-Atom-铺到-CTA-tile" class="headerlink" title="4. TiledMMA：把 MMA Atom 铺到 CTA tile"></a>4. TiledMMA：把 MMA Atom 铺到 CTA tile</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">MMA Atom</span><br><span class="line">  × warp/warp-group/CTA arrangement</span><br><span class="line">  × value arrangement</span><br><span class="line">  → TiledMMA</span><br></pre></td></tr></table></figure>
+
+<p>它回答：</p>
+<ul>
+<li>CTA 中有多少个 MMA 协作组；</li>
+<li>每组负责 CTA tile 的哪部分；</li>
+<li>A/B fragment 怎样从 shared/TMEM/register 映射到 operand；</li>
+<li>accumulator fragment 如何分布；</li>
+<li>多次 atom 如何覆盖完整 <code>M_tile×N_tile×K_tile</code>。</li>
+</ul>
+<p>常见阅读顺序：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">tiled_mma</span><br><span class="line">  → thread_slice / thread_mma</span><br><span class="line">  → partition_A / partition_B / partition_C</span><br><span class="line">  → gemm / mma</span><br></pre></td></tr></table></figure>
+
+<p>在不同架构中，“thread slice”的硬件含义不同：</p>
+<ul>
+<li><code>mma.sync</code> 常以 warp 为协作单元；</li>
+<li>WGMMA 以 4 个 warp（warpgroup）协作；</li>
+<li>tcgen05 可以由单线程 issue，但操作仍代表 CTA/CTA pair 级数据与 Tensor Core 工作；<br>“单线程发指令”不等于“只有该线程计算整个矩阵且其他资源无关”。</li>
+</ul>
+<h2 id="5-Layout-如何把-Copy-接到-MMA"><a href="#5-Layout-如何把-Copy-接到-MMA" class="headerlink" title="5. Layout 如何把 Copy 接到 MMA"></a>5. Layout 如何把 Copy 接到 MMA</h2><p>高性能 kernel 必须让：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">global layout</span><br><span class="line">  → copy thread/value layout</span><br><span class="line">  → shared-memory layout</span><br><span class="line">  → MMA operand layout</span><br></pre></td></tr></table></figure>
+
+<p>彼此兼容。</p>
+<p>一个典型问题：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">global load 很合并</span><br><span class="line">但写入 shared 的排列使 32 lane 同时打到同一 bank</span><br></pre></td></tr></table></figure>
+
+<p>另一个问题：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">shared layout 适合搬运</span><br><span class="line">但不符合 WGMMA/tcgen05 operand 的 alignment/layout 限制</span><br></pre></td></tr></table></figure>
+
+<p>因此 shared layout 常带 swizzle：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">逻辑上仍是 A[m,k]</span><br><span class="line">物理 bank 映射经过可逆重排</span><br></pre></td></tr></table></figure>
+
+<p>它的目标是同时满足：</p>
+<ul>
+<li>global transaction 合并和向量化；</li>
+<li>shared-memory bank 访问；</li>
+<li>Tensor Core operand layout；</li>
+<li>TMA descriptor 约束。</li>
+</ul>
+<h2 id="6-多-stage-pipeline"><a href="#6-多-stage-pipeline" class="headerlink" title="6. 多 stage pipeline"></a>6. 多 stage pipeline</h2><p><img src="/notes/imgs/cuda-cute-hopper-pipeline.svg" alt="CuTe GEMM 搬运与计算流水"></p>
+<p>若只有一个 shared buffer：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">copy tile 0</span><br><span class="line">wait</span><br><span class="line">compute tile 0</span><br><span class="line">copy tile 1</span><br><span class="line">wait</span><br><span class="line">compute tile 1</span><br></pre></td></tr></table></figure>
+
+<p>搬运和计算很难重叠。双 buffer：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">时间 →</span><br><span class="line"></span><br><span class="line">copy:     K0      K1      K2      K3</span><br><span class="line">compute:          K0      K1      K2      K3</span><br><span class="line">buffer:   S0      S1      S0      S1      S0</span><br></pre></td></tr></table></figure>
+
+<p>一般化为 <code>num_stages</code> 个 buffer：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">producer：</span><br><span class="line">  等待 stage 有空位</span><br><span class="line">  发起下一 K tile 的异步 copy/TMA</span><br><span class="line">  标记 stage ready</span><br><span class="line"></span><br><span class="line">consumer：</span><br><span class="line">  等待 stage ready</span><br><span class="line">  用 Tensor Core 计算</span><br><span class="line">  标记 stage 可复用</span><br></pre></td></tr></table></figure>
+
+<h3 id="6-1-Barrier-在保护什么"><a href="#6-1-Barrier-在保护什么" class="headerlink" title="6.1 Barrier 在保护什么"></a>6.1 Barrier 在保护什么</h3><p>barrier 不只是“所有线程集合”。异步 pipeline 中它维护数据依赖：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">不能在数据到达 shared 前读取</span><br><span class="line">不能在 consumer 尚未用完时覆盖该 stage</span><br></pre></td></tr></table></figure>
+
+<p>缺 barrier/phase 管理可能得到偶发错误结果，而不仅是性能下降。</p>
+<h3 id="6-2-stage-越多越好吗"><a href="#6-2-stage-越多越好吗" class="headerlink" title="6.2 stage 越多越好吗"></a>6.2 stage 越多越好吗</h3><p>不是。更多 stage：</p>
+<ul>
+<li>更能隐藏 HBM/TMA latency；</li>
+<li>占更多 shared memory；</li>
+<li>可能降低每 SM resident CTA 数；</li>
+<li>增加 barrier/state 和寄存器压力；</li>
+<li>K 很小时未必有收益。</li>
+</ul>
+<p>要联合考虑：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">tile size × element bytes × A/B buffers × stages</span><br></pre></td></tr></table></figure>
+
+<p>与每 SM shared-memory 容量。</p>
+<h2 id="7-Hopper：TMA-WGMMA"><a href="#7-Hopper：TMA-WGMMA" class="headerlink" title="7. Hopper：TMA + WGMMA"></a>7. Hopper：TMA + WGMMA</h2><p>Hopper 常见 persistent GEMM 主线：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">producer warp(s)</span><br><span class="line">  → 配置/发起 TMA</span><br><span class="line">  → HBM 到 SMEM</span><br><span class="line">  → mbarrier 到达</span><br><span class="line"></span><br><span class="line">consumer warpgroup</span><br><span class="line">  → wait stage</span><br><span class="line">  → WGMMA 从 SMEM 使用 A/B</span><br><span class="line">  → accumulator registers</span><br><span class="line"></span><br><span class="line">epilogue</span><br><span class="line">  → type conversion / bias / activation</span><br><span class="line">  → global store</span><br></pre></td></tr></table></figure>
+
+<h3 id="7-1-TMA"><a href="#7-1-TMA" class="headerlink" title="7.1 TMA"></a>7.1 TMA</h3><p>TMA（Tensor Memory Accelerator）能按 tensor descriptor 执行多维搬运。CPU/host<br>通常先构造 descriptor；device 上少量线程可发起大块异步搬运。</p>
+<p>它减少显式地址计算和大量线程参与 load 的负担，但仍要求：</p>
+<ul>
+<li>descriptor 正确；</li>
+<li>shape/stride/alignment 合法；</li>
+<li>barrier/transaction bytes 正确；</li>
+<li>shared destination 容量正确。</li>
+</ul>
+<h3 id="7-2-WGMMA"><a href="#7-2-WGMMA" class="headerlink" title="7.2 WGMMA"></a>7.2 WGMMA</h3><p>WGMMA 是 warpgroup-level MMA：</p>
+<ul>
+<li>四个 warp 组成 warpgroup；</li>
+<li>指令异步执行；</li>
+<li>需要 commit/wait 等依赖管理；</li>
+<li>operand/accumulator layout 必须符合指令契约。</li>
+</ul>
+<p>“异步”表示发起与完成分离，不表示可以忽略依赖。</p>
+<h2 id="8-Blackwell：TMA-tcgen05-TMEM"><a href="#8-Blackwell：TMA-tcgen05-TMEM" class="headerlink" title="8. Blackwell：TMA + tcgen05 + TMEM"></a>8. Blackwell：TMA + tcgen05 + TMEM</h2><p><img src="/notes/imgs/cuda-cute-blackwell-pipeline.svg" alt="Blackwell tcgen05/TMEM 流水"></p>
+<p>Blackwell SM100 将主要 accumulator 放到 TMEM：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">A/B:</span><br><span class="line">  HBM → TMA → SMEM</span><br><span class="line"></span><br><span class="line">MMA:</span><br><span class="line">  tcgen05.mma 读取 operand</span><br><span class="line">  accumulator → TMEM</span><br><span class="line"></span><br><span class="line">epilogue:</span><br><span class="line">  tcgen05.ld / copy → registers</span><br><span class="line">  scale/convert/fusion</span><br><span class="line">  store → HBM</span><br></pre></td></tr></table></figure>
+
+<p>CuTe DSL/Collective 层需要表达：</p>
+<ul>
+<li>TMEM allocation/deallocation；</li>
+<li>MMA atom 的 instruction shape/dtype；</li>
+<li>CTA group 1 或 2；</li>
+<li>block-scaled datatype 的 scale-factor layout；</li>
+<li>MMA 与 epilogue 对同一 TMEM accumulator 的次序。</li>
+</ul>
+<h3 id="8-1-CTA-pair"><a href="#8-1-CTA-pair" class="headerlink" title="8.1 CTA pair"></a>8.1 CTA pair</h3><p>CTA group 2 可让两个 CTA 协作某些 tcgen05 操作。它不是把普通 <code>blockIdx.x</code><br>相邻的两个 block 随意配对；kernel、launch 和操作类型都必须符合 cluster/CTA-pair<br>契约。</p>
+<h3 id="8-2-单线程-issue"><a href="#8-2-单线程-issue" class="headerlink" title="8.2 单线程 issue"></a>8.2 单线程 issue</h3><p>Blackwell MMA 指令可由一个线程 issue，意义是减少 instruction issue overhead，<br>不是把 Tensor Core 退化成单线程 ALU。数据 tile、TMEM 和 CTA 同步仍属于更大协作域。</p>
+<h2 id="9-Mainloop-与-Epilogue"><a href="#9-Mainloop-与-Epilogue" class="headerlink" title="9. Mainloop 与 Epilogue"></a>9. Mainloop 与 Epilogue</h2><h3 id="9-1-Mainloop"><a href="#9-1-Mainloop" class="headerlink" title="9.1 Mainloop"></a>9.1 Mainloop</h3><p>负责：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">沿 K 维迭代</span><br><span class="line">A/B 搬运</span><br><span class="line">pipeline/barrier</span><br><span class="line">MMA accumulate</span><br></pre></td></tr></table></figure>
+
+<h3 id="9-2-Epilogue"><a href="#9-2-Epilogue" class="headerlink" title="9.2 Epilogue"></a>9.2 Epilogue</h3><p>负责：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">D = activation(alpha × accumulator + beta × C + bias ...)</span><br></pre></td></tr></table></figure>
+
+<p>以及：</p>
+<ul>
+<li>accumulator 转换成输出 dtype；</li>
+<li>scale/zero-point；</li>
+<li>bias、ReLU/GELU 等融合；</li>
+<li>输出 layout 与 global store；</li>
+<li>split-K reduction 或 auxiliary output。</li>
+</ul>
+<p>Epilogue 不是“收尾小代码”。在低精度 GEMM、窄矩阵或融合算子中，它可能是主要瓶颈。</p>
+<h2 id="10-从-PyTorch-调用-CuTe-kernel"><a href="#10-从-PyTorch-调用-CuTe-kernel" class="headerlink" title="10. 从 PyTorch 调用 CuTe kernel"></a>10. 从 PyTorch 调用 CuTe kernel</h2><p>大体流程：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">Python/PyTorch</span><br><span class="line">  1. 检查 tensor device/dtype/shape/stride/alignment</span><br><span class="line">  2. 取得当前 CUDA stream</span><br><span class="line">  3. 生成或命中 JIT cache</span><br><span class="line">  4. 包装 pointer/layout</span><br><span class="line">  5. launch kernel 到同一 stream</span><br><span class="line">  6. 返回；通常不做全局同步</span><br></pre></td></tr></table></figure>
+
+<p>如果偷偷使用 default stream 或 <code>cudaDeviceSynchronize()</code>，可能破坏框架异步性。<br>如果 kernel launch 后 Python tensor 被释放/复用，也可能产生生命周期问题。</p>
+<h2 id="11-如何阅读一个-CuTe-GEMM"><a href="#11-如何阅读一个-CuTe-GEMM" class="headerlink" title="11. 如何阅读一个 CuTe GEMM"></a>11. 如何阅读一个 CuTe GEMM</h2><p>按下面顺序，不要从最长的 kernel body 开始：</p>
+<ol>
+<li>目标架构：SM80、SM90 还是 SM100；</li>
+<li>input/output dtype、layout 和 alignment；</li>
+<li>problem shape：M/N/K/batch；</li>
+<li>CTA tile 与 cluster shape；</li>
+<li>MMA atom/TiledMMA；</li>
+<li>global→shared 的 copy atom/TiledCopy 或 TMA；</li>
+<li>shared layout/swizzle；</li>
+<li>pipeline stages/barriers；</li>
+<li>accumulator storage；</li>
+<li>epilogue 与输出 copy；</li>
+<li>launch grid/block/shared-memory bytes；</li>
+<li>最后看生成 PTX/SASS 与 profile。</li>
+</ol>
+<h2 id="12-正确性和性能检查表"><a href="#12-正确性和性能检查表" class="headerlink" title="12. 正确性和性能检查表"></a>12. 正确性和性能检查表</h2><p>正确性：</p>
+<ul>
+<li>与 PyTorch/CPU reference 比较；</li>
+<li>对 FP16/BF16/TF32/FP8 使用合理 tolerance；</li>
+<li>覆盖非 tile 整除的边界；</li>
+<li>覆盖不同 alignment/stride；</li>
+<li>使用 compute-sanitizer 检查越界/race。</li>
+</ul>
+<p>性能：</p>
+<ul>
+<li>warmup 后计时；</li>
+<li>使用 CUDA Event，而不是只计 Python wall time；</li>
+<li>报告 M/N/K、dtype、layout、batch；</li>
+<li>与 cuBLAS/CUTLASS reference 比较；</li>
+<li>看 Tensor Core 指令是否真的出现；</li>
+<li>检查 HBM、L2、shared、occupancy 和 pipe utilization；</li>
+<li>分开 kernel latency、JIT compile time 和框架开销。</li>
+</ul>
+<h2 id="13-初学者常见误区"><a href="#13-初学者常见误区" class="headerlink" title="13. 初学者常见误区"></a>13. 初学者常见误区</h2><ul>
+<li><code>TiledCopy</code> 不是“一定执行 TMA”；底层 atom 决定机制；</li>
+<li><code>TiledMMA</code> 不是“一定只发一条指令”；大 tile 会铺多个 atom；</li>
+<li><code>num_stages=4</code> 不表示有 4 个 kernel；</li>
+<li>shared-memory swizzle 不是随机打乱，而是可推导的地址映射；</li>
+<li><code>async</code> 不代表没有 completion/wait；</li>
+<li>GFLOP/s 高不等于数值结果正确；</li>
+<li>能在 GB200 编译不代表在 H20 可运行，SM100 指令不能由 SM90 执行。</li>
+</ul>
+<h2 id="14-官方资料"><a href="#14-官方资料" class="headerlink" title="14. 官方资料"></a>14. 官方资料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/quick_start.html">CuTe DSL Quick Start</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/00_quickstart.html">C++ CuTe Quickstart</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html">Blackwell SM100 GEMMs</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/mma_docs/tcgen05_programming.html">tcgen05 MMA Programming Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/hopper-tuning-guide/">Hopper Tuning Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/blackwell-tuning-guide/">Blackwell Tuning Guide</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>09. CuTe DSL：Copy、MMA 与 GEMM 流水线</p><p><a href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-09-cute-dsl-gemm-pipeline/">https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-09-cute-dsl-gemm-pipeline/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUDA/">CUDA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CuTe-DSL/">CuTe DSL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUTLASS/">CUTLASS</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/GPU/">GPU</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Tensor-Core/">Tensor Core</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NVIDIA/">NVIDIA</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-10-profiling-and-practice/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">10. 性能分析、实验与代码阅读路线</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning/"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">71</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">3</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">18</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-02-sm-cuda-core-tensor-core/">02. SM、CUDA Core、Tensor Core、LSU 与 SFU：GPU 到底靠什么执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-00-beginner-primer/">00. 零基础导读：先建立 GPU、CUDA、Core 与架构的正确地图</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/">01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/">03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-04-gemm-mma-tensor-core/">04. GEMM、MMA 与 Tensor Core：从三重循环到高性能流水线</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">43</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">39</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行 1. CPU launch kernel 时发生了什么 CUDA kernel launch 的语法： 1 kernel&amp;lt;&amp;lt;&amp;lt;grid_dim, block_dim, shared_bytes, stream&amp;gt;&amp;gt;&amp;gt;(args...); 这四组配置分别表示： 参数 含义 g"><meta property="og:type" content="blog"><meta property="og:title" content="01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行 1. CPU launch kernel 时发生了什么 CUDA kernel launch 的语法： 1 kernel&amp;lt;&amp;lt;&amp;lt;grid_dim, block_dim, shared_bytes, stream&amp;gt;&amp;gt;&amp;gt;(args...); 这四组配置分别表示： 参数 含义 g"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-launch-and-scheduling.svg"><meta property="article:published_time" content="2026-07-29T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-29T13:03:13.799Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="CUDA"><meta property="article:tag" content="CuTe DSL"><meta property="article:tag" content="CUTLASS"><meta property="article:tag" content="GPU"><meta property="article:tag" content="Tensor Core"><meta property="article:tag" content="NVIDIA"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/cuda-cute-launch-and-scheduling.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/"},"headline":"01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行","image":[],"datePublished":"2026-07-29T00:00:00.000Z","dateModified":"2026-07-29T13:03:13.799Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行 1. CPU launch kernel 时发生了什么 CUDA kernel launch 的语法： 1 kernel&lt;&lt;&lt;grid_dim, block_dim, shared_bytes, stream&gt;&gt;&gt;(args...); 这四组配置分别表示： 参数 含义 g"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-29T00:00:00.000Z" title="7/29/2026, 12:00:00 AM">2026-07-29</time>发表</span><span class="level-item"><time dateTime="2026-07-29T13:03:13.799Z" title="7/29/2026, 1:03:13 PM">2026-07-29</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></span><span class="level-item">12 分钟读完 (大约1856个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行</h1><div class="content"><h1 id="01-CUDA-执行模型：从-Kernel-Launch-到-SM、Warp-与异步执行"><a href="#01-CUDA-执行模型：从-Kernel-Launch-到-SM、Warp-与异步执行" class="headerlink" title="01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行"></a>01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行</h1><h2 id="1-CPU-launch-kernel-时发生了什么"><a href="#1-CPU-launch-kernel-时发生了什么" class="headerlink" title="1. CPU launch kernel 时发生了什么"></a>1. CPU launch kernel 时发生了什么</h2><p>CUDA kernel launch 的语法：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">kernel&lt;&lt;&lt;grid_dim, block_dim, shared_bytes, stream&gt;&gt;&gt;(args...);</span><br></pre></td></tr></table></figure>
+
+<p>这四组配置分别表示：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>grid_dim</code></td>
+<td>grid 中有多少 block</td>
+</tr>
+<tr>
+<td><code>block_dim</code></td>
+<td>每个 block 有多少 thread</td>
+</tr>
+<tr>
+<td><code>shared_bytes</code></td>
+<td>每个 block 额外申请多少 dynamic shared memory</td>
+</tr>
+<tr>
+<td><code>stream</code></td>
+<td>kernel 被排入哪条 CUDA stream</td>
+</tr>
+</tbody></table>
+<p>典型过程：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">CPU host thread</span><br><span class="line">  → 检查/打包 kernel 参数</span><br><span class="line">  → 向 CUDA runtime/driver 提交 launch</span><br><span class="line">  → launch 进入指定 stream</span><br><span class="line">  → host 调用通常返回</span><br><span class="line"></span><br><span class="line">GPU</span><br><span class="line">  → 按 stream 依赖取得 kernel</span><br><span class="line">  → 将待运行 block 分配到有资源的 SM</span><br><span class="line">  → SM 将 block 内 thread 划分为 warp</span><br><span class="line">  → warp scheduler 持续发射 ready warp 的指令</span><br></pre></td></tr></table></figure>
+
+<p><img src="/notes/imgs/cuda-cute-launch-and-scheduling.svg" alt="CUDA kernel 从 host launch 到 GPU 执行"></p>
+<p>“异步”是相对于 host 而言：host launch 返回，不代表 kernel 已执行完。</p>
+<p>需要 host 确认完成时，可使用：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cudaDeviceSynchronize</span>();</span><br><span class="line"><span class="built_in">cudaStreamSynchronize</span>(stream);</span><br><span class="line"><span class="built_in">cudaEventSynchronize</span>(event);</span><br></pre></td></tr></table></figure>
+
+<p>三者等待范围不同，应选择最小必要范围。</p>
+<h2 id="2-Grid、Block、Thread"><a href="#2-Grid、Block、Thread" class="headerlink" title="2. Grid、Block、Thread"></a>2. Grid、Block、Thread</h2><p>三维索引都是内建变量：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">blockIdx.x, blockIdx.y, blockIdx.z</span><br><span class="line">threadIdx.x, threadIdx.y, threadIdx.z</span><br><span class="line">blockDim.x, blockDim.y, blockDim.z</span><br><span class="line">gridDim.x, gridDim.y, gridDim.z</span><br></pre></td></tr></table></figure>
+
+<p>一维全局索引：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">int</span> i = blockIdx.x * blockDim.x + threadIdx.x;</span><br></pre></td></tr></table></figure>
+
+<p>二维矩阵：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">int</span> row = blockIdx.y * blockDim.y + threadIdx.y;</span><br><span class="line"><span class="type">int</span> col = blockIdx.x * blockDim.x + threadIdx.x;</span><br></pre></td></tr></table></figure>
+
+<p>线性 thread id：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">int</span> tid =</span><br><span class="line">    threadIdx.x</span><br><span class="line">  + blockDim.x * (</span><br><span class="line">        threadIdx.y</span><br><span class="line">      + blockDim.y * threadIdx.z);</span><br></pre></td></tr></table></figure>
+
+<p>warp/lane：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">int</span> warp_id_in_block = tid / warpSize;</span><br><span class="line"><span class="type">int</span> lane_id = tid % warpSize;</span><br></pre></td></tr></table></figure>
+
+<p>当前 NVIDIA CUDA warp size 为 32，但写通用 CUDA 代码时可使用 <code>warpSize</code>。</p>
+<h2 id="3-Block-为什么重要"><a href="#3-Block-为什么重要" class="headerlink" title="3. Block 为什么重要"></a>3. Block 为什么重要</h2><p>Block 不只是 thread 的分组标签，它定义了：</p>
+<ol>
+<li>可以使用 <code>__syncthreads()</code> 的同步范围；</li>
+<li>shared memory 的共享范围与生命周期；</li>
+<li>block 被调度到一个 SM 的资源分配单位；</li>
+<li>registers/shared memory/block slots 对 occupancy 的约束；</li>
+<li>Hopper 以前普通编程模型中最主要的协作边界。</li>
+</ol>
+<p>一个 block 在整个执行期间驻留在同一个 SM。一个 SM 可同时驻留多个 block，<br>条件是资源足够：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">threads/block</span><br><span class="line">warps/block</span><br><span class="line">registers/thread × threads</span><br><span class="line">shared memory/block</span><br><span class="line">最大 resident blocks/warps/threads</span><br></pre></td></tr></table></figure>
+
+<p>任一资源先达到上限，都会限制 resident block 数。</p>
+<h2 id="4-Warp-是什么"><a href="#4-Warp-是什么" class="headerlink" title="4. Warp 是什么"></a>4. Warp 是什么</h2><p>Block 中线性 thread id 相邻的每 32 个 thread 组成一个 warp：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">thread 0..31   → warp 0</span><br><span class="line">thread 32..63  → warp 1</span><br><span class="line">thread 64..95  → warp 2</span><br></pre></td></tr></table></figure>
+
+<p>warp 是 SM 指令调度和 SIMT 执行的重要粒度。程序写的是每个 thread 的语义，<br>硬件通常以 warp 为单位取指、发射。</p>
+<h3 id="4-1-SIMT-不等于简单-SIMD"><a href="#4-1-SIMT-不等于简单-SIMD" class="headerlink" title="4.1 SIMT 不等于简单 SIMD"></a>4.1 SIMT 不等于简单 SIMD</h3><p>SIMT = Single Instruction, Multiple Threads。</p>
+<p>每个 thread 有自己的：</p>
+<ul>
+<li>logical thread id；</li>
+<li>register state；</li>
+<li>predicate；</li>
+<li>地址与控制流语义。</li>
+</ul>
+<p>但同一个 warp 的 thread 通常一起执行同一条指令。发生分支：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (lane_id &lt; <span class="number">16</span>) {</span><br><span class="line">  <span class="built_in">path_a</span>();</span><br><span class="line">} <span class="keyword">else</span> {</span><br><span class="line">  <span class="built_in">path_b</span>();</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+
+<p>若两个路径都要执行，warp 会按 mask 分别执行，产生 divergence。最终耗时通常<br>接近两个路径成本之和，而不是二选一。</p>
+<h3 id="4-2-Independent-Thread-Scheduling"><a href="#4-2-Independent-Thread-Scheduling" class="headerlink" title="4.2 Independent Thread Scheduling"></a>4.2 Independent Thread Scheduling</h3><p>Volta 及之后架构支持更灵活的 thread scheduling，但这不代表 warp 内 thread<br>可以忽略同步和内存可见性。依赖 warp lockstep 的旧代码应使用：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">__syncwarp(mask);</span><br></pre></td></tr></table></figure>
+
+<p>并明确使用 warp-level primitives 的 mask。</p>
+<h2 id="5-SM-如何隐藏延迟"><a href="#5-SM-如何隐藏延迟" class="headerlink" title="5. SM 如何隐藏延迟"></a>5. SM 如何隐藏延迟</h2><p>假设 warp A 发出 global memory load，需要等待数百周期。SM 不一定停下来：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">cycle t:</span><br><span class="line">  warp A 发 load，进入等待</span><br><span class="line"></span><br><span class="line">cycle t+1:</span><br><span class="line">  scheduler 选择 ready warp B</span><br><span class="line"></span><br><span class="line">cycle t+2:</span><br><span class="line">  选择 warp C</span><br><span class="line"></span><br><span class="line">...</span><br><span class="line">warp A 数据返回后重新变为 ready</span><br></pre></td></tr></table></figure>
+
+<p>这叫 latency hiding。它依赖：</p>
+<ul>
+<li>有足够多 resident warp；</li>
+<li>warp 之间有可执行的独立工作；</li>
+<li>register/shared memory 不把 occupancy 压得过低；</li>
+<li>内存系统没有达到吞吐极限。</li>
+</ul>
+<p>高 occupancy 不是最终目标。一个 kernel 即使 occupancy 较低，也可能因为数据<br>复用好、ILP 高、Tensor Core pipeline 饱和而更快。</p>
+<h2 id="6-Warp-Scheduler、Issue-与-Execution-Pipeline"><a href="#6-Warp-Scheduler、Issue-与-Execution-Pipeline" class="headerlink" title="6. Warp Scheduler、Issue 与 Execution Pipeline"></a>6. Warp Scheduler、Issue 与 Execution Pipeline</h2><p>概念路径：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">resident warps</span><br><span class="line">  → scoreboard 判断依赖是否满足</span><br><span class="line">  → warp scheduler 选择 ready warp</span><br><span class="line">  → dispatch/issue 指令</span><br><span class="line">  → 指令进入对应流水线</span><br><span class="line">     ├─ FP32/INT</span><br><span class="line">     ├─ FP64</span><br><span class="line">     ├─ load/store</span><br><span class="line">     ├─ SFU</span><br><span class="line">     └─ Tensor Core</span><br></pre></td></tr></table></figure>
+
+<p>“一个 warp 每周期执行一条指令”不是跨架构永远成立的简单定律。实际受到：</p>
+<ul>
+<li>scheduler 数量；</li>
+<li>指令类型与吞吐；</li>
+<li>dual issue；</li>
+<li>数据依赖；</li>
+<li>operand collector/register bank；</li>
+<li>pipeline latency；</li>
+<li>架构具体实现。</li>
+</ul>
+<p>性能分析应查看对应架构的 Nsight Compute metric，而不是凭 CUDA Core 数量推断。</p>
+<h2 id="7-Stream-的顺序语义"><a href="#7-Stream-的顺序语义" class="headerlink" title="7. Stream 的顺序语义"></a>7. Stream 的顺序语义</h2><p>同一 stream 内：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">kernel A</span><br><span class="line">memcpy B</span><br><span class="line">event record</span><br><span class="line">kernel C</span><br></pre></td></tr></table></figure>
+
+<p>按依赖顺序执行。不同 stream 可能并发，但需要硬件资源与显式依赖允许。</p>
+<p>Event 可用于：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cudaEventRecord</span>(event, producer_stream);</span><br><span class="line"><span class="built_in">cudaStreamWaitEvent</span>(consumer_stream, event);</span><br></pre></td></tr></table></figure>
+
+<p>这建立 device-side stream 依赖，不需要 host 等待。</p>
+<p>对比：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">cudaEventSynchronize(event)</span><br><span class="line">  → host thread 等 GPU</span><br><span class="line"></span><br><span class="line">cudaStreamWaitEvent(stream, event)</span><br><span class="line">  → GPU stream 等另一个 event</span><br><span class="line">  → host 可继续</span><br></pre></td></tr></table></figure>
+
+<h2 id="8-CUDA-Graph"><a href="#8-CUDA-Graph" class="headerlink" title="8. CUDA Graph"></a>8. CUDA Graph</h2><p>频繁 launch 很小的 kernel 时，CPU launch overhead 可能显著。CUDA Graph 将一组<br>操作及依赖捕获/构建成图：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">普通：</span><br><span class="line">CPU launch A → launch B → launch C → ...</span><br><span class="line"></span><br><span class="line">Graph：</span><br><span class="line">构建一次 A→B→C</span><br><span class="line">每轮 launch graph executable</span><br></pre></td></tr></table></figure>
+
+<p>它减少重复的 host launch 开销，但不自动提高单个 kernel 的设备执行效率。</p>
+<p>CuTe DSL、PyTorch compile/cudagraph 与自定义 op 结合时，要明确：</p>
+<ul>
+<li>哪些形状/地址是静态；</li>
+<li>event 是内部依赖还是 external record/wait node；</li>
+<li>graph replay 时 allocation 与 stream 的生命周期。</li>
+</ul>
+<h2 id="9-Thread-Block-Cluster"><a href="#9-Thread-Block-Cluster" class="headerlink" title="9. Thread Block Cluster"></a>9. Thread Block Cluster</h2><p>Hopper 增加可选的 cluster 层次：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">Grid</span><br><span class="line">└─ Cluster</span><br><span class="line">   ├─ Block 0 → SM A</span><br><span class="line">   ├─ Block 1 → SM B</span><br><span class="line">   └─ ...</span><br></pre></td></tr></table></figure>
+
+<p>同一 cluster 的 block 被保证并发调度到一个 GPC 内，可使用：</p>
+<ul>
+<li>cluster synchronization；</li>
+<li>distributed shared memory；</li>
+<li>TMA multicast；</li>
+<li>cluster scope barrier/atomic。</li>
+</ul>
+<p>Cluster 不等于把多个 block 放进同一 SM，而是让多个 SM 上的 block 获得明确的<br>协作与调度保证。</p>
+<h2 id="10-结合-target-p-j-的真实-CuTe-DSL-实验"><a href="#10-结合-target-p-j-的真实-CuTe-DSL-实验" class="headerlink" title="10. 结合 target_p_j 的真实 CuTe DSL 实验"></a>10. 结合 <code>target_p_j</code> 的真实 CuTe DSL 实验</h2><p><code>target_p_j:/dashscope/caches/workspace/llx/CuteDSL/hello.py</code> 使用：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@cute.kernel</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">kernel</span>(<span class="params">exp_id: cutlass.Constexpr</span>):</span><br><span class="line">    bidx, bidy, bidz = cute.arch.block_idx()</span><br><span class="line">    tidx, tidy, tidz = cute.arch.thread_idx()</span><br><span class="line">    warp = cute.arch.warp_idx()</span><br><span class="line">    lane = cute.arch.lane_idx()</span><br><span class="line">    cute.printf(...)</span><br></pre></td></tr></table></figure>
+
+<p>并运行：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">kernel(<span class="number">1</span>).launch(grid=(<span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>), block=(<span class="number">32</span>, <span class="number">1</span>, <span class="number">1</span>))</span><br><span class="line">kernel(<span class="number">2</span>).launch(grid=(<span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>), block=(<span class="number">64</span>, <span class="number">1</span>, <span class="number">1</span>))</span><br><span class="line">kernel(<span class="number">3</span>).launch(grid=(<span class="number">2</span>, <span class="number">1</span>, <span class="number">1</span>), block=(<span class="number">32</span>, <span class="number">1</span>, <span class="number">1</span>))</span><br><span class="line">kernel(<span class="number">4</span>).launch(grid=(<span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>), block=(<span class="number">4</span>, <span class="number">2</span>, <span class="number">1</span>))</span><br></pre></td></tr></table></figure>
+
+<p>实测 <code>block=(64,1,1)</code> 中：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">thread 0..31  → warp 0, lane 0..31</span><br><span class="line">thread 32..63 → warp 1, lane 0..31</span><br></pre></td></tr></table></figure>
+
+<p>输出行顺序不能作为线程执行顺序的保证；device <code>printf</code> 只是调试手段。</p>
+<h2 id="11-常见误区"><a href="#11-常见误区" class="headerlink" title="11. 常见误区"></a>11. 常见误区</h2><h3 id="11-1-Grid-越大一定越快"><a href="#11-1-Grid-越大一定越快" class="headerlink" title="11.1 Grid 越大一定越快"></a>11.1 Grid 越大一定越快</h3><p>不一定。Grid 太小无法填满 GPU；足够大后继续增大只增加总工作量。Block size、<br>资源使用与每线程工作量共同决定性能。</p>
+<h3 id="11-2-一个-thread-对应一个-CUDA-Core"><a href="#11-2-一个-thread-对应一个-CUDA-Core" class="headerlink" title="11.2 一个 thread 对应一个 CUDA Core"></a>11.2 一个 thread 对应一个 CUDA Core</h3><p>不是永久一一映射。CUDA thread 是软件状态，warp 指令在不同周期使用 SM 流水线。</p>
+<h3 id="11-3-Kernel-launch-返回代表计算完成"><a href="#11-3-Kernel-launch-返回代表计算完成" class="headerlink" title="11.3 Kernel launch 返回代表计算完成"></a>11.3 Kernel launch 返回代表计算完成</h3><p>通常不代表。launch 相对 host 异步，错误也可能在后续同步 API 才被观察到。</p>
+<h3 id="11-4-syncthreads-能同步整个-Grid"><a href="#11-4-syncthreads-能同步整个-Grid" class="headerlink" title="11.4 __syncthreads() 能同步整个 Grid"></a>11.4 <code>__syncthreads()</code> 能同步整个 Grid</h3><p>不能。它只同步同一 block。跨 block 需要拆 kernel、cooperative groups 或 cluster<br>等明确机制。</p>
+<h2 id="12-官方资料"><a href="#12-官方资料" class="headerlink" title="12. 官方资料"></a>12. 官方资料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-programming-guide/index.html">CUDA Programming Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/contents.html">CUDA C++ Programming Guide：Thread Hierarchy</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/asynchronous-execution.html">CUDA Programming Guide：Asynchronous Execution</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行</p><p><a href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/">https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUDA/">CUDA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CuTe-DSL/">CuTe DSL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUTLASS/">CUTLASS</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/GPU/">GPU</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Tensor-Core/">Tensor Core</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NVIDIA/">NVIDIA</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-00-beginner-primer/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">00. 零基础导读：先建立 GPU、CUDA、Core 与架构的正确地图</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/"><span class="level-item">03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">71</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">3</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">18</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-02-sm-cuda-core-tensor-core/">02. SM、CUDA Core、Tensor Core、LSU 与 SFU：GPU 到底靠什么执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-00-beginner-primer/">00. 零基础导读：先建立 GPU、CUDA、Core 与架构的正确地图</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/">01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/">03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-04-gemm-mma-tensor-core/">04. GEMM、MMA 与 Tensor Core：从三重循环到高性能流水线</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">43</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">39</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

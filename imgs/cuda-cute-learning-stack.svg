@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">CUDA、GPU 硬件、GEMM 与 CuTe DSL 学习栈</title>
+  <desc id="desc">从应用到 CUDA 编程模型、CuTe 映射、GPU 微架构与硬件资源的分层关系。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071426"/>
+      <stop offset="1" stop-color="#102c3b"/>
+    </linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-opacity=".28"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L10,3 L0,6 Z" fill="#70d6ff"/></marker>
+  </defs>
+  <rect width="1200" height="700" rx="28" fill="url(#bg)"/>
+  <text x="600" y="62" text-anchor="middle" fill="#f7fbff" font-size="32" font-family="sans-serif" font-weight="700">从 CUDA 代码到 NVIDIA GPU 硬件</text>
+  <text x="600" y="94" text-anchor="middle" fill="#9fc3d4" font-size="17" font-family="sans-serif">每一层回答一个不同问题；高性能 kernel 需要把四层接起来</text>
+  <g filter="url(#shadow)" font-family="sans-serif">
+    <rect x="120" y="130" width="960" height="105" rx="18" fill="#183f5b" stroke="#70d6ff" stroke-width="2"/>
+    <text x="160" y="169" fill="#70d6ff" font-size="22" font-weight="700">应用与算法</text>
+    <text x="160" y="202" fill="#edf8ff" font-size="18">PyTorch / Attention / GEMM / Reduce / 通信</text>
+    <text x="820" y="184" fill="#a9d5e8" font-size="16">要算什么？shape / dtype / 数值语义</text>
+
+    <rect x="120" y="260" width="960" height="105" rx="18" fill="#233d64" stroke="#a78bfa" stroke-width="2"/>
+    <text x="160" y="299" fill="#c4b5fd" font-size="22" font-weight="700">CUDA 编程与运行模型</text>
+    <text x="160" y="332" fill="#f4f0ff" font-size="18">grid / block / thread / warp · stream / event · memory space</text>
+    <text x="820" y="314" fill="#d6caff" font-size="16">谁执行？何时执行？数据在哪？</text>
+
+    <rect x="120" y="390" width="960" height="105" rx="18" fill="#244d47" stroke="#5ee4a7" stroke-width="2"/>
+    <text x="160" y="429" fill="#78f0b7" font-size="22" font-weight="700">CuTe / CUTLASS 映射与流水</text>
+    <text x="160" y="462" fill="#effff7" font-size="18">Layout / Tensor · TiledCopy / TiledMMA · TMA / pipeline / epilogue</text>
+    <text x="820" y="444" fill="#b9f4d7" font-size="16">坐标怎样映射到线程、地址和 atom？</text>
+
+    <rect x="120" y="520" width="960" height="105" rx="18" fill="#59411e" stroke="#ffc857" stroke-width="2"/>
+    <text x="160" y="559" fill="#ffd477" font-size="22" font-weight="700">GPU 微架构与物理资源</text>
+    <text x="160" y="592" fill="#fff8e8" font-size="18">SM · CUDA Core · Tensor Core · register / SMEM / L2 / HBM · NVLink</text>
+    <text x="820" y="574" fill="#ffe4aa" font-size="16">最终由哪些硬件管线执行？</text>
+  </g>
+  <g stroke="#70d6ff" stroke-width="3" marker-end="url(#arrow)">
+    <path d="M600 237 V252"/>
+    <path d="M600 367 V382"/>
+    <path d="M600 497 V512"/>
+  </g>
+  <text x="600" y="668" text-anchor="middle" fill="#87a9b8" font-size="15" font-family="sans-serif">先保证语义正确，再验证生成指令，最后用 profile 判断瓶颈</text>
+</svg>

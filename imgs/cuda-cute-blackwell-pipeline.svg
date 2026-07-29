@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">Blackwell tcgen05 与 TMEM 数据流</title>
+  <desc id="desc">A/B 从 HBM 经 TMA 到 shared memory，tcgen05 在 Tensor Core 上计算并把 accumulator 放进 TMEM，epilogue 再读出。</desc>
+  <defs><marker id="a" markerWidth="11" markerHeight="11" refX="10" refY="3" orient="auto"><path d="M0 0L11 3 0 6Z" fill="#64d2ff"/></marker></defs>
+  <rect width="1200" height="700" rx="26" fill="#071522"/>
+  <text x="600" y="52" text-anchor="middle" fill="white" font-family="sans-serif" font-size="30" font-weight="700">Blackwell SM100：tcgen05 把 accumulator 放进专用 TMEM</text>
+  <g font-family="sans-serif">
+    <rect x="55" y="145" width="175" height="360" rx="19" fill="#59431e" stroke="#ffd066"/>
+    <text x="142" y="190" text-anchor="middle" fill="#ffdc82" font-size="23" font-weight="700">HBM</text>
+    <text x="142" y="235" text-anchor="middle" fill="white" font-size="16">A / B</text>
+    <text x="142" y="265" text-anchor="middle" fill="#ffe9b6" font-size="14">global tensors</text>
+    <text x="142" y="390" text-anchor="middle" fill="white" font-size="16">D output</text>
+    <text x="142" y="420" text-anchor="middle" fill="#ffe9b6" font-size="14">epilogue store</text>
+
+    <rect x="285" y="145" width="190" height="360" rx="19" fill="#17415a" stroke="#65d0ff"/>
+    <text x="380" y="190" text-anchor="middle" fill="#83dcff" font-size="23" font-weight="700">TMA</text>
+    <text x="380" y="235" text-anchor="middle" fill="white" font-size="16">多维异步 copy</text>
+    <text x="380" y="265" text-anchor="middle" fill="#c4eafa" font-size="14">descriptor + barrier</text>
+    <text x="380" y="390" text-anchor="middle" fill="white" font-size="16">也可服务输出搬运</text>
+
+    <rect x="530" y="145" width="190" height="360" rx="19" fill="#214b3f" stroke="#68e4aa"/>
+    <text x="625" y="190" text-anchor="middle" fill="#83f0bd" font-size="23" font-weight="700">SMEM</text>
+    <text x="625" y="235" text-anchor="middle" fill="white" font-size="16">A / B stages</text>
+    <text x="625" y="265" text-anchor="middle" fill="#c8f6dd" font-size="14">layout / swizzle</text>
+    <text x="625" y="390" text-anchor="middle" fill="white" font-size="16">CTA / CTA pair 协作</text>
+
+    <rect x="775" y="145" width="190" height="360" rx="19" fill="#352f5d" stroke="#ad9eff"/>
+    <text x="870" y="190" text-anchor="middle" fill="#c8bbff" font-size="23" font-weight="700">5th Gen TC</text>
+    <text x="870" y="235" text-anchor="middle" fill="white" font-size="16">tcgen05.mma</text>
+    <text x="870" y="265" text-anchor="middle" fill="#ddd7ff" font-size="14">可由单 thread issue</text>
+    <text x="870" y="390" text-anchor="middle" fill="white" font-size="16">FP4 / FP6 / FP8</text>
+    <text x="870" y="420" text-anchor="middle" fill="#ddd7ff" font-size="14">block scaling 等</text>
+
+    <rect x="1020" y="145" width="130" height="360" rx="19" fill="#553d1f" stroke="#ffbe55"/>
+    <text x="1085" y="190" text-anchor="middle" fill="#ffd080" font-size="23" font-weight="700">TMEM</text>
+    <text x="1085" y="235" text-anchor="middle" fill="white" font-size="16">accumulator</text>
+    <text x="1085" y="265" text-anchor="middle" fill="#ffe2b4" font-size="14">显式 alloc</text>
+    <text x="1085" y="390" text-anchor="middle" fill="white" font-size="16">tcgen05.ld</text>
+    <text x="1085" y="420" text-anchor="middle" fill="#ffe2b4" font-size="14">→ epilogue</text>
+
+    <g stroke="#64d2ff" stroke-width="3" marker-end="url(#a)">
+      <path d="M232 245 H273"/><path d="M477 245 H518"/><path d="M722 245 H763"/><path d="M967 245 H1008"/>
+      <path d="M1085 508 C1085 575 335 575 220 450"/>
+    </g>
+    <text x="600" y="610" text-anchor="middle" fill="#d8eaf1" font-size="17">TMEM 不是 shared memory：它是 Blackwell Tensor Core 数据路径中的专用存储与协议</text>
+    <text x="600" y="647" text-anchor="middle" fill="#8faab6" font-size="14">单线程 issue 只描述指令发射方式；数据 tile、Tensor Core 工作和同步仍属于 CTA/CTA-pair 协作</text>
+  </g>
+</svg>

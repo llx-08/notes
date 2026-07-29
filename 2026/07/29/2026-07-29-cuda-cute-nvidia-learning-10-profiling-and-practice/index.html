@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>10. 性能分析、实验与代码阅读路线 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="10. 性能分析、实验与代码阅读路线 高性能 GPU 学习最危险的状态是“概念都听过，但不知道程序实际用了什么硬件”。 这一章给出可重复的验证路线。 1. 先定义问题 分析前写下： 1 2 3 4 5 我在测什么 operation？ 输入 shape &amp;#x2F; dtype &amp;#x2F; layout 是什么？ 目标是 latency、throughput 还是 scaling？ 包含不包含 H2D&amp;#x2F;D2H、JI"><meta property="og:type" content="blog"><meta property="og:title" content="10. 性能分析、实验与代码阅读路线"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-10-profiling-and-practice/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="10. 性能分析、实验与代码阅读路线 高性能 GPU 学习最危险的状态是“概念都听过，但不知道程序实际用了什么硬件”。 这一章给出可重复的验证路线。 1. 先定义问题 分析前写下： 1 2 3 4 5 我在测什么 operation？ 输入 shape &amp;#x2F; dtype &amp;#x2F; layout 是什么？ 目标是 latency、throughput 还是 scaling？ 包含不包含 H2D&amp;#x2F;D2H、JI"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-roofline.svg"><meta property="article:published_time" content="2026-07-29T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-29T13:03:13.804Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="CUDA"><meta property="article:tag" content="CuTe DSL"><meta property="article:tag" content="CUTLASS"><meta property="article:tag" content="GPU"><meta property="article:tag" content="Tensor Core"><meta property="article:tag" content="NVIDIA"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/cuda-cute-roofline.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-10-profiling-and-practice/"},"headline":"10. 性能分析、实验与代码阅读路线","image":[],"datePublished":"2026-07-29T00:00:00.000Z","dateModified":"2026-07-29T13:03:13.804Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"10. 性能分析、实验与代码阅读路线 高性能 GPU 学习最危险的状态是“概念都听过，但不知道程序实际用了什么硬件”。 这一章给出可重复的验证路线。 1. 先定义问题 分析前写下： 1 2 3 4 5 我在测什么 operation？ 输入 shape &#x2F; dtype &#x2F; layout 是什么？ 目标是 latency、throughput 还是 scaling？ 包含不包含 H2D&#x2F;D2H、JI"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-10-profiling-and-practice/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-29T00:00:00.000Z" title="7/29/2026, 12:00:00 AM">2026-07-29</time>发表</span><span class="level-item"><time dateTime="2026-07-29T13:03:13.804Z" title="7/29/2026, 1:03:13 PM">2026-07-29</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></span><span class="level-item">13 分钟读完 (大约1978个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">10. 性能分析、实验与代码阅读路线</h1><div class="content"><h1 id="10-性能分析、实验与代码阅读路线"><a href="#10-性能分析、实验与代码阅读路线" class="headerlink" title="10. 性能分析、实验与代码阅读路线"></a>10. 性能分析、实验与代码阅读路线</h1><p>高性能 GPU 学习最危险的状态是“概念都听过，但不知道程序实际用了什么硬件”。<br>这一章给出可重复的验证路线。</p>
+<h2 id="1-先定义问题"><a href="#1-先定义问题" class="headerlink" title="1. 先定义问题"></a>1. 先定义问题</h2><p>分析前写下：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">我在测什么 operation？</span><br><span class="line">输入 shape / dtype / layout 是什么？</span><br><span class="line">目标是 latency、throughput 还是 scaling？</span><br><span class="line">包含不包含 H2D/D2H、JIT、通信和同步？</span><br><span class="line">和哪个 reference 比？</span><br></pre></td></tr></table></figure>
+
+<p>没有这些信息，“快了 20%”往往不可解释。</p>
+<h2 id="2-四层证据"><a href="#2-四层证据" class="headerlink" title="2. 四层证据"></a>2. 四层证据</h2><h3 id="第-1-层：机器与软件"><a href="#第-1-层：机器与软件" class="headerlink" title="第 1 层：机器与软件"></a>第 1 层：机器与软件</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">nvidia-smi</span><br><span class="line">nvidia-smi topo -m</span><br><span class="line">nvidia-smi nvlink -s</span><br><span class="line">nvcc --version</span><br></pre></td></tr></table></figure>
+
+<p>记录：</p>
+<ul>
+<li>GPU SKU、compute capability、driver/toolkit；</li>
+<li>GPU 数量、NUMA、NVLink；</li>
+<li>clocks/power/throttle；</li>
+<li>PyTorch/CUTLASS/CuTe 版本。</li>
+</ul>
+<h3 id="第-2-层：source-与-launch"><a href="#第-2-层：source-与-launch" class="headerlink" title="第 2 层：source 与 launch"></a>第 2 层：source 与 launch</h3><p>确认：</p>
+<ul>
+<li>grid/block；</li>
+<li>dynamic shared-memory bytes；</li>
+<li>stream；</li>
+<li>problem shape；</li>
+<li>dtype；</li>
+<li>是否 warmup；</li>
+<li>是否异步。</li>
+</ul>
+<h3 id="第-3-层：PTX-SASS"><a href="#第-3-层：PTX-SASS" class="headerlink" title="第 3 层：PTX/SASS"></a>第 3 层：PTX/SASS</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">nvcc -<span class="built_in">arch</span>=sm_90 -lineinfo -cubin kernel.cu -o kernel.cubin</span><br><span class="line">cuobjdump --dump-ptx kernel.cubin</span><br><span class="line">nvdisasm kernel.cubin</span><br></pre></td></tr></table></figure>
+
+<p>用途：</p>
+<ul>
+<li>PTX：虚拟 ISA，确认编译器表达了什么；</li>
+<li>SASS：实际机器指令，确认最终发了什么；</li>
+<li><code>-lineinfo</code>：profile 时映射 source 行；</li>
+<li>不要只凭 source 中的 API 名称推断硬件指令。</li>
+</ul>
+<h3 id="第-4-层：profiler-counters-timeline"><a href="#第-4-层：profiler-counters-timeline" class="headerlink" title="第 4 层：profiler counters/timeline"></a>第 4 层：profiler counters/timeline</h3><ul>
+<li>Nsight Systems：CPU、CUDA API、kernel、memcpy、NCCL 的时间线；</li>
+<li>Nsight Compute：单 kernel 的指令、memory、occupancy、stall、roofline；</li>
+<li>CUDA Event：同一 device stream 上的 kernel 时间；</li>
+<li>framework profiler：算子级归因。</li>
+</ul>
+<h2 id="3-正确计时"><a href="#3-正确计时" class="headerlink" title="3. 正确计时"></a>3. 正确计时</h2><p>CUDA launch 通常异步：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">kernel&lt;&lt;&lt;grid, block, <span class="number">0</span>, stream&gt;&gt;&gt;(...);</span><br><span class="line"><span class="comment">// 到这里不表示 kernel 已完成</span></span><br></pre></td></tr></table></figure>
+
+<p>Event 计时：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cudaEventRecord</span>(start, stream);</span><br><span class="line"><span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; repeat; ++i) {</span><br><span class="line">    kernel&lt;&lt;&lt;grid, block, <span class="number">0</span>, stream&gt;&gt;&gt;(...);</span><br><span class="line">}</span><br><span class="line"><span class="built_in">cudaEventRecord</span>(stop, stream);</span><br><span class="line"><span class="built_in">cudaEventSynchronize</span>(stop);</span><br><span class="line"><span class="built_in">cudaEventElapsedTime</span>(&amp;ms, start, stop);</span><br></pre></td></tr></table></figure>
+
+<p>必须：</p>
+<ul>
+<li>先 warmup；</li>
+<li>检查 launch error；</li>
+<li>避免把首次 context/JIT 时间混进去；</li>
+<li>同一 stream 上记录；</li>
+<li>除以 repeat；</li>
+<li>防止编译器/程序不消费结果；</li>
+<li>说明时钟和 power 状态。</li>
+</ul>
+<h2 id="4-Roofline：先判断受计算还是受带宽限制"><a href="#4-Roofline：先判断受计算还是受带宽限制" class="headerlink" title="4. Roofline：先判断受计算还是受带宽限制"></a>4. Roofline：先判断受计算还是受带宽限制</h2><p><img src="/notes/imgs/cuda-cute-roofline.svg" alt="Roofline 判断模型"></p>
+<p>定义 arithmetic intensity：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">AI = 执行的 FLOP / 从目标存储层搬运的 byte</span><br></pre></td></tr></table></figure>
+
+<p>性能上界：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">Performance ≤ min(</span><br><span class="line">    Peak Compute,</span><br><span class="line">    AI × Peak Bandwidth</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+
+<p>例：向量加 <code>C=A+B</code>，每个 FP32 元素：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">读 A：4 B</span><br><span class="line">读 B：4 B</span><br><span class="line">写 C：4 B</span><br><span class="line">计算：1 add ≈ 1 FLOP</span><br><span class="line">AI ≈ 1/12 FLOP/B</span><br></pre></td></tr></table></figure>
+
+<p>通常 HBM bandwidth bound。</p>
+<p>GEMM 通过 tile 重用 A/B，提高 AI，可能转为 Tensor Core compute bound。</p>
+<h3 id="4-1-“byte”来自哪一级"><a href="#4-1-“byte”来自哪一级" class="headerlink" title="4.1 “byte”来自哪一级"></a>4.1 “byte”来自哪一级</h3><p>Roofline 必须注明：</p>
+<ul>
+<li>HBM roofline；</li>
+<li>L2 roofline；</li>
+<li>L1/shared roofline。</li>
+</ul>
+<p>如果数据都命中 L2，用 HBM bytes 解释会误判。</p>
+<h2 id="5-Occupancy-应如何理解"><a href="#5-Occupancy-应如何理解" class="headerlink" title="5. Occupancy 应如何理解"></a>5. Occupancy 应如何理解</h2><p>Occupancy：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">active warps / hardware maximum warps</span><br></pre></td></tr></table></figure>
+
+<p>限制因素：</p>
+<ul>
+<li>threads/block；</li>
+<li>registers/thread；</li>
+<li>shared memory/block；</li>
+<li>block/SM 上限；</li>
+<li>cluster 约束。</li>
+</ul>
+<p>高 occupancy 能帮助隐藏 latency，但不是目标本身：</p>
+<ul>
+<li>大量 register 可减少 spill；</li>
+<li>大 shared tile 可提高数据重用；</li>
+<li>persistent kernel 可能故意只驻留少量 CTA；</li>
+<li>Tensor Core 饱和不必要求 100% occupancy。</li>
+</ul>
+<p>正确问题是：</p>
+<blockquote>
+<p>当前 occupancy 是否足以覆盖这条 pipeline 的 latency，瓶颈究竟在哪里？</p>
+</blockquote>
+<h2 id="6-常见-stall-的解释方式"><a href="#6-常见-stall-的解释方式" class="headerlink" title="6. 常见 stall 的解释方式"></a>6. 常见 stall 的解释方式</h2><p>不要把所有 stall 都解释为 GPU “空闲”：</p>
+<ul>
+<li>memory dependency：等待 load result；</li>
+<li>barrier：等待其他 thread/async transaction；</li>
+<li>not selected：有其他 eligible warp 被选择，可能正常；</li>
+<li>scoreboard dependency：前序指令结果未 ready；</li>
+<li>instruction fetch/dispatch：前端供给；</li>
+<li>math pipe throttle：目标执行管线拥塞；</li>
+<li>MIO/LSU throttle：memory instruction 发射压力。</li>
+</ul>
+<p>要结合：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">eligible warps</span><br><span class="line">issued warps</span><br><span class="line">pipe utilization</span><br><span class="line">memory throughput</span><br><span class="line">cache hit rate</span><br><span class="line">source/SASS</span><br></pre></td></tr></table></figure>
+
+<p>共同判断。</p>
+<h2 id="7-三组入门实验"><a href="#7-三组入门实验" class="headerlink" title="7. 三组入门实验"></a>7. 三组入门实验</h2><h3 id="实验-A：线程层次"><a href="#实验-A：线程层次" class="headerlink" title="实验 A：线程层次"></a>实验 A：线程层次</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">python3 examples/cutedsl/01_thread_hierarchy.py</span><br></pre></td></tr></table></figure>
+
+<p>预测：</p>
+<ul>
+<li>block 32 只有 warp 0；</li>
+<li>block 64 有 warp 0 和 warp 1；</li>
+<li><code>lane = threadIdx.x % 32</code>。</li>
+</ul>
+<h3 id="实验-B：向量加"><a href="#实验-B：向量加" class="headerlink" title="实验 B：向量加"></a>实验 B：向量加</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">nvcc -O3 -<span class="built_in">arch</span>=sm_100 examples/cuda/01_vector_add.cu -o /tmp/vector_add</span><br><span class="line">/tmp/vector_add</span><br></pre></td></tr></table></figure>
+
+<p>在 Hopper 改为 <code>-arch=sm_90</code>。</p>
+<p>修改 <code>block_size</code>：64、128、256、512。记录 latency 与 effective bandwidth：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">effective bytes = N × sizeof(float) × 3</span><br><span class="line">GB/s = effective bytes / seconds / 1e9</span><br></pre></td></tr></table></figure>
+
+<h3 id="实验-C：朴素矩阵乘"><a href="#实验-C：朴素矩阵乘" class="headerlink" title="实验 C：朴素矩阵乘"></a>实验 C：朴素矩阵乘</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">nvcc -O3 -<span class="built_in">arch</span>=sm_100 examples/cuda/02_naive_matmul.cu -o /tmp/naive_matmul</span><br><span class="line">/tmp/naive_matmul</span><br></pre></td></tr></table></figure>
+
+<p>这个 kernel 不应接近 Tensor Core GEMM。用它理解：</p>
+<ul>
+<li>二维 grid/block；</li>
+<li>全局内存重复读取；</li>
+<li>为什么 tiling/shared reuse 重要；</li>
+<li>为什么仅把矩阵尺寸设为 16 倍数不会自动保证 Tensor Core。</li>
+</ul>
+<h2 id="8-从-naive-GEMM-到-CuTe-GEMM-的练习梯子"><a href="#8-从-naive-GEMM-到-CuTe-GEMM-的练习梯子" class="headerlink" title="8. 从 naive GEMM 到 CuTe GEMM 的练习梯子"></a>8. 从 naive GEMM 到 CuTe GEMM 的练习梯子</h2><ol>
+<li>naive CUDA GEMM；</li>
+<li>shared-memory tiled GEMM；</li>
+<li>double-buffer copy/compute；</li>
+<li>WMMA 或简单 MMA；</li>
+<li>CUTLASS profiler 跑官方 kernel；</li>
+<li>CuTe layout 打印与 thread/value partition；</li>
+<li>CuTe DSL scalar/vector copy；</li>
+<li>CuTe DSL tiled copy；</li>
+<li>CuTe DSL GEMM tutorial；</li>
+<li>Hopper TMA/WGMMA；</li>
+<li>Blackwell tcgen05/TMEM；</li>
+<li>PyTorch custom op 与 production shape tuning。</li>
+</ol>
+<p>每一级都保留：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">correctness test</span><br><span class="line">benchmark script</span><br><span class="line">build command</span><br><span class="line">hardware/software metadata</span><br><span class="line">profile screenshot/report</span><br><span class="line">结论和尚未解释的现象</span><br></pre></td></tr></table></figure>
+
+<h2 id="9-架构对照实验"><a href="#9-架构对照实验" class="headerlink" title="9. 架构对照实验"></a>9. 架构对照实验</h2><p>在 <code>ecs</code>（H20/SM90）与 <code>target_p_j</code>（GB200/SM100）比较时：</p>
+<h3 id="可以比较"><a href="#可以比较" class="headerlink" title="可以比较"></a>可以比较</h3><ul>
+<li>相同算法、dtype、shape；</li>
+<li>相同计时边界；</li>
+<li>相同 warmup/repeat；</li>
+<li>每 GPU 的 latency/throughput；</li>
+<li>相同 NCCL collective 的 size curve。</li>
+</ul>
+<h3 id="不能直接归因"><a href="#不能直接归因" class="headerlink" title="不能直接归因"></a>不能直接归因</h3><p>端到端差异不只来自架构：</p>
+<ul>
+<li>SKU SM 数不同；</li>
+<li>HBM 容量/带宽不同；</li>
+<li>CPU、NUMA、PCIe/NVLink 不同；</li>
+<li>driver/toolkit/library 不同；</li>
+<li>power/clock 不同；</li>
+<li>kernel dispatch 可能选了不同算法。</li>
+</ul>
+<p>因此结论应写成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">在这两台具体机器、这些版本和参数下观察到……</span><br></pre></td></tr></table></figure>
+
+<p>而不是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Blackwell 一定比 Hopper 快 X 倍。</span><br></pre></td></tr></table></figure>
+
+<h2 id="10-CUTLASS-profiler"><a href="#10-CUTLASS-profiler" class="headerlink" title="10. CUTLASS profiler"></a>10. CUTLASS profiler</h2><p>若安装/构建了 CUTLASS profiler：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">cutlass_profiler \</span><br><span class="line">  --operation=Gemm \</span><br><span class="line">  --m=4096 --n=4096 --k=4096 \</span><br><span class="line">  --verification-enabled=<span class="literal">true</span></span><br></pre></td></tr></table></figure>
+
+<p>实际 operation 名、dtype、layout 参数取决于构建版本。它适合：</p>
+<ul>
+<li>列出该架构可用 kernel；</li>
+<li>做 correctness verification；</li>
+<li>按 shape/dtype 搜索较优实现；</li>
+<li>查看 runtime、GFLOP/s。</li>
+</ul>
+<p>它不能替代应用 profile：真实模型还有 shape 分布、launch 间隙、融合、通信和内存峰值。</p>
+<h2 id="11-调试工具"><a href="#11-调试工具" class="headerlink" title="11. 调试工具"></a>11. 调试工具</h2><h3 id="11-1-API-error"><a href="#11-1-API-error" class="headerlink" title="11.1 API error"></a>11.1 API error</h3><figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">kernel&lt;&lt;&lt;...&gt;&gt;&gt;(...);</span><br><span class="line">cudaError_t e = <span class="built_in">cudaGetLastError</span>();</span><br><span class="line"><span class="built_in">cudaDeviceSynchronize</span>();</span><br></pre></td></tr></table></figure>
+
+<p>开发期同步便于把错误归因到正确 kernel；性能版本不要无条件保留每 kernel 全局同步。</p>
+<h3 id="11-2-Compute-Sanitizer"><a href="#11-2-Compute-Sanitizer" class="headerlink" title="11.2 Compute Sanitizer"></a>11.2 Compute Sanitizer</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">compute-sanitizer --tool memcheck ./program</span><br><span class="line">compute-sanitizer --tool racecheck ./program</span><br><span class="line">compute-sanitizer --tool synccheck ./program</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>memcheck：越界/misaligned；</li>
+<li>racecheck：shared-memory data hazard；</li>
+<li>synccheck：同步使用问题。</li>
+</ul>
+<p>它会显著减慢程序，适合缩小输入。</p>
+<h3 id="11-3-数值误差"><a href="#11-3-数值误差" class="headerlink" title="11.3 数值误差"></a>11.3 数值误差</h3><p>对 reference：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">abs_error = |actual - expected|</span><br><span class="line">rel_error = abs_error / max(|expected|, epsilon)</span><br></pre></td></tr></table></figure>
+
+<p>误差阈值依赖 dtype、K、累加类型和算法。不能用 FP64 的预期判断 FP8，也不能只检查<br>一个元素。</p>
+<h2 id="12-性能改动的实验纪律"><a href="#12-性能改动的实验纪律" class="headerlink" title="12. 性能改动的实验纪律"></a>12. 性能改动的实验纪律</h2><p>每次只改变一个主要变量：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">baseline</span><br><span class="line">  → 改 tile</span><br><span class="line">  → 改 stage</span><br><span class="line">  → 改 vector width</span><br><span class="line">  → 改 shared layout</span><br><span class="line">  → 改 MMA atom</span><br></pre></td></tr></table></figure>
+
+<p>每次记录：</p>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>git commit</td>
+<td>可复现代码版本</td>
+</tr>
+<tr>
+<td>machine</td>
+<td>ecs / target_p_j</td>
+</tr>
+<tr>
+<td>GPU/driver</td>
+<td>SKU、CC、driver</td>
+</tr>
+<tr>
+<td>toolchain</td>
+<td>CUDA、CuTe/CUTLASS</td>
+</tr>
+<tr>
+<td>workload</td>
+<td>M/N/K、dtype、layout、batch</td>
+</tr>
+<tr>
+<td>config</td>
+<td>tile、stage、cluster</td>
+</tr>
+<tr>
+<td>correctness</td>
+<td>max abs/rel error</td>
+</tr>
+<tr>
+<td>latency</td>
+<td>median/P50/P95</td>
+</tr>
+<tr>
+<td>throughput</td>
+<td>GB/s 或 TFLOP/s</td>
+</tr>
+<tr>
+<td>profile</td>
+<td>关键 counters</td>
+</tr>
+<tr>
+<td>conclusion</td>
+<td>证据支持的解释</td>
+</tr>
+</tbody></table>
+<h2 id="13-建议的代码阅读路线"><a href="#13-建议的代码阅读路线" class="headerlink" title="13. 建议的代码阅读路线"></a>13. 建议的代码阅读路线</h2><h3 id="CUDA-kernel"><a href="#CUDA-kernel" class="headerlink" title="CUDA kernel"></a>CUDA kernel</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">launch site</span><br><span class="line">  → kernel signature</span><br><span class="line">  → grid/block index</span><br><span class="line">  → pointer/stride</span><br><span class="line">  → synchronization</span><br><span class="line">  → memory access</span><br><span class="line">  → computation</span><br><span class="line">  → output/writeback</span><br></pre></td></tr></table></figure>
+
+<h3 id="CuTe-CUTLASS-kernel"><a href="#CuTe-CUTLASS-kernel" class="headerlink" title="CuTe/CUTLASS kernel"></a>CuTe/CUTLASS kernel</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">architecture dispatch</span><br><span class="line">  → problem/input layout</span><br><span class="line">  → tile/cluster shape</span><br><span class="line">  → collective mainloop</span><br><span class="line">  → Copy Atom/TiledCopy</span><br><span class="line">  → MMA Atom/TiledMMA</span><br><span class="line">  → pipeline/barrier</span><br><span class="line">  → epilogue</span><br><span class="line">  → scheduler</span><br><span class="line">  → launch/config</span><br></pre></td></tr></table></figure>
+
+<h3 id="看到陌生名词时"><a href="#看到陌生名词时" class="headerlink" title="看到陌生名词时"></a>看到陌生名词时</h3><ol>
+<li>先在仓库中找定义；</li>
+<li>再找调用点和测试；</li>
+<li>再看对应架构官方文档；</li>
+<li>用最小程序打印/编译；</li>
+<li>最后看 PTX/SASS/profile；</li>
+<li>仍不能确认时明确标注“推测”，不要把推测写成硬件事实。</li>
+</ol>
+<h2 id="14-官方资料"><a href="#14-官方资料" class="headerlink" title="14. 官方资料"></a>14. 官方资料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-programming-guide/index.html">CUDA Programming Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/">CUDA C++ Best Practices Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/nsight-compute/">Nsight Compute Documentation</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/nsight-systems/">Nsight Systems Documentation</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/compute-sanitizer/">Compute Sanitizer</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/">CUTLASS Documentation</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>10. 性能分析、实验与代码阅读路线</p><p><a href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-10-profiling-and-practice/">https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-10-profiling-and-practice/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUDA/">CUDA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CuTe-DSL/">CuTe DSL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUTLASS/">CUTLASS</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/GPU/">GPU</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Tensor-Core/">Tensor Core</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NVIDIA/">NVIDIA</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-08-cute-dsl-layout-tensor/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">08. CuTe DSL：从 Layout、Tensor 到 Python JIT</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-09-cute-dsl-gemm-pipeline/"><span class="level-item">09. CuTe DSL：Copy、MMA 与 GEMM 流水线</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">71</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">3</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">18</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-02-sm-cuda-core-tensor-core/">02. SM、CUDA Core、Tensor Core、LSU 与 SFU：GPU 到底靠什么执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-00-beginner-primer/">00. 零基础导读：先建立 GPU、CUDA、Core 与架构的正确地图</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/">01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/">03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-04-gemm-mma-tensor-core/">04. GEMM、MMA 与 Tensor Core：从三重循环到高性能流水线</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">43</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">39</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

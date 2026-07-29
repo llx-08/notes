@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">CuTe DSL 从 Python 到 GPU 指令的编译路径</title>
+  <desc id="desc">Python source 经过 CuTe JIT、MLIR、NVVM/PTX、ptxas 或 driver JIT 生成 CUBIN SASS 并在 GPU 上执行。</desc>
+  <defs><marker id="a" markerWidth="11" markerHeight="11" refX="10" refY="3" orient="auto"><path d="M0 0L11 3 0 6Z" fill="#65d1ff"/></marker></defs>
+  <rect width="1200" height="650" rx="26" fill="#071522"/>
+  <text x="600" y="52" text-anchor="middle" fill="white" font-family="sans-serif" font-size="30" font-weight="700">CuTe DSL：Python 是前端，最终仍由 GPU 机器指令执行</text>
+  <g font-family="sans-serif">
+    <g>
+      <rect x="50" y="140" width="170" height="150" rx="17" fill="#173e57" stroke="#65d0ff"/>
+      <text x="135" y="182" text-anchor="middle" fill="#83ddff" font-size="20" font-weight="700">Python Source</text>
+      <text x="135" y="218" text-anchor="middle" fill="white" font-size="15">@cute.jit</text>
+      <text x="135" y="247" text-anchor="middle" fill="#c3eafa" font-size="14">Layout / Tensor</text>
+    </g>
+    <g>
+      <rect x="250" y="140" width="170" height="150" rx="17" fill="#263657" stroke="#9da5ff"/>
+      <text x="335" y="182" text-anchor="middle" fill="#c5c9ff" font-size="20" font-weight="700">DSL Frontend</text>
+      <text x="335" y="218" text-anchor="middle" fill="white" font-size="15">source / AST</text>
+      <text x="335" y="247" text-anchor="middle" fill="#d7d9ff" font-size="14">type &amp; static values</text>
+    </g>
+    <g>
+      <rect x="450" y="140" width="170" height="150" rx="17" fill="#30305c" stroke="#ad9eff"/>
+      <text x="535" y="182" text-anchor="middle" fill="#cbbfff" font-size="20" font-weight="700">MLIR / IR</text>
+      <text x="535" y="218" text-anchor="middle" fill="white" font-size="15">CUTLASS DSL</text>
+      <text x="535" y="247" text-anchor="middle" fill="#ded8ff" font-size="14">lowering / optimize</text>
+    </g>
+    <g>
+      <rect x="650" y="140" width="170" height="150" rx="17" fill="#214a3e" stroke="#68e3aa"/>
+      <text x="735" y="182" text-anchor="middle" fill="#83efbc" font-size="20" font-weight="700">NVVM / PTX</text>
+      <text x="735" y="218" text-anchor="middle" fill="white" font-size="15">virtual ISA</text>
+      <text x="735" y="247" text-anchor="middle" fill="#c8f5dc" font-size="14">target SM80/90/100</text>
+    </g>
+    <g>
+      <rect x="850" y="140" width="140" height="150" rx="17" fill="#58421f" stroke="#ffd066"/>
+      <text x="920" y="182" text-anchor="middle" fill="#ffdc82" font-size="20" font-weight="700">ptxas / JIT</text>
+      <text x="920" y="218" text-anchor="middle" fill="white" font-size="15">assemble</text>
+      <text x="920" y="247" text-anchor="middle" fill="#ffe9b5" font-size="14">link / cache</text>
+    </g>
+    <g>
+      <rect x="1020" y="140" width="130" height="150" rx="17" fill="#5b332a" stroke="#ff947c"/>
+      <text x="1085" y="182" text-anchor="middle" fill="#ffad9b" font-size="20" font-weight="700">CUBIN</text>
+      <text x="1085" y="218" text-anchor="middle" fill="white" font-size="15">SASS</text>
+      <text x="1085" y="247" text-anchor="middle" fill="#ffd2ca" font-size="14">machine code</text>
+    </g>
+    <g stroke="#65d1ff" stroke-width="3" marker-end="url(#a)">
+      <path d="M222 215H238"/><path d="M422 215H438"/><path d="M622 215H638"/><path d="M822 215H838"/><path d="M992 215H1008"/>
+    </g>
+    <rect x="140" y="375" width="400" height="155" rx="18" fill="#162d3e" stroke="#4b8098"/>
+    <text x="170" y="414" fill="#89d9fa" font-size="20" font-weight="700">编译期知道</text>
+    <text x="170" y="451" fill="white" font-size="16">静态 shape / dtype / layout / target arch</text>
+    <text x="170" y="483" fill="white" font-size="16">线程映射、atom 选择、部分 Python 元编程</text>
+    <rect x="660" y="375" width="400" height="155" rx="18" fill="#213f36" stroke="#5aa884"/>
+    <text x="690" y="414" fill="#83efbc" font-size="20" font-weight="700">运行期处理</text>
+    <text x="690" y="451" fill="white" font-size="16">device pointer / runtime shape / stream</text>
+    <text x="690" y="483" fill="white" font-size="16">load/store/TMA/MMA 与实际 GPU 调度</text>
+    <path d="M1085 295 V348 H860 V363" fill="none" stroke="#65d1ff" stroke-width="3" marker-end="url(#a)"/>
+    <text x="600" y="594" text-anchor="middle" fill="#91aeba" font-size="15">源码中出现 Tensor Core API 不足以证明最终指令；必要时检查 PTX/SASS 与 profiler</text>
+  </g>
+</svg>

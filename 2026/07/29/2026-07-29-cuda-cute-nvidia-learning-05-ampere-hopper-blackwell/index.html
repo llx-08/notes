@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异 1. 不要把架构比较写成参数背诵 从 kernel 作者角度，三代最重要的问题是： 1 2 3 4 5 6 7 数据如何从 HBM 进入片上？ 谁负责地址生成？ Tensor Core collective 的粒度是什么？ accumulator 放在哪里？ producer&amp;#x2F;consumer 如何同步？ 多"><meta property="og:type" content="blog"><meta property="og:title" content="05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-05-ampere-hopper-blackwell/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异 1. 不要把架构比较写成参数背诵 从 kernel 作者角度，三代最重要的问题是： 1 2 3 4 5 6 7 数据如何从 HBM 进入片上？ 谁负责地址生成？ Tensor Core collective 的粒度是什么？ accumulator 放在哪里？ producer&amp;#x2F;consumer 如何同步？ 多"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-architecture-evolution.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-hopper-pipeline.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-blackwell-pipeline.svg"><meta property="article:published_time" content="2026-07-29T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-29T13:03:13.801Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="CUDA"><meta property="article:tag" content="CuTe DSL"><meta property="article:tag" content="CUTLASS"><meta property="article:tag" content="GPU"><meta property="article:tag" content="Tensor Core"><meta property="article:tag" content="NVIDIA"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/cuda-cute-architecture-evolution.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-05-ampere-hopper-blackwell/"},"headline":"05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异","image":[],"datePublished":"2026-07-29T00:00:00.000Z","dateModified":"2026-07-29T13:03:13.801Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异 1. 不要把架构比较写成参数背诵 从 kernel 作者角度，三代最重要的问题是： 1 2 3 4 5 6 7 数据如何从 HBM 进入片上？ 谁负责地址生成？ Tensor Core collective 的粒度是什么？ accumulator 放在哪里？ producer&#x2F;consumer 如何同步？ 多"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-05-ampere-hopper-blackwell/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-29T00:00:00.000Z" title="7/29/2026, 12:00:00 AM">2026-07-29</time>发表</span><span class="level-item"><time dateTime="2026-07-29T13:03:13.801Z" title="7/29/2026, 1:03:13 PM">2026-07-29</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></span><span class="level-item">11 分钟读完 (大约1707个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异</h1><div class="content"><h1 id="05-NVIDIA-Ampere、Hopper、Blackwell：架构演进与编程差异"><a href="#05-NVIDIA-Ampere、Hopper、Blackwell：架构演进与编程差异" class="headerlink" title="05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异"></a>05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异</h1><h2 id="1-不要把架构比较写成参数背诵"><a href="#1-不要把架构比较写成参数背诵" class="headerlink" title="1. 不要把架构比较写成参数背诵"></a>1. 不要把架构比较写成参数背诵</h2><p>从 kernel 作者角度，三代最重要的问题是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">数据如何从 HBM 进入片上？</span><br><span class="line">谁负责地址生成？</span><br><span class="line">Tensor Core collective 的粒度是什么？</span><br><span class="line">accumulator 放在哪里？</span><br><span class="line">producer/consumer 如何同步？</span><br><span class="line">多个 block 能否协作？</span><br><span class="line">低精度数据如何表示与缩放？</span><br></pre></td></tr></table></figure>
+
+<p><img src="/notes/imgs/cuda-cute-architecture-evolution.svg" alt="Ampere、Hopper、Blackwell 数据流演进"></p>
+<h2 id="2-总览"><a href="#2-总览" class="headerlink" title="2. 总览"></a>2. 总览</h2><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>Ampere（GA100/A100）</th>
+<th>Hopper（GH100/H100/H20）</th>
+<th>Blackwell（GB100/B200/GB200）</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>常见 CC</td>
+<td>8.0</td>
+<td>9.0</td>
+<td>10.0（本文 GB200）</td>
+</tr>
+<tr>
+<td>Tensor Core</td>
+<td>第三代</td>
+<td>第四代</td>
+<td>第五代</td>
+</tr>
+<tr>
+<td>代表 MMA</td>
+<td>warp <code>mma.sync</code></td>
+<td>warpgroup <code>wgmma.mma_async</code></td>
+<td><code>tcgen05.mma</code></td>
+</tr>
+<tr>
+<td>低精度重点</td>
+<td>TF32、BF16、INT8</td>
+<td>FP8、Transformer Engine</td>
+<td>FP4/FP6/FP8、block scaling</td>
+</tr>
+<tr>
+<td>GMEM→SMEM</td>
+<td><code>cp.async</code></td>
+<td>TMA</td>
+<td>TMA/增强 descriptor 与 scale 流水</td>
+</tr>
+<tr>
+<td>accumulator</td>
+<td>主要是 register fragment</td>
+<td>主要是 register fragment</td>
+<td>TMEM</td>
+</tr>
+<tr>
+<td>block 协作</td>
+<td>普通 block 边界</td>
+<td>Thread Block Cluster、DSM</td>
+<td>cluster + CTA pair 等增强</td>
+</tr>
+<tr>
+<td>NVLink</td>
+<td>第三代</td>
+<td>第四代</td>
+<td>第五代</td>
+</tr>
+</tbody></table>
+<p>表格是主线，不代表所有 Ampere/Blackwell 产品支持完全相同的子特性。</p>
+<h2 id="3-Ampere：异步-copy-与新-Tensor-Core-数据类型"><a href="#3-Ampere：异步-copy-与新-Tensor-Core-数据类型" class="headerlink" title="3. Ampere：异步 copy 与新 Tensor Core 数据类型"></a>3. Ampere：异步 copy 与新 Tensor Core 数据类型</h2><h3 id="3-1-第三代-Tensor-Core"><a href="#3-1-第三代-Tensor-Core" class="headerlink" title="3.1 第三代 Tensor Core"></a>3.1 第三代 Tensor Core</h3><p>Ampere GA100 的 Tensor Core 增强包括：</p>
+<ul>
+<li>TF32；</li>
+<li>BF16；</li>
+<li>FP64 Tensor Core；</li>
+<li>INT8/INT4/binary 等；</li>
+<li>2:4 structured sparsity；</li>
+<li>相比 Volta/Turing 更大的/更多 MMA shape。</li>
+</ul>
+<h3 id="3-2-cp-async"><a href="#3-2-cp-async" class="headerlink" title="3.2 cp.async"></a>3.2 <code>cp.async</code></h3><p>Ampere 给 kernel 作者的关键变化：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">旧路径：</span><br><span class="line">GMEM → register → SMEM</span><br><span class="line"></span><br><span class="line">cp.async：</span><br><span class="line">GMEM ───────────→ SMEM</span><br></pre></td></tr></table></figure>
+
+<p>优点：</p>
+<ul>
+<li>避免中间 register；</li>
+<li>允许 copy 与 compute overlap；</li>
+<li>可选择 cache 行为；</li>
+<li>配合 async group/barrier 建立多 stage pipeline。</li>
+</ul>
+<p>但 thread/warp 仍负责循环与地址生成。</p>
+<h3 id="3-3-Split-Arrive-Wait-Barrier"><a href="#3-3-Split-Arrive-Wait-Barrier" class="headerlink" title="3.3 Split Arrive/Wait Barrier"></a>3.3 Split Arrive/Wait Barrier</h3><p>将 barrier 分成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">arrive：我完成了自己的 producer 工作</span><br><span class="line">wait：等所有需要的 arrival/transaction</span><br></pre></td></tr></table></figure>
+
+<p>比所有 thread 同时停在传统 barrier 更适合 producer-consumer pipeline。</p>
+<h3 id="3-4-Ampere-的核心编程图"><a href="#3-4-Ampere-的核心编程图" class="headerlink" title="3.4 Ampere 的核心编程图"></a>3.4 Ampere 的核心编程图</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">warp/thread 计算地址</span><br><span class="line">  → cp.async A/B tile</span><br><span class="line">  → wait group / barrier</span><br><span class="line">  → ldmatrix / register fragment</span><br><span class="line">  → mma.sync</span><br></pre></td></tr></table></figure>
+
+<h2 id="4-Hopper：TMA、WGMMA-与-Cluster"><a href="#4-Hopper：TMA、WGMMA-与-Cluster" class="headerlink" title="4. Hopper：TMA、WGMMA 与 Cluster"></a>4. Hopper：TMA、WGMMA 与 Cluster</h2><h3 id="4-1-TMA"><a href="#4-1-TMA" class="headerlink" title="4.1 TMA"></a>4.1 TMA</h3><p>TMA = Tensor Memory Accelerator。</p>
+<p>Ampere <code>cp.async</code> 仍需要大量 thread 参与地址生成和发 copy。Hopper TMA：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">host/producer 构造 tensor map descriptor</span><br><span class="line">  → 一个 thread 发起 tensor 坐标和 box</span><br><span class="line">  → TMA 硬件完成 1D～5D 地址生成与搬运</span><br><span class="line">  → mbarrier 记录 transaction completion</span><br></pre></td></tr></table></figure>
+
+<p>能力包括：</p>
+<ul>
+<li>GMEM↔SMEM；</li>
+<li>tensor swizzle/interleave；</li>
+<li>out-of-bounds fill；</li>
+<li>cluster multicast；</li>
+<li>某些 reduction/store 模式。</li>
+</ul>
+<h3 id="4-2-WGMMA"><a href="#4-2-WGMMA" class="headerlink" title="4.2 WGMMA"></a>4.2 WGMMA</h3><p>WGMMA = Warpgroup Matrix Multiply-Accumulate。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">warpgroup = 4 warps = 128 threads</span><br></pre></td></tr></table></figure>
+
+<p>Hopper <code>wgmma.mma_async</code>：</p>
+<ul>
+<li>异步发起；</li>
+<li>operand 可通过 shared memory descriptor；</li>
+<li>使用 fence/commit_group/wait_group；</li>
+<li>支持 FP8/FP16/BF16/TF32/INT8 等 shape/type 组合；</li>
+<li>适合 warp-specialized producer/consumer。</li>
+</ul>
+<h3 id="4-3-Thread-Block-Cluster"><a href="#4-3-Thread-Block-Cluster" class="headerlink" title="4.3 Thread Block Cluster"></a>4.3 Thread Block Cluster</h3><p>Hopper 在 Grid 和 Block 间增加 Cluster：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">Cluster</span><br><span class="line">├─ CTA 0 on SM 0</span><br><span class="line">├─ CTA 1 on SM 1</span><br><span class="line">└─ ...</span><br></pre></td></tr></table></figure>
+
+<p>Cluster 内：</p>
+<ul>
+<li>保证 block 并发调度在同一个 GPC；</li>
+<li>cluster sync；</li>
+<li>Distributed Shared Memory；</li>
+<li>TMA multicast。</li>
+</ul>
+<h3 id="4-4-Hopper-的核心编程图"><a href="#4-4-Hopper-的核心编程图" class="headerlink" title="4.4 Hopper 的核心编程图"></a>4.4 Hopper 的核心编程图</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">TMA producer warp</span><br><span class="line">  → descriptor-based GMEM→SMEM</span><br><span class="line">  → mbarrier</span><br><span class="line"></span><br><span class="line">WGMMA consumer warpgroup</span><br><span class="line">  → async MMA</span><br><span class="line">  → commit/wait group</span><br><span class="line"></span><br><span class="line">epilogue</span><br><span class="line">  → store</span><br></pre></td></tr></table></figure>
+
+<p><img src="/notes/imgs/cuda-cute-hopper-pipeline.svg" alt="Hopper TMA 与 WGMMA 流水"></p>
+<h2 id="5-Blackwell：第五代-Tensor-Core、TMEM-与-tcgen05"><a href="#5-Blackwell：第五代-Tensor-Core、TMEM-与-tcgen05" class="headerlink" title="5. Blackwell：第五代 Tensor Core、TMEM 与 tcgen05"></a>5. Blackwell：第五代 Tensor Core、TMEM 与 tcgen05</h2><h3 id="5-1-第五代-Tensor-Core"><a href="#5-1-第五代-Tensor-Core" class="headerlink" title="5.1 第五代 Tensor Core"></a>5.1 第五代 Tensor Core</h3><p>Blackwell 重点包括：</p>
+<ul>
+<li>FP4、FP6、FP8；</li>
+<li>microscaling/block scaling；</li>
+<li>更高 <code>tcgen05</code> throughput；</li>
+<li>新 Tensor Core issue/协作模式；</li>
+<li>面向大模型训练与推理的数据格式链路。</li>
+</ul>
+<h3 id="5-2-TMEM"><a href="#5-2-TMEM" class="headerlink" title="5.2 TMEM"></a>5.2 TMEM</h3><p>TMEM = Tensor Memory，是 Blackwell SM100 的专用片上空间，服务第五代 Tensor<br>Core accumulator（以及特定 operand/数据运动用途）。</p>
+<p>传统 accumulator：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Tensor Core → thread registers</span><br></pre></td></tr></table></figure>
+
+<p>Blackwell：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">Tensor Core → TMEM</span><br><span class="line">  → tcgen05.ld / copy</span><br><span class="line">  → registers / epilogue</span><br></pre></td></tr></table></figure>
+
+<p>收益：</p>
+<ul>
+<li>accumulator 不长期占满普通 register；</li>
+<li>producer/consumer/epilogue 角色更容易解耦；</li>
+<li>大 tile 与 CTA-pair 计算更可行。</li>
+</ul>
+<p>TMEM 不是用户可像 global pointer 一样普通读写的 HBM。它有显式 alloc/dealloc、<br>layout、访问与同步约束。</p>
+<h3 id="5-3-tcgen05"><a href="#5-3-tcgen05" class="headerlink" title="5.3 tcgen05"></a>5.3 <code>tcgen05</code></h3><p>Blackwell SM100 PTX 家族：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">tcgen05.alloc / dealloc</span><br><span class="line">tcgen05.mma</span><br><span class="line">tcgen05.cp</span><br><span class="line">tcgen05.ld / st</span><br><span class="line">tcgen05.wait / fence / commit</span><br></pre></td></tr></table></figure>
+
+<p>CUTLASS 官方文档指出 <code>tcgen05.mma</code> 对不同 dtype 相比 Hopper WGMMA 可提供<br>2×～4×指令吞吐，但实际 kernel 加速仍受数据移动、shape、频率、epilogue 和<br>利用率影响。</p>
+<h3 id="5-4-CTA-Pair"><a href="#5-4-CTA-Pair" class="headerlink" title="5.4 CTA Pair"></a>5.4 CTA Pair</h3><p>Blackwell 某些 <code>tcgen05</code> 模式允许两个相邻 CTA 协作一个 MMA：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">CTA 0 ─┐</span><br><span class="line">       ├─ CTA-pair MMA tile</span><br><span class="line">CTA 1 ─┘</span><br></pre></td></tr></table></figure>
+
+<p>这不是任意两个 block 自动配对，需要使用相应指令模式、launch/cluster 布局和<br>同步协议。</p>
+<h3 id="5-5-Blackwell-核心编程图"><a href="#5-5-Blackwell-核心编程图" class="headerlink" title="5.5 Blackwell 核心编程图"></a>5.5 Blackwell 核心编程图</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">TMA producer</span><br><span class="line">  → A/B/scale → SMEM</span><br><span class="line"></span><br><span class="line">single-thread tcgen05 issue</span><br><span class="line">  → CTA 或 CTA-pair Tensor Core</span><br><span class="line">  → accumulator → TMEM</span><br><span class="line"></span><br><span class="line">epilogue consumer</span><br><span class="line">  → TMEM load/copy</span><br><span class="line">  → cast/activation/store</span><br></pre></td></tr></table></figure>
+
+<p><img src="/notes/imgs/cuda-cute-blackwell-pipeline.svg" alt="Blackwell TMA、tcgen05 与 TMEM 流水"></p>
+<h2 id="6-CUDA-Core-与-Tensor-Core-的架构演进"><a href="#6-CUDA-Core-与-Tensor-Core-的架构演进" class="headerlink" title="6. CUDA Core 与 Tensor Core 的架构演进"></a>6. CUDA Core 与 Tensor Core 的架构演进</h2><p>不能简单说：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Blackwell CUDA Core 一定是 Hopper CUDA Core 的 X 倍</span><br></pre></td></tr></table></figure>
+
+<p>不同 workload 主要瓶颈不同：</p>
+<ul>
+<li>elementwise/softmax 受普通流水线、SFU、memory 影响；</li>
+<li>GEMM 受 Tensor Core 与数据 pipeline 影响；</li>
+<li>decode 小 batch 可能受 latency、launch、memory 限制；</li>
+<li>prefill/训练大 GEMM 更容易接近 Tensor Core throughput；</li>
+<li>MoE 还受通信、dispatch、专家大小影响。</li>
+</ul>
+<p>架构升级的价值常体现在系统协作：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">更快 Tensor Core</span><br><span class="line">+ 更高 HBM bandwidth</span><br><span class="line">+ 更强异步搬运</span><br><span class="line">+ 更大/更灵活片上存储</span><br><span class="line">+ 更快 NVLink</span><br><span class="line">+ 更成熟的 library/kernel</span><br></pre></td></tr></table></figure>
+
+<h2 id="7-NVLink-演进"><a href="#7-NVLink-演进" class="headerlink" title="7. NVLink 演进"></a>7. NVLink 演进</h2><table>
+<thead>
+<tr>
+<th>架构</th>
+<th>NVLink 代际</th>
+<th>编程含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Ampere</td>
+<td>第三代</td>
+<td>GPU P2P、NVSwitch 系统</td>
+</tr>
+<tr>
+<td>Hopper</td>
+<td>第四代</td>
+<td>更高 GPU-GPU bandwidth；HGX H100/H20 常经 NVSwitch</td>
+</tr>
+<tr>
+<td>Blackwell</td>
+<td>第五代</td>
+<td>更大的 NVLink domain 与 rack-scale 系统能力</td>
+</tr>
+</tbody></table>
+<p>CUDA pointer load/store、NCCL collective 等高层接口可透明利用可用互连，但拓扑、<br>peer access、NUMA、NVSwitch 与软件配置仍决定实际路径。</p>
+<h2 id="8-兼容性与编译目标"><a href="#8-兼容性与编译目标" class="headerlink" title="8. 兼容性与编译目标"></a>8. 兼容性与编译目标</h2><p>常见：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Ampere A100</span></span><br><span class="line">nvcc -<span class="built_in">arch</span>=sm_80</span><br><span class="line"></span><br><span class="line"><span class="comment"># Hopper</span></span><br><span class="line">nvcc -<span class="built_in">arch</span>=sm_90</span><br><span class="line"></span><br><span class="line"><span class="comment"># Blackwell SM100</span></span><br><span class="line">nvcc -<span class="built_in">arch</span>=sm_100</span><br></pre></td></tr></table></figure>
+
+<p>架构加速特性可能使用 <code>a</code>/family-specific target 约束，例如某些 PTX 只在特定<br>架构家族保证。Fatbin 可同时包含：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">多份 cubin</span><br><span class="line">+ PTX fallback</span><br></pre></td></tr></table></figure>
+
+<p>部署时要检查：</p>
+<ul>
+<li>driver 是否支持对应 PTX 版本；</li>
+<li>toolkit/ptxas 是否识别目标 SM；</li>
+<li>代码是否使用 architecture-specific 指令；</li>
+<li>library 是否包含对应 kernel；</li>
+<li>JIT 是否发生及首轮开销。</li>
+</ul>
+<h2 id="9-学习时应该抓住的三条主线"><a href="#9-学习时应该抓住的三条主线" class="headerlink" title="9. 学习时应该抓住的三条主线"></a>9. 学习时应该抓住的三条主线</h2><h3 id="9-1-数据移动"><a href="#9-1-数据移动" class="headerlink" title="9.1 数据移动"></a>9.1 数据移动</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">Ampere：thread/warp-driven cp.async</span><br><span class="line">Hopper：descriptor-driven TMA</span><br><span class="line">Blackwell：TMA + TMEM/scale 数据流</span><br></pre></td></tr></table></figure>
+
+<h3 id="9-2-Tensor-Core-collective"><a href="#9-2-Tensor-Core-collective" class="headerlink" title="9.2 Tensor Core collective"></a>9.2 Tensor Core collective</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">Ampere：warp MMA</span><br><span class="line">Hopper：warpgroup WGMMA</span><br><span class="line">Blackwell：tcgen05 + CTA/CTA-pair + TMEM</span><br></pre></td></tr></table></figure>
+
+<h3 id="9-3-同步"><a href="#9-3-同步" class="headerlink" title="9.3 同步"></a>9.3 同步</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">Ampere：async group + split barrier</span><br><span class="line">Hopper：mbarrier transaction + WGMMA groups + cluster</span><br><span class="line">Blackwell：tcgen05 completion + TMEM lifecycle + CTA pair</span><br></pre></td></tr></table></figure>
+
+<h2 id="10-官方资料"><a href="#10-官方资料" class="headerlink" title="10. 官方资料"></a>10. 官方资料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/ampere-tuning-guide/">Ampere Tuning Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/hopper-tuning-guide/">Hopper Tuning Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/blackwell-tuning-guide/">Blackwell Tuning Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.nvidia.com/blog/nvidia-hopper-architecture-in-depth/">NVIDIA Hopper Architecture In-Depth</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html">Blackwell SM100 GEMMs</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/mma_docs/tcgen05_programming.html">tcgen05 MMA Programming Guide</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异</p><p><a href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-05-ampere-hopper-blackwell/">https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-05-ampere-hopper-blackwell/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUDA/">CUDA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CuTe-DSL/">CuTe DSL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUTLASS/">CUTLASS</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/GPU/">GPU</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Tensor-Core/">Tensor Core</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NVIDIA/">NVIDIA</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-04-gemm-mma-tensor-core/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">04. GEMM、MMA 与 Tensor Core：从三重循环到高性能流水线</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-07-blackwell-gb200-lab/"><span class="level-item">07. Blackwell/GB200 实机导读：在 `target_p_j` 上认识 SM100 与 CuTe DSL</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">71</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">3</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">18</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-02-sm-cuda-core-tensor-core/">02. SM、CUDA Core、Tensor Core、LSU 与 SFU：GPU 到底靠什么执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-00-beginner-primer/">00. 零基础导读：先建立 GPU、CUDA、Core 与架构的正确地图</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/">01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/">03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-04-gemm-mma-tensor-core/">04. GEMM、MMA 与 Tensor Core：从三重循环到高性能流水线</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">43</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">39</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

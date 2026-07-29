@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>07. Blackwell/GB200 实机导读：在 `target_p_j` 上认识 SM100 与 CuTe DSL - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="07. Blackwell&amp;#x2F;GB200 实机导读：在 target_p_j 上认识 SM100 与 CuTe DSL 1. 实机基线 2026-07-29： 1 2 3 4 5 6 7 8 9 10 11 12 13 host: target_p_j hostname: ds-046-016 GPU count: 4 GPU: NVIDIA GB200 compute capability: 10"><meta property="og:type" content="blog"><meta property="og:title" content="07. Blackwell/GB200 实机导读：在 `target_p_j` 上认识 SM100 与 CuTe DSL"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-07-blackwell-gb200-lab/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="07. Blackwell&amp;#x2F;GB200 实机导读：在 target_p_j 上认识 SM100 与 CuTe DSL 1. 实机基线 2026-07-29： 1 2 3 4 5 6 7 8 9 10 11 12 13 host: target_p_j hostname: ds-046-016 GPU count: 4 GPU: NVIDIA GB200 compute capability: 10"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-blackwell-pipeline.svg"><meta property="article:published_time" content="2026-07-29T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-29T13:03:13.803Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="CUDA"><meta property="article:tag" content="CuTe DSL"><meta property="article:tag" content="CUTLASS"><meta property="article:tag" content="GPU"><meta property="article:tag" content="Tensor Core"><meta property="article:tag" content="NVIDIA"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/cuda-cute-blackwell-pipeline.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-07-blackwell-gb200-lab/"},"headline":"07. Blackwell/GB200 实机导读：在 `target_p_j` 上认识 SM100 与 CuTe DSL","image":[],"datePublished":"2026-07-29T00:00:00.000Z","dateModified":"2026-07-29T13:03:13.803Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"07. Blackwell&#x2F;GB200 实机导读：在 target_p_j 上认识 SM100 与 CuTe DSL 1. 实机基线 2026-07-29： 1 2 3 4 5 6 7 8 9 10 11 12 13 host: target_p_j hostname: ds-046-016 GPU count: 4 GPU: NVIDIA GB200 compute capability: 10"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-07-blackwell-gb200-lab/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-29T00:00:00.000Z" title="7/29/2026, 12:00:00 AM">2026-07-29</time>发表</span><span class="level-item"><time dateTime="2026-07-29T13:03:13.803Z" title="7/29/2026, 1:03:13 PM">2026-07-29</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></span><span class="level-item">8 分钟读完 (大约1162个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">07. Blackwell/GB200 实机导读：在 `target_p_j` 上认识 SM100 与 CuTe DSL</h1><div class="content"><h1 id="07-Blackwell-GB200-实机导读：在-target-p-j-上认识-SM100-与-CuTe-DSL"><a href="#07-Blackwell-GB200-实机导读：在-target-p-j-上认识-SM100-与-CuTe-DSL" class="headerlink" title="07. Blackwell/GB200 实机导读：在 target_p_j 上认识 SM100 与 CuTe DSL"></a>07. Blackwell/GB200 实机导读：在 <code>target_p_j</code> 上认识 SM100 与 CuTe DSL</h1><h2 id="1-实机基线"><a href="#1-实机基线" class="headerlink" title="1. 实机基线"></a>1. 实机基线</h2><p>2026-07-29：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">host: target_p_j</span><br><span class="line">hostname: ds-046-016</span><br><span class="line">GPU count: 4</span><br><span class="line">GPU: NVIDIA GB200</span><br><span class="line">compute capability: 10.0</span><br><span class="line">driver: 580.95.05</span><br><span class="line">memory/GPU: 189471 MiB（约 185.0 GiB）</span><br><span class="line">power limit: 1200 W</span><br><span class="line">CUDA toolkit: 13.2 / nvcc 13.2.51</span><br><span class="line">PyTorch: 2.11.0a0 NVIDIA build</span><br><span class="line">PyTorch CUDA: 13.2</span><br><span class="line">CuTe DSL: 4.5.2</span><br><span class="line">Triton: 3.6.0</span><br></pre></td></tr></table></figure>
+
+<h2 id="2-查询命令"><a href="#2-查询命令" class="headerlink" title="2. 查询命令"></a>2. 查询命令</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">ssh target_p_j</span><br><span class="line"></span><br><span class="line">nvidia-smi \</span><br><span class="line">  --query-gpu=index,name,compute_cap,driver_version,memory.total,pci.bus_id,pstate,power.limit \</span><br><span class="line">  --format=csv,noheader</span><br><span class="line"></span><br><span class="line">nvidia-smi topo -m</span><br><span class="line">nvidia-smi nvlink -s</span><br><span class="line">nvcc --version</span><br></pre></td></tr></table></figure>
+
+<p>Python：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> torch</span><br><span class="line"></span><br><span class="line"><span class="keyword">for</span> i <span class="keyword">in</span> <span class="built_in">range</span>(torch.cuda.device_count()):</span><br><span class="line">    <span class="built_in">print</span>(</span><br><span class="line">        i,</span><br><span class="line">        torch.cuda.get_device_name(i),</span><br><span class="line">        torch.cuda.get_device_capability(i),</span><br><span class="line">    )</span><br></pre></td></tr></table></figure>
+
+<p>输出均为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">(10, 0)</span><br></pre></td></tr></table></figure>
+
+<p>即 SM100/compute capability 10.0 家族。</p>
+<h2 id="3-GPU-属性"><a href="#3-GPU-属性" class="headerlink" title="3. GPU 属性"></a>3. GPU 属性</h2><p>GPU 0 的 PyTorch properties：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">SM count                        152</span><br><span class="line">warp size                       32</span><br><span class="line">max threads/SM                  2048</span><br><span class="line">max threads/block               1024</span><br><span class="line">registers/SM                    65536</span><br><span class="line">shared memory/SM                233472 bytes</span><br><span class="line">default shared memory/block     49152 bytes</span><br><span class="line">memory clock                    3996000 kHz（工具字段）</span><br><span class="line">memory bus width                7936 bits</span><br></pre></td></tr></table></figure>
+
+<p>解释：</p>
+<ul>
+<li>152 SM 是当前产品启用数量，不应泛化为所有 Blackwell；</li>
+<li>48 KiB 是默认 per-block shared limit，使用更大 dynamic shared 通常需 opt-in；</li>
+<li>约 228 KiB shared/SM 与 Blackwell tuning guide 的片上容量主线一致；</li>
+<li>总显存来自 <code>total_memory</code>/NVML，不能用 bus width × clock 简单推断有效应用带宽。</li>
+</ul>
+<h2 id="4-拓扑"><a href="#4-拓扑" class="headerlink" title="4. 拓扑"></a>4. 拓扑</h2><p><code>nvidia-smi topo -m</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">GPU0..GPU3 彼此：NV18</span><br><span class="line"></span><br><span class="line">GPU0/1 CPU Affinity：0-71，NUMA 0</span><br><span class="line">GPU2/3 CPU Affinity：72-143，NUMA 1</span><br><span class="line"></span><br><span class="line">NIC0/1 对 GPU0/1：NODE</span><br><span class="line">NIC2/3 对 GPU2/3：NODE</span><br><span class="line">跨 NUMA 组合：SYS</span><br></pre></td></tr></table></figure>
+
+<p>这说明两条拓扑同时存在：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">GPU ↔ GPU：第五代 NVLink/NVSwitch 路径</span><br><span class="line"></span><br><span class="line">GPU ↔ RNIC/CPU：</span><br><span class="line">  同 NUMA NODE 较近</span><br><span class="line">  跨 NUMA SYS 较远</span><br></pre></td></tr></table></figure>
+
+<p>对 NCCL/NVSHMEM/RDMA：</p>
+<ul>
+<li>GPU-GPU collective 关注 NVLink domain；</li>
+<li>GPU-NIC 关注 NUMA/RNIC affinity；</li>
+<li>“GPU 都 NV18 相连”不代表任意 GPU 到任意 NIC 路径同样近。</li>
+</ul>
+<h2 id="5-NVLink-link-status"><a href="#5-NVLink-link-status" class="headerlink" title="5. NVLink link status"></a>5. NVLink link status</h2><p>每 GPU 18 link，每 link：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">53.125 GB/s</span><br></pre></td></tr></table></figure>
+
+<p>相对于 <code>ecs</code> H20 报告的 26.562 GB/s/link，工具层面约为 2 倍，符合第五代<br>NVLink 对第四代链路速率的代际提升方向。</p>
+<p>简单聚合：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">18 × 53.125 = 956.25 GB/s</span><br></pre></td></tr></table></figure>
+
+<p>仍要注意：这是 link status 的聚合尺度，不是某个单向/双向 NCCL payload<br>benchmark 的承诺值。</p>
+<h2 id="6-Blackwell-Tensor-Core-数据流"><a href="#6-Blackwell-Tensor-Core-数据流" class="headerlink" title="6. Blackwell Tensor Core 数据流"></a>6. Blackwell Tensor Core 数据流</h2><p><img src="/notes/imgs/cuda-cute-blackwell-pipeline.svg" alt="GB200/SM100 中 tcgen05 与 TMEM 概念流"></p>
+<p>关键部件：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">HBM</span><br><span class="line">  ↕ TMA</span><br><span class="line">SMEM</span><br><span class="line">  → tcgen05 operand</span><br><span class="line">5th Gen Tensor Core</span><br><span class="line">  → accumulator</span><br><span class="line">TMEM</span><br><span class="line">  → tcgen05.ld/copy</span><br><span class="line">register / epilogue</span><br><span class="line">  → HBM</span><br></pre></td></tr></table></figure>
+
+<h3 id="6-1-TMEM-不是-shared-memory"><a href="#6-1-TMEM-不是-shared-memory" class="headerlink" title="6.1 TMEM 不是 shared memory"></a>6.1 TMEM 不是 shared memory</h3><p>区别：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Shared Memory</th>
+<th>TMEM</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>主要用途</td>
+<td>通用 CTA staging/共享</td>
+<td>第五代 Tensor Core accumulator/相关数据</td>
+</tr>
+<tr>
+<td>访问</td>
+<td>普通 shared load/store、TMA</td>
+<td>tcgen05 专用 alloc/load/store/copy</td>
+</tr>
+<tr>
+<td>生命周期</td>
+<td>block/cluster 资源</td>
+<td>显式 TMEM allocation protocol</td>
+</tr>
+<tr>
+<td>布局</td>
+<td>bank/swizzle</td>
+<td>Tensor Core 定义的 TMEM column/layout</td>
+</tr>
+</tbody></table>
+<h3 id="6-2-tcgen05-mma"><a href="#6-2-tcgen05-mma" class="headerlink" title="6.2 tcgen05.mma"></a>6.2 <code>tcgen05.mma</code></h3><p>CUTLASS 官方 SM100 文档说明：</p>
+<ul>
+<li>支持 TF32/FP16/BF16/INT8；</li>
+<li>支持 FP8/FP6/FP4 和 scaling；</li>
+<li>可由单 thread issue；</li>
+<li>支持 CTA group 1/2；</li>
+<li>accumulator 写入 TMEM；</li>
+<li>指令吞吐相对 Hopper WGMMA 随 dtype 可达 2×～4×。</li>
+</ul>
+<p>最后一项是指令/理论层面，端到端 kernel 必须另外测量。</p>
+<h2 id="7-CuTe-DSL-环境"><a href="#7-CuTe-DSL-环境" class="headerlink" title="7. CuTe DSL 环境"></a>7. CuTe DSL 环境</h2><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> cutlass</span><br><span class="line"><span class="keyword">import</span> cutlass.cute <span class="keyword">as</span> cute</span><br><span class="line"></span><br><span class="line"><span class="built_in">print</span>(cutlass.__version__)</span><br></pre></td></tr></table></figure>
+
+<p>实测：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">4.5.2</span><br></pre></td></tr></table></figure>
+
+<p>安装位置：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">/usr/local/lib/python3.12/dist-packages/</span><br><span class="line">  nvidia_cutlass_dsl/python_packages/cutlass/</span><br></pre></td></tr></table></figure>
+
+<p>已有工作目录：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">/dashscope/caches/workspace/llx/CuteDSL</span><br><span class="line">├─ hello.py</span><br><span class="line">├─ diagrams/</span><br><span class="line">├─ docs/</span><br><span class="line">└─ ir_dump/</span><br></pre></td></tr></table></figure>
+
+<h2 id="8-已运行的-CuTe-DSL-线程实验"><a href="#8-已运行的-CuTe-DSL-线程实验" class="headerlink" title="8. 已运行的 CuTe DSL 线程实验"></a>8. 已运行的 CuTe DSL 线程实验</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cd</span> /dashscope/caches/workspace/llx/CuteDSL</span><br><span class="line">python3 hello.py</span><br></pre></td></tr></table></figure>
+
+<p>返回码 0，共 176 行。</p>
+<p>Exp1：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">grid=(1,1,1)</span><br><span class="line">block=(32,1,1)</span><br></pre></td></tr></table></figure>
+
+<p>输出确认：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">thread 0  → warp 0, lane 0</span><br><span class="line">...</span><br><span class="line">thread 31 → warp 0, lane 31</span><br></pre></td></tr></table></figure>
+
+<p>Exp2：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">block=(64,1,1)</span><br></pre></td></tr></table></figure>
+
+<p>输出确认：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">thread 32 → warp 1, lane 0</span><br><span class="line">thread 33 → warp 1, lane 1</span><br><span class="line">...</span><br></pre></td></tr></table></figure>
+
+<p>这验证了 CuTe DSL 的：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">cute.arch.block_idx()</span><br><span class="line">cute.arch.thread_idx()</span><br><span class="line">cute.arch.warp_idx()</span><br><span class="line">cute.arch.lane_idx()</span><br></pre></td></tr></table></figure>
+
+<p>与 CUDA 执行模型一致。</p>
+<h2 id="9-CuTe-DSL-为什么不能直接在-REPL-定义-JIT-函数"><a href="#9-CuTe-DSL-为什么不能直接在-REPL-定义-JIT-函数" class="headerlink" title="9. CuTe DSL 为什么不能直接在 REPL 定义 JIT 函数"></a>9. CuTe DSL 为什么不能直接在 REPL 定义 JIT 函数</h2><p>在 stdin/REPL 中尝试：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@cute.jit</span></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">show_layout</span>():</span><br><span class="line">    ...</span><br></pre></td></tr></table></figure>
+
+<p>当前 4.5.2 返回：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">DSLRuntimeError: Failed to parse function show_layout</span><br><span class="line">DSL does not support REPL mode, save the function to a file instead.</span><br></pre></td></tr></table></figure>
+
+<p>原因是 DSL 会读取 Python function source/AST 做转换。教学实验应保存成 <code>.py</code><br>文件运行，而不是直接粘贴到交互式 stdin。</p>
+<h2 id="10-Blackwell-实验路线"><a href="#10-Blackwell-实验路线" class="headerlink" title="10. Blackwell 实验路线"></a>10. Blackwell 实验路线</h2><h3 id="10-1-基础"><a href="#10-1-基础" class="headerlink" title="10.1 基础"></a>10.1 基础</h3><ol>
+<li>thread/warp/lane；</li>
+<li>vector add；</li>
+<li>naive GEMM；</li>
+<li>shared tiled GEMM；</li>
+<li>CuTe Layout。</li>
+</ol>
+<h3 id="10-2-Tensor-Core"><a href="#10-2-Tensor-Core" class="headerlink" title="10.2 Tensor Core"></a>10.2 Tensor Core</h3><ol>
+<li>CUTLASS/CuTe SM100 GEMM；</li>
+<li>FP16/BF16；</li>
+<li>FP8；</li>
+<li>block-scaled FP4；</li>
+<li>CTA group 1 vs 2；</li>
+<li>tile/stage sweep。</li>
+</ol>
+<h3 id="10-3-Profiling"><a href="#10-3-Profiling" class="headerlink" title="10.3 Profiling"></a>10.3 Profiling</h3><ol>
+<li>Nsight Systems 看 host launch 与 overlap；</li>
+<li>Nsight Compute 看 tensor pipe、TMA、TMEM、stall；</li>
+<li>PTX 查 <code>tcgen05</code>；</li>
+<li>SASS 与 resource usage；</li>
+<li>correctness/precision。</li>
+</ol>
+<h2 id="11-编译注意"><a href="#11-编译注意" class="headerlink" title="11. 编译注意"></a>11. 编译注意</h2><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">nvcc -<span class="built_in">arch</span>=sm_100 ...</span><br></pre></td></tr></table></figure>
+
+<p>CuTe DSL/CUTLASS example 要与安装版本匹配。官方 quick start 建议使用对应<br>CUTLASS commit 的 setup script；“pip wheel 最新版 + GitHub main examples”可能<br>存在 API 不一致。</p>
+<h2 id="12-官方资料"><a href="#12-官方资料" class="headerlink" title="12. 官方资料"></a>12. 官方资料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/blackwell-tuning-guide/">Blackwell Tuning Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html">Blackwell SM100 GEMMs</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/mma_docs/tcgen05_programming.html">tcgen05 MMA Programming Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/quick_start.html">CuTe DSL Quick Start</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.nvidia.com/en-us/data-center/gb200-nvl72/">GB200 NVL72</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>07. Blackwell/GB200 实机导读：在 `target_p_j` 上认识 SM100 与 CuTe DSL</p><p><a href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-07-blackwell-gb200-lab/">https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-07-blackwell-gb200-lab/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUDA/">CUDA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CuTe-DSL/">CuTe DSL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUTLASS/">CUTLASS</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/GPU/">GPU</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Tensor-Core/">Tensor Core</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NVIDIA/">NVIDIA</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-05-ampere-hopper-blackwell/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">05. NVIDIA Ampere、Hopper、Blackwell：架构演进与编程差异</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-06-hopper-h20-lab/"><span class="level-item">06. Hopper/H20 实机导读：在 `ecs` 上把架构概念落到设备</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">71</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">3</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">18</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-02-sm-cuda-core-tensor-core/">02. SM、CUDA Core、Tensor Core、LSU 与 SFU：GPU 到底靠什么执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-00-beginner-primer/">00. 零基础导读：先建立 GPU、CUDA、Core 与架构的正确地图</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/">01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/">03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-04-gemm-mma-tensor-core/">04. GEMM、MMA 与 Tensor Core：从三重循环到高性能流水线</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">43</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">39</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

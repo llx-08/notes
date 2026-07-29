@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运 1. 为什么 GPU 性能经常不是算力问题 假设一次操作： 1 2 3 从 HBM 读取 4 byte 只做一次加法 再写回 4 byte 算术很少，数据移动很多，通常 memory-bound。 反之，GEMM 将加载的 A&amp;#x2F;B tile 反复复用： 1 2 加载一次 → shared&amp;#x2F;regist"><meta property="og:type" content="blog"><meta property="og:title" content="03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运 1. 为什么 GPU 性能经常不是算力问题 假设一次操作： 1 2 3 从 HBM 读取 4 byte 只做一次加法 再写回 4 byte 算术很少，数据移动很多，通常 memory-bound。 反之，GEMM 将加载的 A&amp;#x2F;B tile 反复复用： 1 2 加载一次 → shared&amp;#x2F;regist"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-memory-hierarchy.svg"><meta property="article:published_time" content="2026-07-29T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-29T13:03:13.800Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="CUDA"><meta property="article:tag" content="CuTe DSL"><meta property="article:tag" content="CUTLASS"><meta property="article:tag" content="GPU"><meta property="article:tag" content="Tensor Core"><meta property="article:tag" content="NVIDIA"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/cuda-cute-memory-hierarchy.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/"},"headline":"03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运","image":[],"datePublished":"2026-07-29T00:00:00.000Z","dateModified":"2026-07-29T13:03:13.800Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运 1. 为什么 GPU 性能经常不是算力问题 假设一次操作： 1 2 3 从 HBM 读取 4 byte 只做一次加法 再写回 4 byte 算术很少，数据移动很多，通常 memory-bound。 反之，GEMM 将加载的 A&#x2F;B tile 反复复用： 1 2 加载一次 → shared&#x2F;regist"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-29T00:00:00.000Z" title="7/29/2026, 12:00:00 AM">2026-07-29</time>发表</span><span class="level-item"><time dateTime="2026-07-29T13:03:13.800Z" title="7/29/2026, 1:03:13 PM">2026-07-29</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></span><span class="level-item">12 分钟读完 (大约1810个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运</h1><div class="content"><h1 id="03-GPU-内存层次：HBM、L2、Shared-Memory、Register-与数据搬运"><a href="#03-GPU-内存层次：HBM、L2、Shared-Memory、Register-与数据搬运" class="headerlink" title="03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运"></a>03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运</h1><h2 id="1-为什么-GPU-性能经常不是算力问题"><a href="#1-为什么-GPU-性能经常不是算力问题" class="headerlink" title="1. 为什么 GPU 性能经常不是算力问题"></a>1. 为什么 GPU 性能经常不是算力问题</h2><p>假设一次操作：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">从 HBM 读取 4 byte</span><br><span class="line">只做一次加法</span><br><span class="line">再写回 4 byte</span><br></pre></td></tr></table></figure>
+
+<p>算术很少，数据移动很多，通常 memory-bound。</p>
+<p>反之，GEMM 将加载的 A/B tile 反复复用：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">加载一次</span><br><span class="line">  → shared/register 中多次参与 MMA</span><br></pre></td></tr></table></figure>
+
+<p>可提高 arithmetic intensity：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Arithmetic Intensity = FLOPs / bytes moved from a given memory level</span><br></pre></td></tr></table></figure>
+
+<p>GPU 优化很大一部分是在回答：</p>
+<blockquote>
+<p>数据应该在哪一级存多久、由谁搬、被复用多少次？</p>
+</blockquote>
+<h2 id="2-整体层次"><a href="#2-整体层次" class="headerlink" title="2. 整体层次"></a>2. 整体层次</h2><p><img src="/notes/imgs/cuda-cute-memory-hierarchy.svg" alt="GPU 内存层次和数据流"></p>
+<p>典型层次：</p>
+<table>
+<thead>
+<tr>
+<th>层次</th>
+<th>作用域</th>
+<th>特点</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>register</td>
+<td>thread</td>
+<td>最接近执行流水线，容量有限</td>
+</tr>
+<tr>
+<td>shared memory</td>
+<td>block/cluster 扩展</td>
+<td>软件管理的片上 scratchpad</td>
+</tr>
+<tr>
+<td>L1/texture</td>
+<td>SM</td>
+<td>cache；通常与 shared memory 使用统一物理资源/carveout</td>
+</tr>
+<tr>
+<td>L2</td>
+<td>GPU</td>
+<td>所有 SM 共享，连接 HBM 与 peer/I/O 路径</td>
+</tr>
+<tr>
+<td>HBM/global memory</td>
+<td>GPU device</td>
+<td>容量大、带宽高、延迟远高于片上存储</td>
+</tr>
+<tr>
+<td>host memory</td>
+<td>CPU/系统</td>
+<td>经 PCIe/NVLink-C2C/互连访问</td>
+</tr>
+</tbody></table>
+<p>“快/慢”必须看访问模式与并行度，不能只记固定延迟数字。</p>
+<h2 id="3-Register"><a href="#3-Register" class="headerlink" title="3. Register"></a>3. Register</h2><p>优点：</p>
+<ul>
+<li>thread 私有；</li>
+<li>带宽高；</li>
+<li>编译器直接分配；</li>
+<li>适合 accumulator、索引、临时值。</li>
+</ul>
+<p>代价：</p>
+<ul>
+<li>SM register file 总量有限；</li>
+<li>register pressure 限制 occupancy；</li>
+<li>动态索引数组可能无法保持在 register；</li>
+<li>spill 进入 local memory。</li>
+</ul>
+<p>Tensor Core fragment/accumulator 在不同架构中可能放在 register 或专用空间：</p>
+<ul>
+<li>Ampere/Hopper 许多 accumulator fragment 占用 register；</li>
+<li>Blackwell tcgen05 引入 TMEM，减轻 accumulator 对 register file 的压力。</li>
+</ul>
+<h2 id="4-Shared-Memory"><a href="#4-Shared-Memory" class="headerlink" title="4. Shared Memory"></a>4. Shared Memory</h2><p>Shared memory 是程序显式管理的片上存储：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">extern</span> __shared__ <span class="type">float</span> smem[];</span><br></pre></td></tr></table></figure>
+
+<p>生命周期：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">一个 block 被分配到 SM</span><br><span class="line">  → 为该 block 分配 shared memory</span><br><span class="line">  → block 内 thread 共享</span><br><span class="line">  → block 结束后释放</span><br></pre></td></tr></table></figure>
+
+<p>用途：</p>
+<ul>
+<li>重用 global memory 数据；</li>
+<li>thread 间交换；</li>
+<li>GEMM tile；</li>
+<li>reduction；</li>
+<li>staging/pipeline；</li>
+<li>TMA destination/source。</li>
+</ul>
+<h3 id="4-1-Shared-Memory-Bank"><a href="#4-1-Shared-Memory-Bank" class="headerlink" title="4.1 Shared Memory Bank"></a>4.1 Shared Memory Bank</h3><p>Shared memory 被划分为 bank。一个 warp 同时访问时：</p>
+<ul>
+<li>不同 bank：可并行；</li>
+<li>同一地址：可利用 broadcast；</li>
+<li>同一 bank 不同地址：可能 bank conflict，分多次服务。</li>
+</ul>
+<p>矩阵转置常见问题：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">按列访问一个朴素 row-major shared tile</span><br><span class="line">  → 多个 lane 落入同一 bank</span><br></pre></td></tr></table></figure>
+
+<p>解决方法：</p>
+<ul>
+<li>padding，例如 <code>[32][33]</code>；</li>
+<li>swizzle；</li>
+<li>调整 thread/data layout；</li>
+<li>使用 CuTe 的 layout algebra 显式描述。</li>
+</ul>
+<h2 id="5-L1、Texture-与-Shared-Carveout"><a href="#5-L1、Texture-与-Shared-Carveout" class="headerlink" title="5. L1、Texture 与 Shared Carveout"></a>5. L1、Texture 与 Shared Carveout</h2><p>现代数据中心架构中，L1/texture/shared 常共享一块统一片上数据资源，通过<br>carveout 调整偏好。</p>
+<p>这不表示：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">shared memory 就等于 L1 cache</span><br></pre></td></tr></table></figure>
+
+<p>二者编程语义不同：</p>
+<ul>
+<li>shared 由程序明确寻址、同步和管理；</li>
+<li>L1 是 cache，由硬件按访问自动管理；</li>
+<li>统一的是部分物理容量/数据路径。</li>
+</ul>
+<p>静态 shared memory 通常受兼容性限制；要使用更大的 dynamic shared memory，<br>常需要 <code>cudaFuncSetAttribute</code> opt-in。</p>
+<h2 id="6-L2"><a href="#6-L2" class="headerlink" title="6. L2"></a>6. L2</h2><p>L2 是 GPU 全局共享 cache：</p>
+<ul>
+<li>所有 SM 可访问；</li>
+<li>缓存 global/local 等流量；</li>
+<li>peer/NVLink/PCIe 数据路径可能经过相关 L2/coherence/translation 逻辑；</li>
+<li>容量与 residency policy 随架构演进。</li>
+</ul>
+<p>命中 L2 不等于免费：仍有互连、queue、partition 和访问并行度成本。</p>
+<h2 id="7-HBM-与-Global-Memory"><a href="#7-HBM-与-Global-Memory" class="headerlink" title="7. HBM 与 Global Memory"></a>7. HBM 与 Global Memory</h2><p>HBM 是物理堆叠 DRAM。CUDA global memory 是设备全局地址空间。</p>
+<p>对 A100/H100/H20/B200 这类数据中心 GPU，可粗略画成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">SM request</span><br><span class="line">  → L1/shared path</span><br><span class="line">  → L2 slice / fabric</span><br><span class="line">  → memory partition/controller</span><br><span class="line">  → HBM stack/channel</span><br></pre></td></tr></table></figure>
+
+<p>峰值 HBM bandwidth 要依靠：</p>
+<ul>
+<li>大量并行 request；</li>
+<li>合并良好的连续访问；</li>
+<li>足够 transaction size；</li>
+<li>均匀访问 memory partition；</li>
+<li>避免依赖链和过低 occupancy。</li>
+</ul>
+<h2 id="8-Coalescing"><a href="#8-Coalescing" class="headerlink" title="8. Coalescing"></a>8. Coalescing</h2><p>一个 warp 的 global memory 地址会合并为若干 memory transaction。</p>
+<p>理想：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">lane 0 → a[0]</span><br><span class="line">lane 1 → a[1]</span><br><span class="line">...</span><br><span class="line">lane 31 → a[31]</span><br></pre></td></tr></table></figure>
+
+<p>离散：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">lane 0 → a[0]</span><br><span class="line">lane 1 → a[1024]</span><br><span class="line">lane 2 → a[2048]</span><br><span class="line">...</span><br></pre></td></tr></table></figure>
+
+<p>后者可能产生大量 transaction，浪费带宽。</p>
+<p>对齐也重要。向量化 load 如 16-byte 并不自动保证高效，地址必须满足类型与指令<br>要求。</p>
+<h2 id="9-Local-Memory"><a href="#9-Local-Memory" class="headerlink" title="9. Local Memory"></a>9. Local Memory</h2><p>Local memory 是每 thread 的逻辑地址空间，但常位于 device memory。</p>
+<p>来源：</p>
+<ul>
+<li>register spill；</li>
+<li>大型局部数组；</li>
+<li>动态索引导致 compiler 无法寄存器化；</li>
+<li>ABI stack/调用状态。</li>
+</ul>
+<p>它可能被 L1/L2 缓存，但延迟与 global path 相近，不能按“名字 local”认为是<br>片上 scratchpad。</p>
+<h2 id="10-Constant-与-Texture"><a href="#10-Constant-与-Texture" class="headerlink" title="10. Constant 与 Texture"></a>10. Constant 与 Texture</h2><p>Constant memory：</p>
+<ul>
+<li>只读；</li>
+<li>有专用 cache；</li>
+<li>warp 访问相同地址时 broadcast 高效；</li>
+<li>每 lane 访问不同地址时可能序列化。</li>
+</ul>
+<p>Texture/read-only 路径：</p>
+<ul>
+<li>利用空间局部性与专用访问语义；</li>
+<li>现代编译器/cache 架构下具体收益依访问模式而定。</li>
+</ul>
+<h2 id="11-数据搬运演进"><a href="#11-数据搬运演进" class="headerlink" title="11. 数据搬运演进"></a>11. 数据搬运演进</h2><h3 id="11-1-传统-thread-driven-copy"><a href="#11-1-传统-thread-driven-copy" class="headerlink" title="11.1 传统 thread-driven copy"></a>11.1 传统 thread-driven copy</h3><figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">reg = global[idx];</span><br><span class="line">shared[idx] = reg;</span><br></pre></td></tr></table></figure>
+
+<p>数据经过 register，thread 负责地址生成与循环。</p>
+<h3 id="11-2-Ampere-cp-async"><a href="#11-2-Ampere-cp-async" class="headerlink" title="11.2 Ampere cp.async"></a>11.2 Ampere <code>cp.async</code></h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">global → shared</span><br></pre></td></tr></table></figure>
+
+<p>异步 copy 可避免使用中间 register，并与计算流水重叠。</p>
+<h3 id="11-3-Hopper-TMA"><a href="#11-3-Hopper-TMA" class="headerlink" title="11.3 Hopper TMA"></a>11.3 Hopper TMA</h3><p>TMA = Tensor Memory Accelerator：</p>
+<ul>
+<li>descriptor 描述 1D～5D tensor；</li>
+<li>单 thread 可发起大块异步搬运；</li>
+<li>硬件负责地址生成；</li>
+<li>支持 GMEM↔SMEM、multicast、部分 reduction；</li>
+<li>与 mbarrier/pipeline 配合。</li>
+</ul>
+<h3 id="11-4-Blackwell"><a href="#11-4-Blackwell" class="headerlink" title="11.4 Blackwell"></a>11.4 Blackwell</h3><p>Blackwell 延续 TMA，并加入与第五代 Tensor Core、TMEM、block-scaled 数据格式<br>配套的搬运与同步机制。优化重点从“让每个 thread 搬更多”进一步转向：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">让专用数据运动硬件、Tensor Core 与 producer/consumer warp 更独立地并行</span><br></pre></td></tr></table></figure>
+
+<h2 id="12-Double-Buffer-Multi-stage-Pipeline"><a href="#12-Double-Buffer-Multi-stage-Pipeline" class="headerlink" title="12. Double Buffer / Multi-stage Pipeline"></a>12. Double Buffer / Multi-stage Pipeline</h2><p>GEMM 主循环：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">Stage 0：加载 tile k+1</span><br><span class="line">Stage 1：计算 tile k</span><br><span class="line">Stage 2：写回/推进 barrier</span><br></pre></td></tr></table></figure>
+
+<p>双缓冲：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">SMEM buffer A：Tensor Core 正在消费</span><br><span class="line">SMEM buffer B：copy/TMA 正在填充</span><br><span class="line">下一轮交换</span><br></pre></td></tr></table></figure>
+
+<p>stage 太少无法隐藏延迟；太多消耗 shared/register，降低 occupancy。最佳值与：</p>
+<ul>
+<li>tile shape；</li>
+<li>dtype；</li>
+<li>K 长度；</li>
+<li>TMA/cp.async latency；</li>
+<li>register/shared 容量；</li>
+<li>架构；</li>
+<li>epilogue</li>
+</ul>
+<p>有关。</p>
+<h2 id="13-target-p-j-实机属性如何解读"><a href="#13-target-p-j-实机属性如何解读" class="headerlink" title="13. target_p_j 实机属性如何解读"></a>13. <code>target_p_j</code> 实机属性如何解读</h2><p>PyTorch 报告 GB200 GPU 0：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">compute capability              10.0</span><br><span class="line">SM count                        152</span><br><span class="line">warp size                       32</span><br><span class="line">max threads/SM                  2048</span><br><span class="line">max threads/block               1024</span><br><span class="line">registers/SM                    65536</span><br><span class="line">shared memory/SM                233472 bytes</span><br><span class="line">default shared memory/block     49152 bytes</span><br><span class="line">memory bus width                7936 bits</span><br></pre></td></tr></table></figure>
+
+<p><code>shared_memory_per_block=49152</code> 是默认 block 上限，不代表硬件只能用 48 KiB。<br>Blackwell tuning guide说明 B200 可支持更大的 dynamic shared memory，但超过兼容<br>默认值需要显式 opt-in，并且 CUDA 会保留一小部分系统用途。</p>
+<h2 id="14-优化检查清单"><a href="#14-优化检查清单" class="headerlink" title="14. 优化检查清单"></a>14. 优化检查清单</h2><ol>
+<li>global load/store 是否 coalesced？</li>
+<li>实际 DRAM bandwidth 与峰值差多少？</li>
+<li>L2 hit rate 是否符合数据复用预期？</li>
+<li>shared 是否 bank conflict？</li>
+<li>register 是否 spill？</li>
+<li>shared/register 是否压低 occupancy？</li>
+<li>是否有足够 outstanding memory request？</li>
+<li>copy 与 compute 是否真正 overlap？</li>
+<li>pipeline stage 是否过多或过少？</li>
+<li>是否把一次性数据错误地搬进 shared？</li>
+</ol>
+<h2 id="15-官方资料"><a href="#15-官方资料" class="headerlink" title="15. 官方资料"></a>15. 官方资料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/contents.html">CUDA C++ Programming Guide：Memory Hierarchy</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/ampere-tuning-guide/">Ampere Tuning Guide：Memory System</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/hopper-tuning-guide/">Hopper Tuning Guide：Tensor Memory Accelerator</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/blackwell-tuning-guide/">Blackwell Tuning Guide：Memory System</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运</p><p><a href="https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/">https://llx-08.github.io/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-29</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUDA/">CUDA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CuTe-DSL/">CuTe DSL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUTLASS/">CUTLASS</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/GPU/">GPU</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Tensor-Core/">Tensor Core</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NVIDIA/">NVIDIA</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-04-gemm-mma-tensor-core/"><span class="level-item">04. GEMM、MMA 与 Tensor Core：从三重循环到高性能流水线</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">71</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">3</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">18</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-02-sm-cuda-core-tensor-core/">02. SM、CUDA Core、Tensor Core、LSU 与 SFU：GPU 到底靠什么执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-00-beginner-primer/">00. 零基础导读：先建立 GPU、CUDA、Core 与架构的正确地图</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/">01. CUDA 执行模型：从 Kernel Launch 到 SM、Warp 与异步执行</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-03-memory-hierarchy/">03. GPU 内存层次：HBM、L2、Shared Memory、Register 与数据搬运</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-29T00:00:00.000Z">2026-07-29</time></p><p class="title"><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-04-gemm-mma-tensor-core/">04. GEMM、MMA 与 Tensor Core：从三重循环到高性能流水线</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">43</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">39</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
