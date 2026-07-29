@@ -341,6 +341,191 @@ WR 回答：这些字节要执行什么逻辑操作？
 WQE 回答：如何把该请求表示成这块 RNIC 能执行的队列任务？
 ```
 
+#### 1.1.6 对照 blade-kvt/Barex：`IpcBlock`、`WriteBatch` 与 WQE 怎么对应
+
+先给结论：
+
+> 把 `IpcBlock` 类比成 SGE、把一次 `WriteBatch()` 类比成一条 WR，方向是接近的，
+> 但两者都比对应的 verbs 对象更上层。更准确地说，**合并后的一个
+> `IpcBlock` 通常先变成一个 Barex `rw_memp_t`；在 blade-kvt 当前 direct RDMA
+> 路径中，一个 `rw_memp_t` 再变成一个 SGE、一个 RDMA WRITE WR，并由 provider
+> 编码成一条逻辑 Send WQE。一次 `WriteBatch()` 可以包含很多这样的 WR/WQE。**
+
+各层对象的职责如下：
+
+| 层次 | 对象 | 它描述什么 | 是否已经是 RNIC 队列任务 |
+| --- | --- | --- | --- |
+| blade-kvt 业务层 | `IpcBlock{src_offset,dst_offset,length}` | KV 数据中哪一段从源布局的哪个 offset 搬到目标布局的哪个 offset | 否 |
+| Barex API 层 | `rw_memp_t` | 一项本地 SGE/内存与远端 `address+rkey` 的配对 | 否 |
+| verbs API 层 | `ibv_sge` | 一段本地已注册内存：`addr+length+lkey` | 否 |
+| verbs API 层 | `ibv_send_wr` | 一次 RDMA WRITE 的 opcode、本地 SGE、远端地址/rkey、完成策略 | 否 |
+| provider/RNIC 层 | Send WQE | 上述 WR 在特定 RNIC 的 SQ 中的硬件表示 | **是** |
+| 网络层 | packet | RNIC 执行 WQE 时产生的线上的一个分片 | 不是 WQE |
+
+所以 `IpcBlock` 不等于 SGE，主要有三个原因：
+
+1. `IpcBlock` 中是相对于 KV tensor 基址的 `src_offset/dst_offset`，SGE 中则是可供
+   本地 RNIC DMA 的实际 `addr/length/lkey`；
+2. `IpcBlock` 同时描述源和目标布局，SGE **只描述本地内存**；
+3. 多个相邻 `IpcBlock` 可能先被 blade-kvt 合并，Barex 也可能把超大的一项再次
+   切片，所以不能脱离具体路径断言原始 `IpcBlock` 与 WQE 永远一一对应。
+
+##### 第一步：blade-kvt 先合并可以连续搬运的 `IpcBlock`
+
+`kvtransfer/src/channel.cpp::merge_interval()` 只有在下面两个条件同时满足时才合并：
+
+```text
+cur.src_offset == prev.src_offset + prev.length
+cur.dst_offset == prev.dst_offset + prev.length
+```
+
+也就是说，源地址连续且目标地址也连续，才能把两次搬运安全地变成一次更长的搬运。
+例如：
+
+```text
+原始 IpcBlock[0] = {src=0,     dst=8192,  len=4096}
+原始 IpcBlock[1] = {src=4096,  dst=12288, len=4096}
+原始 IpcBlock[2] = {src=16384, dst=32768, len=4096}
+
+合并后：
+IpcBlock'[0] = {src=0,     dst=8192,  len=8192}
+IpcBlock'[1] = {src=16384, dst=32768, len=4096}
+```
+
+前两段的源、目标都首尾相接，因此可以合并；第三段与前一段不连续，必须保持为另一项。
+
+##### 第二步：每个合并后的区间变成一个 `rw_memp_t`
+
+`kvtransfer/src/rdma_channel.cpp::RDMAChannel::send_data()` 对每个剩余
+`IpcBlock` 执行的核心逻辑可以简化为：
+
+```cpp
+rw_memp_t item;
+
+// 远端 GPU MR 中的最终目标
+item.r_addr = remote_tensor_base + dst_offset;
+item.r_key  = remote_rkey;
+
+// 本地 GPU MR 中的源数据；这三个字段本身就是一条 ibv_sge
+item.sg.addr   = local_tensor_base + src_offset;
+item.sg.length = len;
+item.sg.lkey   = local_mr_lkey;
+
+datas->emplace_back(item);
+```
+
+因此在这条路径中，`rw_memp_t` 比 `IpcBlock` 更接近“RDMA WRITE 的一项完整输入”：
+
+```text
+rw_memp_t
+  ├─ sg.addr + sg.length + sg.lkey    本地 source
+  └─ r_addr + r_key                   远端 destination
+```
+
+blade-kvt 随后调用的是：
+
+```text
+WriteBatch(vector<rw_memp_t>)
+```
+
+`WriteBatch` 是一个**批量 API**，不是一条 WR 的名称。假设 vector 中有 100 项，
+它表达的是“请 Barex 管理这 100 项 write”，而不是“把 100 个不连续目标强行变成
+一条 RDMA WRITE WR”。
+
+##### 第三步：Barex 为每项构造一条 WR，并把多条 WR 链起来 post
+
+在 Barex
+`src/barex/impl/rdma/xchannel_impl.cc::WriteOrReadBatchOnce()` 中，每项的关键转换是：
+
+```cpp
+wr->sg_list = &data.sg;
+wr->num_sge = 1;
+wr->opcode  = IBV_WR_RDMA_WRITE;
+wr->wr.rdma.remote_addr = data.r_addr;
+wr->wr.rdma.rkey        = data.r_key;
+
+previous_wr->next = wr;  // 多条 WR 形成 linked list
+```
+
+然后对这条 WR linked list 调用：
+
+```cpp
+ibv_post_send(qp, first_wr, &bad_wr);
+```
+
+provider 接受 linked list 后，会按当前 RNIC 的格式把每条 WR 编码进 QP 的 SQ。
+在建立心智模型时，可以把它理解为：
+
+```text
+rw_memp_t[0] → SGE[0] + WR[0] → Send WQE[0] → 若干 packet
+rw_memp_t[1] → SGE[1] + WR[1] → Send WQE[1] → 若干 packet
+rw_memp_t[2] → SGE[2] + WR[2] → Send WQE[2] → 若干 packet
+
+WriteBatch([0,1,2])
+  → WR[0] -> WR[1] -> WR[2]
+  → 可以一次 ibv_post_send/一次批量 doorbell 提交
+  → SQ 中仍是 3 项逻辑工作，不是 1 项
+```
+
+这正好回答“WQE 是一次写还是多次写”：
+
+- **从逻辑 operation 看，一条 Send WQE 对应一次 RDMA WRITE，而不是整个
+  `WriteBatch` 的多次写；**
+- **从线上 packet 看，一条大 WQE 可以被 RNIC 分成很多 packet；packet 数量不等于
+  WR/WQE 数量；**
+- 从硬件编码细节看，一条逻辑 WQE 还可能占多个厂商定义的 WQE basic block，不能用
+  ring buffer 中占几个固定大小块来反推逻辑 WRITE 数；
+- 一次 `ibv_post_send()` 可以提交一条含 N 个 WR 的链，通常由 provider 批量写 SQ
+  并减少 doorbell 次数，但这不会把 N 个 WR 合并成一个 WQE。
+
+##### blade-kvt 当前配置下，批处理与 completion 又是什么关系
+
+blade-kvt 的 `blade_kvt/__init__.py::set_envs()` 默认设置
+`ACCL_WRITEBATCH_OPT=2`。Barex 在这一模式下：
+
+1. 按发送深度把过大的 `WriteBatch` 分成若干轮；
+2. 一轮中的每个 `rw_memp_t` 仍各构造 `num_sge=1` 的一条 WR；
+3. 只给该轮最后一条 WR 设置 `IBV_SEND_SIGNALED`；
+4. 最后一条 signaled WR 的 CQE 到达时，利用同一 QP 的有序执行语义回收这一轮占用的
+   send depth；
+5. 所有轮完成后，Barex 才调用一次上层 `WriteBatch` callback。
+
+因此下面四个数量不要混为一谈：
+
+```text
+一次 blade-kvt send_data()
+  可能调用多次 WriteBatch（还可能分散到不同 channel）
+
+一次 Barex WriteBatch()
+  包含 N 个 rw_memp_t
+  → 大项可能被 Barex 切片，实际项数可能增大
+  → 按 tx depth 分成一轮或多轮
+
+一轮
+  → N_round 个 WR
+  → N_round 个逻辑 WQE
+  → 可以只调用一次 ibv_post_send
+  → 当前 opt=2 时通常只请求 1 个 CQE
+
+一个 WQE
+  → 一次逻辑 RDMA WRITE
+  → 可产生多个网络 packet 和多个本地 PCIe transaction
+```
+
+回到最初的类比，建议记成这一条：
+
+```text
+IpcBlock（业务搬运区间）
+  → 合并
+rw_memp_t（Barex 的一项 local+remote 描述）
+  → Barex 构造
+1 个 SGE + 1 个 RDMA WRITE WR
+  → provider post/编码
+1 条逻辑 Send WQE
+  → RNIC 执行并分包
+若干网络 packet
+```
+
 接下来再进入 Work Queue、具体 WQE 字段和构造/执行流程。
 
 ### 1.2 Work Queue、SQ、RQ 与 WQE
