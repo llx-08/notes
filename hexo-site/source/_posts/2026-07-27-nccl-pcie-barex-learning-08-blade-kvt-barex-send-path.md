@@ -646,7 +646,7 @@ for (auto i = start_layer; i < num_layers; ++i) {
 | 位置 | 谁在等待 | 等待什么 | 实现 |
 |---|---|---|---|
 | A | `single_thd_` 的 step waiter | Python 是否已对下一层调用 event record | `SyncSemaphore`：mutex + condition variable |
-| B | 同一个 step waiter CPU 线程 | GPU 是否真正执行到该层 event | `cudaEventSynchronize(event[layer_i])` |
+| B | 同一个 step waiter CPU 线程 | GPU 是否真正执行到该层 event | `cudaEventSynchronize(event[layer_i])`；可能阻塞或忙等，取决于 event flag |
 | C | waiter 发信号 | 宣布该层数据现在可安全读取 | `Step::data_signal_.release(...)` |
 | D | target thread pool 的发送线程 | 当前 layer 是否已被 C 放行 | `SyncSemaphore`：mutex + condition variable |
 
@@ -654,8 +654,8 @@ for (auto i = start_layer; i < num_layers; ++i) {
 
 - **notify 到达之前**：step waiter 阻塞在 CPU condition variable
   `record_signal_`，它甚至还没有调用 `cudaEventSynchronize`；
-- **notify 已到达、但 GPU 尚未算到 event**：step waiter 才阻塞在
-  `cudaEventSynchronize`；
+- **notify 已到达、但 GPU 尚未算到 event**：step waiter 才停在
+  `cudaEventSynchronize`；底层可能阻塞，也可能 busy-wait；
 - **发送线程过早走到该层**：它阻塞在另一个 CPU condition variable
   `data_signal_`；
 - **模型 CUDA stream**：不会被上述 host 等待反向阻塞，仍按 stream 中的
@@ -664,7 +664,8 @@ for (auto i = start_layer; i < num_layers; ++i) {
   这里等待该 CUDA event 完成。
 
 这里使用的是 host 侧 `cudaEventSynchronize`，不是向另一个 CUDA stream 插入
-`cudaStreamWaitEvent`。因此真正睡眠的是一个 blade-kvt 后台 CPU 线程。
+`cudaStreamWaitEvent`。因此被占用的是一个 blade-kvt 后台 CPU waiter；不能
+笼统地说它一定“睡眠”，具体等待策略由 event 创建 flag 决定。
 
 ### 6.4 一层数据从计算到发送的完整时序
 
@@ -693,7 +694,255 @@ notify(step_id) ─────────────────────�
 `notify_event_record` 只证明第一件事；`cudaEventSynchronize` 返回才证明第二件事。
 发送线程必须等第二件事，才能避免 RNIC 或 copy kernel 读到仍在写入的 KV cache。
 
-### 6.5 `flush_send_step` 在这套状态机中的作用
+### 6.5 CUDA Event 如何完成，又如何“唤醒”发送线程
+
+可以把这里拆成两个完全不同的唤醒：
+
+```text
+第一段：GPU → step waiter
+CUDA stream 执行到 event marker
+  → event 状态变为 complete
+  → cudaEventSynchronize(event) 可以返回
+
+第二段：step waiter → 所有 target 发送线程
+Step::notify_layer_ready(layer_i + 1)
+  → data_signal_.ready_ 向前推进
+  → condition_variable.notify_all()
+  → wait_layer_ready(layer_i) 的发送线程重新检查条件并继续
+```
+
+第一段由 CUDA runtime/driver 和 GPU 的 stream 完成机制处理。blade-kvt 没有
+CUDA callback，也没有在 event ready 时执行 Python 回调；它只是让后台 CPU
+waiter 调用 `cudaEventSynchronize`，该调用在 event complete 前不会返回。
+
+等待不一定等于 OS 线程睡眠。CUDA 官方文档说明：
+
+- event 使用 `cudaEventBlockingSync` 时，等待线程采用 blocking sync；
+- 没有这个 flag 时，`cudaEventSynchronize` 可能 busy-wait。
+
+当前 blade-kvt 在 `_init_events` 中使用：
+
+```python
+self._events = [
+    torch.cuda.Event() for _ in range(self._num_layers)
+]
+```
+
+PyTorch 的 `torch.cuda.Event` 默认参数是 `blocking=False`。因此理解这段代码时，
+最可靠的抽象是“waiter 不能越过 `cudaEventSynchronize`”，不要额外假定一定由
+某个 CPU 中断把一个休眠线程唤醒。具体 driver/GPU 中断与轮询实现并不是
+blade-kvt 的接口契约。
+
+第二段则完全能从 blade-kvt 源码确定。`SyncSemaphore::release(cond)`：
+
+```cpp
+if (ready_ < cond) {
+  ready_ = cond;
+  cv_.notify_all();
+}
+```
+
+而发送线程调用：
+
+```cpp
+void SyncSemaphore::wait(uint32_t cond) {
+  std::unique_lock<std::mutex> lock(c_mutex_);
+  if (ready_ <= cond) {
+    cv_.wait(lock, [this, &cond] {
+      return ready_ > cond;
+    });
+  }
+}
+```
+
+假设 `event[0]` 完成，StepGuard 调用：
+
+```cpp
+step_->notify_layer_ready(1);
+```
+
+于是 `ready_` 从 0 变成 1，`notify_all()` 唤醒所有等待同一个 `Step` 的 target
+线程：
+
+```text
+wait_layer_ready(0)：条件 ready_ > 0 成立，可以发送 layer 0
+wait_layer_ready(1)：条件 ready_ > 1 不成立，继续等待 layer 1
+```
+
+因此不是 CUDA Event 直接寻找某个 `send_data()` 线程并唤醒它，而是：
+
+```text
+CUDA Event 完成
+  → C++ waiter 从 cudaEventSynchronize 返回
+  → waiter 更新 Step 的 ready 层数
+  → C++ condition variable 唤醒发送线程
+```
+
+### 6.6 Event 与 `submit_req_send` / `submit_delta_send` 如何对应
+
+最重要的结论是：
+
+> Event 与 request 不是一一对应；Event 是 **step × layer** 级别，发送任务是
+> **step × target × request/token range** 级别。二者通过共享的 `Step` 对象关联。
+
+这里的“step × layer”是逻辑语义。物理上 Python 只创建
+`num_layers` 个 `_events[layer_id]` 并在不同 step 中重复 record；每次
+`cudaEventSynchronize` 等待的是该 event 最近一次 record 所捕获的 stream
+进度。`StepGuard`、`step_id` 和严格的逐层调用顺序共同把这组复用 event 解释为
+当前 step 的 layer-ready 信号。
+
+可以把一个 step 想象成一张表：
+
+```text
+                         layer 0 event   layer 1 event   layer 2 event
+request A → target X          │               │               │
+request B → target X          │               │               │
+request C → target Y          │               │               │
+                              │               │               │
+每一列 event ready ───────────┴───────────────┴───────────────┘
+会放行该层所有相关 target/request 的发送
+```
+
+为什么一个 layer event 可以覆盖多个 request？因为 vLLM 的一次 attention
+forward 通常以 batch 形式同时处理本 step 中的多个 request，并把它们这一层的
+KV 写入各自 block。只要这些写入都排在同一个 current stream 的 event marker
+之前，event ready 就表示该 batch 在这一层需要发送的 KV 都已经可读。
+
+#### 6.6.1 `submit_req_send` 描述“发什么”，不创建 event
+
+`submit_req_send` 创建的 `RequestInfo` 保存：
+
+```text
+req_id
+dst_inst_id / dst_worker_id
+src_blocks / dst_blocks
+```
+
+随后 `ReqSendTask` 再保存本次 token 区间：
+
+```text
+seen_tokens
+new_tokens
+reach_last_token
+```
+
+这些任务先按 target 放入 `targets_tasks_buf_`。它们回答的是：
+
+```text
+哪个 request？
+把哪些 token 对应的 source block 发到哪些 destination block？
+发给哪个远端 worker？
+```
+
+它们不回答“第几层现在算完了”，也不会创建 CUDA Event。
+
+#### 6.6.2 `start_send` 把所有 batch 绑定到同一个 `Step`
+
+`start_send(stepid, ...)` 创建：
+
+```cpp
+auto step = std::make_shared<Step>(stepid);
+auto step_guard = std::make_shared<StepGuard>(ctx, step);
+```
+
+随后封存 `targets_tasks_buf_` 并提交给 `TargetMgr`。在
+`TargetMgr::do_submit` 中，每个 target batch 都获得同一个指针：
+
+```cpp
+worker_tasks.step = step;
+```
+
+所以可能出现：
+
+```text
+BatchSendTask(target X, requests A/B) ─┐
+                                      ├─ shared Step(step_id=42)
+BatchSendTask(target Y, request C) ────┘
+```
+
+两个 target 线程各自解析自己的 request/block，但在发送每层前都调用：
+
+```cpp
+batch.step->wait_layer_ready(layer_i);
+```
+
+这就是任务与 Event 的真正连接点。
+
+#### 6.6.3 一个具体例子
+
+假设 step 42 有：
+
+```text
+request A：src block 5 → target X block 12
+request B：src block 8 → target X block 20
+request C：src block 3 → target Y block 7
+模型共有 3 层
+```
+
+任务侧先形成：
+
+```text
+target X batch = {A, B}
+target Y batch = {C}
+```
+
+两个 batch 都绑定 `Step(42)`。运行时：
+
+```text
+event[0] ready
+  ├─ target X 发送 A/B 的 layer 0 block
+  └─ target Y 发送 C 的 layer 0 block
+
+event[1] ready
+  ├─ target X 发送 A/B 的 layer 1 block
+  └─ target Y 发送 C 的 layer 1 block
+
+event[2] ready
+  ├─ target X 发送 A/B 的 layer 2 block
+  └─ target Y 发送 C 的 layer 2 block
+```
+
+所以 event 不需要知道 request id。每个 target 的 `BatchSendTask` 已经知道自己
+要发哪些 request/block；event 只负责打开“现在允许读取第 i 层”的公共闸门。
+
+#### 6.6.4 `submit_delta_send` 的区别
+
+首次 `submit_req_send` 若 `has_last_token=False`，client 会把
+`RequestInfo` 保存在：
+
+```cpp
+reqs_[req_id]
+```
+
+后续 `submit_delta_send(req_id, seen_tokens, new_tokens, ...)` 用 `req_id` 找回
+原来的：
+
+```text
+target
+src_blocks / dst_blocks
+```
+
+再为新的 token 区间创建一个 `ReqSendTask`，放入当前 step 的
+`targets_tasks_buf_`。因此 delta task 仍然受**当前 step 的逐层 Event**控制，
+并不存在“每个 delta task 自己对应一个 CUDA Event”。
+
+例如：
+
+```text
+step 42:
+  submit_req_send(A, seen=0, new=128, has_last=False)
+  → 由 step 42 的 event[0..L-1] 逐层放行
+
+step 43:
+  submit_delta_send(A, seen=128, new=16, has_last=True)
+  → 复用 A 的 target/block 映射
+  → 由 step 43 的 event[0..L-1] 逐层放行
+```
+
+这里 `step_id` 防止 step 42 的 event 通知错误地推进 step 43，但它不负责区分
+request。request/block 的区分早已编码在各 target 的 `BatchSendTask` 中。
+
+### 6.7 `flush_send_step` 在这套状态机中的作用
 
 Python 最后调用 `flush_send_step()`，C++ 的 `flush_send` 会执行：
 
