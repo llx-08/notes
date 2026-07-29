@@ -604,6 +604,320 @@ blade-kvt 的 `blade_kvt/__init__.py::set_envs()` 默认设置
   → 可产生多个网络 packet 和多个本地 PCIe transaction
 ```
 
+##### 这 1 个 CQE 从哪里来：不是接收端把 CQE 发回来
+
+这里必须区分 **transport ACK** 与 **CQE**：
+
+```text
+transport ACK
+  由远端 RNIC 按 RC transport protocol 返回
+  会经过网络回到发送端 RNIC
+
+CQE
+  由发送端 RNIC 在本地生成
+  通过 DMA 写入发送端主机上的 local CQ
+  不会从接收端跨网络“传回来”
+```
+
+plain RDMA WRITE 的接收端通常没有 Receive WQE，也不会因为这次 WRITE 自然产生一个
+供接收端应用 poll 的 success CQE。远端 RNIC 处理 WRITE packet、访问目标 MR，并按
+RC 可靠传输规则返回 ACK；发送端 RNIC 收到 ACK、满足该 WQE 的 transport completion
+条件后，才在**发送端本地 CQ**写入 send CQE：
+
+```text
+发送端 CPU/provider
+  │ ① post WR，敲 doorbell
+  ▼
+发送端 RNIC
+  │ ② DMA read local source
+  │ ③ packetize 并发送
+  ▼
+网络
+  ▼
+接收端 RNIC
+  │ ④ 校验 QP/PSN/rkey/address
+  │ ⑤ 向目标 memory 发起写入
+  │ ⑥ 返回 RC transport ACK
+  ▼
+网络
+  ▼
+发送端 RNIC
+  │ ⑦ 收到 ACK，推进 requester QP 状态
+  │ ⑧ 为 signaled WQE 在 local CQ 写 CQE
+  ▼
+发送端 CQ polling thread
+  │ ⑨ poll 到 CQE，Barex 回收 depth/调用 callback
+  ▼
+blade-kvt future 完成
+```
+
+所以如果“`WriteBatch` 时间”指的是从提交到 Barex callback/future 完成的时间，它通常
+包含：
+
+```text
+本地软件提交/排队
++ 写 WQE/doorbell
++ 发送端 RNIC DMA read source
++ 数据从发送端传到接收端
++ 接收端 RNIC 的 transport/memory 操作
++ transport ACK 从接收端返回发送端
++ 发送端 RNIC 写 local CQE
++ CQ polling/Barex batch completion/callback 调度
+```
+
+但如果测量的是 `WriteBatch()` 这个异步 API 从调用到返回的时间，则通常只包含：
+
+```text
+构造/接受/排队 WQE 的 submission latency
+```
+
+它不等待数据传输结束。blade-kvt
+`kvtransfer/src/rdma_channel.cpp` 中的 helper 把 `write_start_ts` 放在调用
+`ch->WriteBatch()` 前，并在 callback 中计算 `send_us`，因此这里的 `send_us` 属于
+前一种“直到异步 completion”的时间，而不是单纯的函数调用耗时。
+
+在 `ACCL_WRITEBATCH_OPT=2` 下，一轮有 N 条按同一 QP 顺序执行的 WR，但只将最后一条
+设置为 signaled：
+
+```text
+WR0 ─ unsignaled
+WR1 ─ unsignaled
+...
+WR(N-1) ─ signaled
+             ↓
+        生成这一轮的 CQE
+```
+
+发送端 poll 到最后一条的成功 CQE 后，可以依据该 QP 的有序完成关系，认为它之前的
+unsignaled WR 已越过相应 completion 边界，并一次归还这一轮占用的 send depth。
+如果整个 `WriteBatch` 被分成多轮，Barex 要等所有轮完成才调用最终 callback。
+
+##### CQE 的职责到底是什么
+
+CQE 是 **Completion Queue Element**。它的职责不是在两台机器之间保证可靠传输；
+可靠传输主要由 RNIC 的 transport engine 完成。CQE 负责把硬件内部的最终结果汇报给
+**本机软件**：
+
+```text
+RNIC 内部状态
+  “这条 WQE 成功完成了”
+  “这条 WQE retry 次数耗尽了”
+  “远端 rkey/address 非法”
+  “这个 Receive WQE 收到一条消息”
+             │
+             │ DMA write CQE
+             ▼
+本机 CQ
+             │
+             │ ibv_poll_cq()
+             ▼
+应用/Barex
+  根据 status、opcode、wr_id 等字段处理结果
+```
+
+一条 CQE 主要帮助软件完成以下工作：
+
+| 职责 | 例子 |
+| --- | --- |
+| 判断成功或失败 | `wc.status == IBV_WC_SUCCESS`，或 retry/access/length 等错误 |
+| 找回原请求上下文 | `wc.wr_id` 映射到 buffer、promise、callback、batch |
+| 安全管理本地 buffer 生命周期 | non-inline SEND/WRITE 完成后才允许复用 source buffer |
+| 回收 SQ/RQ 软件资源 | 归还 send depth、释放 request metadata、重新 post receive |
+| 获得接收信息 | Receive CQE 可带 `byte_len`、`imm_data`、source QP 等 |
+| 驱动上层状态机 | Barex callback、blade-kvt future、错误关闭 channel |
+
+发送 CQE 与接收 CQE也是本地的：
+
+```text
+发送端 local CQE
+  汇报发送端 SQ WQE 的完成结果
+
+接收端 local CQE
+  汇报接收端 Receive WQE 被消费/收到通知
+  例如 SEND/RECV 或 WRITE_WITH_IMM
+
+plain RDMA WRITE
+  接收端没有自然的 success Receive CQE
+```
+
+所以 CQE 可以理解成“网卡给本机软件的完成报告”，而不是“远端发回来的收据”。
+
+用 blade-kvt/Barex 的 `WriteBatch opt=2` 看，CQE 的用途非常具体：
+
+```text
+Barex 构造一轮 N 个 WR
+  → 最后一个 WR.wr_id 指向 x_wr_id
+  → x_wr_id.send_semaphore = N
+  → 最后一个 WR 设置 IBV_SEND_SIGNALED
+
+发送端 RNIC 生成 CQE
+  → CQE.wr_id 把 x_wr_id 原样带回来
+
+XContextImpl::ProcessOneIoEvent(wc)
+  → 用 wc.wr_id 找回 x_wr_id
+  → 检查 wc.status
+  → XChannelImpl::IoEventOccur()
+  → ReleaseAndPostSend(N)，一次归还这一轮的发送额度
+  → 执行 x_wr_id.done
+  → Barex 聚合各轮完成
+  → blade-kvt promise/future 完成
+```
+
+如果没有这个 CQE，发送端软件会面临几个实际问题：
+
+```text
+不知道 source GPU buffer 何时可以覆盖/复用
+不知道 SQ 中这 N 个 WQE 何时可以回收
+不知道应该归还多少 send depth
+不知道该调用哪一个 WriteBatch callback
+不知道操作成功，还是 retry/rkey/QP 等错误
+```
+
+软件当然可以改用额外 control message、轮询 memory flag 或保守 timeout，但这些都是
+在重新实现另一套 completion 协议。CQ/CQE 的意义就是让 RNIC 用标准、低开销方式把
+本地工作完成状态交给软件。
+
+##### 发送方如何确认每个 packet 没丢：RC 的 PSN、ACK/NAK、timer 与 retry
+
+以下讨论的是 blade-kvt/Barex 使用的 **RC（Reliable Connected）QP**。RC 的可靠性
+协议运行在两个 RNIC 的硬件 transport engine 之间，一般不需要接收端 CPU 为每个
+packet 处理 ACK：
+
+```text
+发送端应用只提交一个 WR/WQE
+             │
+             ▼
+发送端 RNIC 把 WQE 拆成 packet
+  packet PSN=100
+  packet PSN=101
+  packet PSN=102
+  packet PSN=103
+             │
+             ▼
+接收端 RNIC
+  检查 ICRC/完整性
+  检查 QP 与 PSN 是否符合预期
+  执行数据放置
+  更新 expected PSN
+  返回 ACK 或 NAK
+```
+
+PSN 是 **Packet Sequence Number**。发送端 requester QP 会保存仍未确认的 PSN/WQE
+状态，接收端 responder QP 会保存下一个期望的 PSN。不同异常大致这样处理：
+
+| 情况 | 接收端/发送端 RNIC 的典型行为 |
+| --- | --- |
+| packet 正常且 PSN 正确 | 接收、推进 PSN，按协议返回 ACK |
+| packet 在网络中丢失 | 后续 PSN 形成 gap 时可能触发 sequence NAK；或发送端等待 ACK 超时 |
+| packet 损坏、ICRC 不正确 | 接收端丢弃，不把它当作成功 packet；之后由 NAK/ACK timeout 触发恢复 |
+| packet 重复 | 根据 PSN 识别重复，避免把同一操作重复执行，并重建正确 ACK 状态 |
+| 接收端暂时无 Receive WQE | 对需要 RQ 的 SEND/WRITE_WITH_IMM 返回 RNR NAK；plain WRITE 不依赖 RQ |
+| rkey/address/operation 非法 | 返回远端访问/操作错误，最终在 requester completion 中体现 |
+
+ACK 不一定严格“一 packet 一个 ACK”。硬件可以按协议进行累计、延迟或合并 ACK。
+例如某个 ACK 推进到 PSN 103，可以让 requester 知道它覆盖范围内更早的 packet 已经
+按 RC 语义推进，不需要给应用暴露四个 ACK。
+
+丢包恢复的大致时间线：
+
+```text
+发送 PSN 100
+发送 PSN 101       ← 在网络中丢失
+发送 PSN 102
+       │
+       ├─ 接收端发现期望 101 却看到 102，返回 sequence NAK
+       │        或
+       └─ 发送端等待 ACK 超过 local ACK timeout
+                    ↓
+              发送端 RNIC 硬件重传
+                    ↓
+        在 retry_cnt 预算内恢复成功
+                    → 应用最终只看到 SUCCESS CQE
+
+        一直无法恢复、retry 次数耗尽
+                    → QP 进入错误路径
+                    → 本地 CQE 报 IBV_WC_RETRY_EXC_ERR 等错误
+```
+
+因此，发送方软件不需要自己逐个确认 packet：
+
+```text
+packet 级可靠性
+  RNIC 用 PSN + ACK/NAK + timeout + retry 负责
+
+WQE/WR 级结果
+  RNIC 用本地 CQE 汇报给软件
+
+业务级“远端已经消费”
+  应用协议用业务 ACK/response 负责
+```
+
+假设一个 8 MiB RDMA WRITE 被拆成 2048 个 4 KiB transport packet，应用仍可能只得到
+一个 signaled WR CQE。这个 success CQE 表示 RNIC 的 RC transport state machine
+已经把整条 WQE 的所有 packet 推进到成功 completion 边界；它不是“2048 个 CQE
+压缩成一个”，而是 packet 可靠性原本就由低层协议管理。
+
+还要注意 QP transport 类型：
+
+| QP 类型 | 是否提供上述硬件可靠性 |
+| --- | --- |
+| RC | 提供有序、ACK/retry 驱动的可靠连接语义 |
+| UC | connected 但不提供与 RC 相同的重传保证 |
+| UD | datagram；应用不能依赖 RC 式 ACK/retry，需要上层自行处理可靠性 |
+
+所以“RDMA 都绝不丢包”并不准确。更准确的说法是：**RC 会在硬件中尝试检测并重传
+丢失/损坏的 packet；在 retry 预算内恢复时应用看到成功，无法恢复时通过 error CQE/
+QP error 告诉应用，而不是静默伪装成成功。**
+
+##### 目标是 GPU HBM 时：transport completion 不等于 GPU kernel 已经可见/消费
+
+还不能把上面的第 ⑤ 步简单表述成“数据已经被 GPU kernel 安全看到”。至少有三个
+不同边界：
+
+```text
+A. 远端 RNIC 已按 transport 规则处理 WRITE，并返回 ACK
+B. RNIC 发出的 PCIe peer write 已达到要求的 memory/ordering scope
+C. 远端 GPU kernel 在正确同步后观察并消费新数据
+```
+
+local send CQE 是 transport completion；它绝不表示 C，也不表示远端业务 callback
+已经执行。NVIDIA GPUDirect RDMA 使用独立于 GPU kernel 的数据路径，官方文档明确
+提醒：并发运行的 GPU kernel 可能在缺少正确 CUDA synchronization/work-submission
+ordering 时看到旧数据、部分数据或乱序数据。因此远端还需要协议通知、buffer
+ownership、CUDA stream/event/API ordering；特定平台也可以使用
+`cuFlushGPUDirectRDMA()` 建立所需 visibility scope。
+
+Barex 还提供了 `ACCL_WRITE_CONFIRM`：
+
+```text
+普通模式（默认 false）
+  最后一轮 WRITE completion
+    → WriteBatch callback
+
+ACCL_WRITE_CONFIRM=1
+  最后一轮 WRITE completion
+    → 对最后一个 remote address 再发起 ReadSingle
+    → READ completion
+    → WriteBatch callback
+```
+
+代码位于
+`src/barex/impl/rdma/xchannel_impl.cc::WriteOrReadBatchAll()/MakeSendBatch()`：
+当 `gdr_confirm` 开启时，Barex 在 WRITE 成功后额外执行一次 RDMA READ。这个
+read-after-write 用来加强对先前 GDR write 的完成/顺序确认，但也会增加一次额外
+READ request/response 与 completion 延迟。Barex 默认
+`default_write_confirm=false`，当前 blade-kvt 的 `set_envs()` 也没有默认打开
+`ACCL_WRITE_CONFIRM`。
+
+最终建议把几个时间指标分别命名：
+
+| 指标 | 起点 → 终点 | 包含 ACK/CQE 吗 |
+| --- | --- | --- |
+| API submission latency | 调用 `WriteBatch()` → 函数返回 | 通常不包含 |
+| WR transport completion latency | post/doorbell → local CQE | 包含 RC ACK 推进与 local CQE |
+| Barex batch callback latency | `WriteBatch()` → 最终 callback | 包含所有轮的 CQE、poll 与 Barex 聚合；confirm 开启时还含额外 READ |
+| Remote business completion latency | 业务提交 → 远端确认已处理 | 需要上层 ACK；不由 plain WRITE CQE表达 |
+
 回到最初的类比，建议记成这一条：
 
 ```text
@@ -2391,3 +2705,6 @@ WC status
 - [NVIDIA RDMA Aware Networks Programming User Manual](https://docs.nvidia.com/rdma-aware-networks-programming-user-manual-1-7.pdf)
 - [rdma-core mlx5 `post_send_db()`：DBR、UAR MMIO 与 BlueFlame 的实际实现](https://github.com/linux-rdma/rdma-core/blob/master/providers/mlx5/qp.c)
 - [NVIDIA DOCA Verbs：UAR、WQ UMEM 与 DBR UMEM](https://docs.nvidia.com/doca/archive/3-1-0/doca%2Bverbs/index.html)
+- [NVIDIA GPUDirect RDMA：Synchronization and Memory Ordering](https://docs.nvidia.com/cuda/gpudirect-rdma/#synchronization-and-memory-ordering)
+- [CUDA Driver API：`cuFlushGPUDirectRDMA()`](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__DEVICE.html)
+- [NVIDIA InfiniBand Security Overview：RC hardware transport、sequence number 与 CRC](https://docs.nvidia.com/networking/display/nvidia-infiniband-security-overview-and-guidelines.pdf)
