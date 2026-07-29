@@ -891,6 +891,105 @@ SQ slot/应用资源可安全复用
 
 ### 1.8 Doorbell 是什么，为什么不能先敲再写完 WQE
 
+#### 1.8.1 先回答：它不是 CPU 中断
+
+Doorbell 可以直译为“门铃”。它解决的问题是：
+
+> 软件已经把新的 WQE 写入 SQ/RQ，但 RNIC 怎么知道“现在有新任务可以取了”？
+
+软件写完队列后再“按一下门铃”，告诉 RNIC 某个队列的 producer index 已经前进。
+它通常不携带业务 payload，只携带或关联很少的控制信息，例如 QP/WQ 标识、最新
+producer index 或新 WQE 的 control segment。
+
+它与 CPU 中断的方向正好相反：
+
+```text
+Doorbell：
+CPU/provider  ──通知──>  RNIC
+“我提交了新 WQE”
+
+MSI-X interrupt：
+RNIC          ──通知──>  CPU
+“CQ 中出现 completion/event”
+```
+
+所以在普通 CPU 发起的 verbs 路径中，敲 doorbell **不是 RNIC 给 CPU 发中断**，
+也通常不会导致线程被中断或进行一次上下文切换。它是当前 CPU 线程主动执行的一次
+设备通知操作。高性能程序通常 polling CQ，连完成阶段的 MSI-X 都不使用；只有应用
+arm CQ、使用 completion channel/event 等事件驱动方式时，RNIC 才可能在 completion
+侧通过 MSI-X 唤醒 CPU。
+
+#### 1.8.2 CPU 如何“写到网卡”：MMIO、BAR 与 UAR
+
+设备初始化时，内核驱动和 provider 会建立所需资源：
+
+```text
+RNIC PCIe BAR 中的一部分寄存器空间
+  ↓ 内核建立 mmap
+用户进程 virtual address 中的一段 MMIO mapping
+  ↓ mlx5 中常称 UAR：User Access Region
+provider 可以在用户态直接访问的 doorbell register
+```
+
+这里的 virtual address 看起来也能被 C 指针访问，但它背后不是普通 DRAM，而是
+PCIe 设备的 MMIO 地址空间。CPU 执行类似下面的 store：
+
+```cpp
+*doorbell_mmio_address = doorbell_value;
+```
+
+从硬件路径看大致是：
+
+```text
+CPU store instruction
+  → CPU/uncore 识别该地址属于 MMIO，而不是普通 cacheable DRAM
+  → Root Complex 将 store 变成一个很小的 PCIe Memory Write TLP
+  → TLP 经过 PCIe link/switch 到达 RNIC BAR/UAR
+  → RNIC doorbell logic 解码通知
+  → RNIC 调度对应 QP/WQ，读取并执行新 WQE
+```
+
+因此要区分：
+
+| 问题 | 答案 |
+| --- | --- |
+| doorbell 是 CPU instruction 吗 | provider 最终通常会执行 store/MMIO write instruction |
+| 是 CPU 中断吗 | **不是** |
+| 是系统调用吗 | fast path 通常不是；资源创建/mmap 等 control path 才需要内核 |
+| 是网络 packet 吗 | 不是 RoCE/InfiniBand packet；它通常先是一个本机 PCIe MMIO Write |
+| doorbell 搬运 payload 吗 | 普通模式通常不搬；它只通知设备取 WQE，payload 由后续 DMA/网络传输搬运 |
+
+“fast path 通常不需要 syscall”非常重要。QP、SQ、CQ、UAR mapping 建好后，
+`ibv_post_send()` 往往直接进入用户态 provider：写 SQ memory、做 memory barrier、
+写 doorbell，无需每条 WR 都陷入内核。
+
+#### 1.8.3 Doorbell record 与 MMIO doorbell 不是同一块东西
+
+文档和代码中经常同时出现两个名字：
+
+```text
+Doorbell Record（DBR）
+  通常位于 host memory
+  保存 producer/consumer index 等持久状态
+
+MMIO Doorbell / UAR register
+  位于 RNIC BAR 映射的 MMIO 空间
+  用一次 PCIe write 主动“提醒”设备
+```
+
+可以把它们类比为：
+
+```text
+DBR：写在取件柜旁边的“最新有 103 件货”记录
+MMIO doorbell：按铃，提醒工作人员现在去看记录/队列
+```
+
+不同 RNIC、不同队列类型和不同优化模式对二者的使用方式并不完全相同；“doorbell”
+一词有时也被宽泛地用于整个更新 DBR + 写 MMIO 的过程，所以阅读代码时必须看它
+究竟指 host-memory record 还是 BAR/UAR register。
+
+#### 1.8.4 一次 `ibv_post_send()` 中的具体顺序
+
 WQE ring 是一排已经分配好的槽位。软件先写槽位，再通知设备“新的 producer index
 到这里了”：
 
@@ -907,11 +1006,100 @@ consumer                         producer
 
 写好 WQE2/WQE3
   → memory barrier
-  → doorbell 告诉 RNIC producer 已前进
+  → 更新 doorbell record / producer index
+  → MMIO doorbell 告诉 RNIC producer 已前进
 ```
 
-若设备在 WQE 字段完全可见前就收到 doorbell，理论上可能读取到部分旧值/未完成内容。
-因此 provider 必须处理正确的内存顺序；应用不应绕过 provider 自己随意写 doorbell。
+完整顺序可以写成：
+
+```text
+① 应用调用 ibv_post_send(qp, wr_list, ...)
+② provider 在 SQ ring 中预留 slot
+③ provider 把每条 WR 编码成 RNIC 专用 WQE
+④ 更新软件 producer index
+⑤ device memory barrier
+   确保 WQE store 对设备可见
+⑥ 写 host-memory doorbell record
+⑦ 写 UAR/MMIO doorbell
+⑧ 必要时 flush write-combining buffer
+⑨ RNIC 收到通知，调度对应 QP
+⑩ RNIC DMA fetch WQE/payload 并开始执行
+```
+
+第 ⑤ 步不能省略。CPU、cache、store buffer、Root Complex 与 PCIe 可能存在允许的
+写入缓冲和顺序优化。如果 MMIO doorbell 先到达，而 WQE 内容尚未完整地对 RNIC
+可见，RNIC 可能读到旧字段或只写了一半的 WQE。因此 provider 必须使用适合平台的
+memory barrier/MMIO ordering primitive；应用不应绕过 provider 自己随意写
+doorbell。
+
+#### 1.8.5 用 mlx5 provider 源码看真实实现
+
+blade-kvt/Barex 自己并没有直接写 ConnectX doorbell。调用链是：
+
+```text
+blade-kvt
+  → XChannel::WriteBatch
+Barex XChannelImpl::PostSend()
+  → verbs_->IbvPostSend()
+libibverbs mlx5 provider
+  → 编码 mlx5 WQE
+  → 更新 DBR
+  → 写 UAR/BlueFlame register
+```
+
+Barex 的 `XChannelImpl::PostSend()` 最终只是调用 `IbvPostSend()`；真正依赖网卡型号的
+doorbell 逻辑位于 provider。
+
+在 rdma-core mlx5 provider 的 `providers/mlx5/qp.c::post_send_db()` 中，可以看到
+与上面流程一一对应的实现：
+
+```c
+qp->sq.head += nreq;                         // 推进 SQ 软件状态
+udma_to_device_barrier();                    // WQE 先对设备可见
+qp->db[MLX5_SND_DBR] = ...;                  // 更新 host-memory DBR
+
+if (can_use_blueflame)
+    mlx5_bf_copy(bf->reg + bf->offset, ...); // WQE/control 写入 MMIO
+else
+    mmio_write64_be(bf->reg + bf->offset,
+                    *(__be64 *)ctrl);         // 普通 MMIO doorbell
+
+mmio_flush_writes();                         // 刷新/排序 WC MMIO write
+```
+
+这里的 `bf->reg` 指向映射到用户空间的 UAR/BlueFlame MMIO 区域。provider 还要处理
+多个 CPU thread 共用 UAR 时的锁与 write-combining 顺序，避免 RNIC 先看到较新的
+doorbell、后看到较旧的 doorbell。
+
+#### 1.8.6 普通 doorbell 与 BlueFlame 的区别
+
+普通方式可以简化为：
+
+```text
+CPU 把完整 WQE 写到 host SQ memory
+  → CPU 用一个很小的 MMIO write 敲 doorbell
+  → RNIC 收到通知
+  → RNIC 再通过 PCIe DMA read 取 WQE
+```
+
+BlueFlame 是 mlx5 的一种低延迟优化：
+
+```text
+CPU 把 WQE/control 的一部分或全部直接复制到 UAR 的 MMIO 区域
+  → RNIC 在 doorbell 路径上直接获得 WQE
+  → 对合适的小 WQE，可以减少一次 RNIC DMA fetch WQE 的延迟
+```
+
+BlueFlame 不等于 `IBV_SEND_INLINE`：
+
+| 机制 | 解决什么问题 |
+| --- | --- |
+| BlueFlame | provider 怎样把 **WQE** 更快交给 RNIC |
+| `IBV_SEND_INLINE` | payload 是否直接放进 **WQE**，从而避免 RNIC 再 DMA read application buffer |
+
+两者可以相关联——小型 inline WQE 很适合 BlueFlame——但它们描述的是两个不同层次。
+
+#### 1.8.7 为什么 batch 可以减少 doorbell
 
 一次 `ibv_post_send()` 可以提交一条 WR linked list。provider 可以在准备一串 WQE 后
 只做一次或更少的 doorbell 动作，所以 batch posting 能减少：
@@ -929,6 +1117,12 @@ N 个 WR → N 个 WQE → 可以一次 post/doorbell 通知
 
 如果应用想真正提高 `bytes/WQE`，需要把多个小逻辑对象合并进更大的 buffer/WR，或者
 在 capability 允许时使用一个带多个 SGE 的 WR。
+
+还要注意，不只有 SQ 有 doorbell：
+
+- post Receive WR 时，RQ/SRQ 也需要更新队列状态并通知设备；
+- CQ consumer index 更新或 arm notification 也可能使用 CQ doorbell/doorbell record；
+- 它们的寄存器和值不同，但共同思想都是“软件更新共享队列状态后通知硬件”。
 
 ### 1.9 WQE、网络 Packet 和 PCIe TLP 不是一一对应
 
@@ -2195,3 +2389,5 @@ WC status
 - [`ibv_wr_*` builder API：SEND、READ、WRITE、WRITE_WITH_IMM 与 Atomic](https://man7.org/linux/man-pages/man3/ibv_wr_rdma_read.3.html)
 - [Linux InfiniBand/RDMA interfaces](https://docs.kernel.org/driver-api/infiniband.html)
 - [NVIDIA RDMA Aware Networks Programming User Manual](https://docs.nvidia.com/rdma-aware-networks-programming-user-manual-1-7.pdf)
+- [rdma-core mlx5 `post_send_db()`：DBR、UAR MMIO 与 BlueFlame 的实际实现](https://github.com/linux-rdma/rdma-core/blob/master/providers/mlx5/qp.c)
+- [NVIDIA DOCA Verbs：UAR、WQ UMEM 与 DBR UMEM](https://docs.nvidia.com/doca/archive/3-1-0/doca%2Bverbs/index.html)
