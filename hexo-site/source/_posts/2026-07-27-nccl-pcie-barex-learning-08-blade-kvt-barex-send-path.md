@@ -809,6 +809,106 @@ void SyncSemaphore::wait(uint32_t cond) {
 }
 ```
 
+`ready_` 不是 `wait()` 的局部变量，也不是 CUDA Event 内部的状态。它定义在
+`kvtransfer/include/utils/semaphore.h` 的 `SyncSemaphore` 对象中；省略
+cache-line padding 后，定义如下：
+
+```cpp
+class SyncSemaphore {
+ public:
+  SyncSemaphore() = default;
+  void wait(uint32_t cond);
+  void release();
+  uint32_t release(uint32_t cond);
+
+ private:
+  uint32_t ready_{0};
+  std::condition_variable cv_;
+  std::mutex c_mutex_;
+};
+```
+
+`ready_{0}` 是 C++ 的类成员默认初始化，表示每个新建的 `SyncSemaphore` 一开始
+水位都是 0。`wait()` 里的：
+
+```cpp
+ready_
+```
+
+等价于：
+
+```cpp
+this->ready_
+```
+
+也就是“当前这个 SyncSemaphore 对象所保存的共享状态”。它位于 CPU 内存中，
+由 `c_mutex_` 保护，不是 GPU memory，也不会被 CUDA Event 自动修改。
+
+`Step` 又把其中一个对象作为成员：
+
+```cpp
+class Step {
+  ...
+ private:
+  SyncSemaphore data_signal_;
+};
+```
+
+因此对象归属是：
+
+```text
+Step(step 42)
+└─ data_signal_
+   ├─ ready_ = 0
+   ├─ cv_
+   └─ c_mutex_
+
+Step(step 43)
+└─ 另一个 data_signal_
+   ├─ ready_ = 0
+   ├─ cv_
+   └─ c_mutex_
+```
+
+每次 `start_send` 执行：
+
+```cpp
+auto step = std::make_shared<Step>(stepid);
+```
+
+都会创建新的 `Step`，进而创建新的 `data_signal_`，其 `ready_` 重新从 0 开始。
+同一个 step 的所有 `BatchSendTask` 持有同一个 `shared_ptr<Step>`，所以不同
+target 线程最终访问的是同一个 `step->data_signal_.ready_`。
+
+修改 `ready_` 的入口只有 `SyncSemaphore` 自己的两个 `release`：
+
+```cpp
+void release() {
+  ready_++;                 // 加一
+  cv_.notify_all();
+}
+
+uint32_t release(uint32_t cond) {
+  if (ready_ < cond) {
+    ready_ = cond;          // 推进到指定水位
+    cv_.notify_all();
+  }
+  return ready_;
+}
+```
+
+CUDA Event 与它的关系是显式的：
+
+```text
+CUDA Event complete
+  → StepGuard 的 cudaEventSynchronize 返回
+  → StepGuard 调用 Step::notify_layer_ready(i + 1)
+  → data_signal_.release(i + 1)
+  → 修改 CPU 成员 ready_
+```
+
+Event 自己不会直接找到或写入 `ready_`。
+
 #### 6.5.1 `wait(cond)` 的逐行含义
 
 这里的 `wait` 不是“从 semaphore 取走一个许可”，它是：
