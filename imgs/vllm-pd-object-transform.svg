@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="560" viewBox="0 0 1500 560">
+  <defs>
+    <style>.bg{fill:#f8fafc}.title{font:700 28px system-ui;fill:#0f172a}.box{fill:#fff;stroke:#64748b;stroke-width:2}.h{font:700 17px system-ui;fill:#0f172a}.t{font:13px system-ui;fill:#475569}.a{stroke:#2563eb;stroke-width:3;marker-end:url(#m)}</style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0L0 6L9 3z" fill="#2563eb"/></marker>
+  </defs>
+  <rect class="bg" width="1500" height="560"/><text class="title" x="45" y="52">一个 KV 发送任务的数据结构如何逐层变形</text>
+  <g transform="translate(35 105)">
+    <rect class="box" rx="14" width="210" height="300"/><text class="h" x="20" y="38">vLLM Request</text>
+    <text class="t" x="20" y="73">request_id</text><text class="t" x="20" y="98">token IDs</text><text class="t" x="20" y="123">computed tokens</text>
+    <text class="t" x="20" y="148">KV block table</text><text class="t" x="20" y="173">transfer params</text>
+  </g>
+  <path class="a" d="M245 255L295 255"/>
+  <g transform="translate(295 105)">
+    <rect class="box" rx="14" width="220" height="300"/><text class="h" x="20" y="38">PReqMeta</text>
+    <text class="t" x="20" y="73">seen / new tokens</text><text class="t" x="20" y="98">P / D block IDs</text>
+    <text class="t" x="20" y="123">D instance</text><text class="t" x="20" y="148">worker info</text><text class="t" x="20" y="173">has_last / freeze</text>
+  </g>
+  <path class="a" d="M515 255L565 255"/>
+  <g transform="translate(565 105)">
+    <rect class="box" rx="14" width="220" height="300"/><text class="h" x="20" y="38">BatchSendTask</text>
+    <text class="t" x="20" y="73">按 instance</text><text class="t" x="20" y="98">再按 worker 分组</text>
+    <text class="t" x="20" y="123">共享 Step</text><text class="t" x="20" y="148">substepid</text><text class="t" x="20" y="173">多个 ReqSendTask</text>
+  </g>
+  <path class="a" d="M785 255L835 255"/>
+  <g transform="translate(835 105)">
+    <rect class="box" rx="14" width="220" height="300"/><text class="h" x="20" y="38">IpcBlock</text>
+    <text class="t" x="20" y="73">src_offset</text><text class="t" x="20" y="98">dst_offset</text><text class="t" x="20" y="123">length</text>
+    <text class="t" x="20" y="160">由 cache shape / TP</text><text class="t" x="20" y="185">和 Block ID 计算</text>
+  </g>
+  <path class="a" d="M1055 255L1105 255"/>
+  <g transform="translate(1105 105)">
+    <rect class="box" rx="14" width="350" height="300"/><text class="h" x="20" y="38">RDMA rw_memp_t → WR/WQE</text>
+    <text class="t" x="20" y="73">local SGE.addr = P base + src_offset</text><text class="t" x="20" y="98">SGE.length = length</text>
+    <text class="t" x="20" y="123">SGE.lkey = P GPU MR lkey</text><text class="t" x="20" y="148">remote addr = D base + dst_offset</text>
+    <text class="t" x="20" y="173">rkey = D GPU MR rkey</text><text class="t" x="20" y="215">Barex/provider 最终编码 WQE</text>
+  </g>
+  <text class="t" x="45" y="510">Block ID 是逻辑页号；只有结合布局、注册基址和 key 后，才成为 RNIC 可以执行的任务。</text>
+</svg>

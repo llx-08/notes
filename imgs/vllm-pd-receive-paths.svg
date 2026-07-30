@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="690" viewBox="0 0 1440 690">
+  <defs><style>.bg{fill:#f8fafc}.title{font:700 28px system-ui;fill:#0f172a}.h{font:700 18px system-ui;fill:#0f172a}.t{font:14px system-ui;fill:#475569}.gpu{fill:#dbeafe;stroke:#2563eb;stroke-width:2}.host{fill:#fef3c7;stroke:#d97706;stroke-width:2}.nic{fill:#dcfce7;stroke:#059669;stroke-width:2}.a{stroke:#334155;stroke-width:3;fill:none;marker-end:url(#m)}.r{stroke:#ea580c;stroke-width:5}</style><marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0L0 6L9 3z" fill="#334155"/></marker></defs>
+  <rect class="bg" width="1440" height="690"/><text class="title" x="50" y="50">Blade-KVT 三种数据路径：网络段相同，不代表端到端路径相同</text>
+  <text class="h" x="50" y="120">RDMA Direct</text>
+  <rect class="gpu" x="210" y="85" rx="10" width="220" height="70"/><text class="t" x="255" y="125">P GPU KV MR</text>
+  <rect class="nic" x="585" y="85" rx="10" width="250" height="70"/><text class="t" x="623" y="125">RNIC / RDMA WRITE</text>
+  <rect class="gpu" x="1010" y="85" rx="10" width="250" height="70"/><text class="t" x="1060" y="125">D GPU KV MR</text>
+  <path class="a r" d="M430 120L585 120"/><path class="a r" d="M835 120L1010 120"/>
+  <text class="t" x="505" y="175">无 payload host staging；仍经过 GPU/RNIC 的 PCIe/互连</text>
+
+  <text class="h" x="50" y="285">TCP</text>
+  <rect class="gpu" x="120" y="245" rx="10" width="190" height="70"/><text class="t" x="160" y="285">P GPU 离散 KV</text>
+  <rect class="host" x="390" y="245" rx="10" width="200" height="70"/><text class="t" x="425" y="275">P pinned host</text><text class="t" x="425" y="297">D2H gather</text>
+  <rect class="nic" x="670" y="245" rx="10" width="170" height="70"/><text class="t" x="718" y="285">TCP/Barex</text>
+  <rect class="host" x="920" y="245" rx="10" width="200" height="70"/><text class="t" x="955" y="285">D host message</text>
+  <rect class="gpu" x="1200" y="245" rx="10" width="190" height="70"/><text class="t" x="1243" y="275">D GPU KV</text><text class="t" x="1243" y="297">H2D scatter</text>
+  <path class="a" d="M310 280L390 280"/><path class="a" d="M590 280L670 280"/><path class="a" d="M840 280L920 280"/><path class="a" d="M1120 280L1200 280"/>
+
+  <text class="h" x="50" y="465">RDMA Staged</text>
+  <rect class="gpu" x="120" y="425" rx="10" width="190" height="70"/><text class="t" x="160" y="465">P GPU 离散 KV</text>
+  <rect class="host" x="390" y="425" rx="10" width="200" height="70"/><text class="t" x="425" y="455">P pinned host</text><text class="t" x="425" y="477">D2H gather</text>
+  <rect class="nic" x="670" y="425" rx="10" width="170" height="70"/><text class="t" x="697" y="465">RNIC / RDMA</text>
+  <rect class="host" x="920" y="425" rx="10" width="200" height="70"/><text class="t" x="953" y="455">D staging MR</text><text class="t" x="953" y="477">host memory</text>
+  <rect class="gpu" x="1200" y="425" rx="10" width="190" height="70"/><text class="t" x="1243" y="455">D GPU KV</text><text class="t" x="1243" y="477">H2D scatter</text>
+  <path class="a" d="M310 460L390 460"/><path class="a r" d="M590 460L670 460"/><path class="a r" d="M840 460L920 460"/><path class="a" d="M1120 460L1200 460"/>
+
+  <rect x="120" y="565" rx="12" width="1270" height="80" fill="#fff" stroke="#94a3b8" stroke-width="2"/>
+  <text class="t" x="150" y="598">完成边界：RDMA Direct flush 等本地 Write completion；TCP/staged 还通过远端响应覆盖 H2D/scatter。</text>
+  <text class="t" x="150" y="624">上层仍需 SEND_DONE → TP 汇聚 → KVTResp，才能让 D 请求进入普通 Scheduler。</text>
+</svg>

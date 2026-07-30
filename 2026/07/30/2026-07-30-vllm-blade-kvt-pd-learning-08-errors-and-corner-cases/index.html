@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>08 错误传播与 corner cases：断连、超时、取消和迟到完成 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="08 错误传播与 corner cases：断连、超时、取消和迟到完成 1. 先建立错误传播分层 1 2 3 4 5 6 7 8 9 10 11 CUDA &amp;#x2F; layout error ↓ C++ exception Blade-KVT ReqState::FAILED ↓ SEND_DONE code&amp;#x3D;500 PBackend IoRet &amp;#x2F; KVTResp ↓ DBackend IoRet.e"><meta property="og:type" content="blog"><meta property="og:title" content="08 错误传播与 corner cases：断连、超时、取消和迟到完成"><meta property="og:url" content="https://llx-08.github.io/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-08-errors-and-corner-cases/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="08 错误传播与 corner cases：断连、超时、取消和迟到完成 1. 先建立错误传播分层 1 2 3 4 5 6 7 8 9 10 11 CUDA &amp;#x2F; layout error ↓ C++ exception Blade-KVT ReqState::FAILED ↓ SEND_DONE code&amp;#x3D;500 PBackend IoRet &amp;#x2F; KVTResp ↓ DBackend IoRet.e"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-07-30T00:00:00.000Z"><meta property="article:modified_time" content="2026-07-30T04:04:16.008Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="vLLM"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="Barex"><meta property="article:tag" content="Blade-KVT"><meta property="article:tag" content="PD 分离"><meta property="article:tag" content="KV Cache"><meta property="article:tag" content="Hybrid Connector"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-08-errors-and-corner-cases/"},"headline":"08 错误传播与 corner cases：断连、超时、取消和迟到完成","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-07-30T00:00:00.000Z","dateModified":"2026-07-30T04:04:16.008Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"08 错误传播与 corner cases：断连、超时、取消和迟到完成 1. 先建立错误传播分层 1 2 3 4 5 6 7 8 9 10 11 CUDA &#x2F; layout error ↓ C++ exception Blade-KVT ReqState::FAILED ↓ SEND_DONE code&#x3D;500 PBackend IoRet &#x2F; KVTResp ↓ DBackend IoRet.e"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-08-errors-and-corner-cases/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-07-30T00:00:00.000Z" title="7/30/2026, 12:00:00 AM">2026-07-30</time>发表</span><span class="level-item"><time dateTime="2026-07-30T04:04:16.008Z" title="7/30/2026, 4:04:16 AM">2026-07-30</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/">vllm、Blade-kvt与PD分离</a></span><span class="level-item">13 分钟读完 (大约2016个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">08 错误传播与 corner cases：断连、超时、取消和迟到完成</h1><div class="content"><h1 id="08-错误传播与-corner-cases：断连、超时、取消和迟到完成"><a href="#08-错误传播与-corner-cases：断连、超时、取消和迟到完成" class="headerlink" title="08 错误传播与 corner cases：断连、超时、取消和迟到完成"></a>08 错误传播与 corner cases：断连、超时、取消和迟到完成</h1><h2 id="1-先建立错误传播分层"><a href="#1-先建立错误传播分层" class="headerlink" title="1. 先建立错误传播分层"></a>1. 先建立错误传播分层</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">CUDA / layout error</span><br><span class="line">  ↓ C++ exception</span><br><span class="line">Blade-KVT ReqState::FAILED</span><br><span class="line">  ↓ SEND_DONE code=500</span><br><span class="line">PBackend IoRet / KVTResp</span><br><span class="line">  ↓ DBackend IoRet.ex</span><br><span class="line">HybridScheduler _loaded</span><br><span class="line">  ↓ sched_add_req + abort</span><br><span class="line">Scheduler finish/free</span><br><span class="line">  ↓ EngineCoreOutput ABORT</span><br><span class="line">用户/路由层</span><br></pre></td></tr></table></figure>
+
+<p>不是所有错误都能完整走完这条链。某些通知本身发送失败时，系统可能停在中间，<br>因此要同时讨论“理想路径”和“通知丢失路径”。</p>
+<h2 id="2-P-Worker-本地构造-metadata-失败"><a href="#2-P-Worker-本地构造-metadata-失败" class="headerlink" title="2. P Worker 本地构造 metadata 失败"></a>2. P Worker 本地构造 metadata 失败</h2><p>例如 P/D TP size 不能整除，<code>_get_distinfo()</code> 返回空。</p>
+<p>PBackend worker 不会只 log 后继续，它把 reqid 收集到 <code>failed_reqids</code>，在独立 worker<br>uvloop 调：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">KVTransferClient.send_error_done_req(reqids)</span><br></pre></td></tr></table></figure>
+
+<p>该函数直接构造与 Blade-KVT <code>SEND_DONE_REQ</code> 兼容的 TCP 消息：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">plen=0</span><br><span class="line">code=500</span><br><span class="line">reqid</span><br><span class="line">worker_tp_rank</span><br></pre></td></tr></table></figure>
+
+<p>目的：即使真正的 C++ send task 根本没创建，P Scheduler 的 <code>_SendingReq</code> 也能收到<br>失败信号，不会永远等“本不存在的 WQE”。</p>
+<h2 id="3-Blade-KVT-发送过程中异常"><a href="#3-Blade-KVT-发送过程中异常" class="headerlink" title="3. Blade-KVT 发送过程中异常"></a>3. Blade-KVT 发送过程中异常</h2><p><code>KvSendStub::TaskContext::do_task()</code> 用 try/catch 包住：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">try_create_channel</span><br><span class="line">parse_block</span><br><span class="line">register_data</span><br><span class="line">wait layer</span><br><span class="line">send_data</span><br><span class="line">flush</span><br></pre></td></tr></table></figure>
+
+<p>异常后：</p>
+<ol>
+<li><code>ch.reset()</code>，不复用可疑 channel；</li>
+<li>batch 中每个 task 设 <code>ReqState::FAILED</code>；</li>
+<li>对 <code>reach_last_token</code> 的请求仍构造 send_done，code=500；</li>
+<li>PBackend 汇聚失败。</li>
+</ol>
+<p>这体现一个重要原则：错误 completion 也是 completion。失败分支必须尽量产生终结信号，<br>否则上层只看到“还没完成”。</p>
+<h2 id="4-P-或-D-突然断开：分阶段分析"><a href="#4-P-或-D-突然断开：分阶段分析" class="headerlink" title="4. P 或 D 突然断开：分阶段分析"></a>4. P 或 D 突然断开：分阶段分析</h2><h3 id="4-1-D-在-P-建连前消失"><a href="#4-1-D-在-P-建连前消失" class="headerlink" title="4.1 D 在 P 建连前消失"></a>4.1 D 在 P 建连前消失</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">naming/WorkerInfo 有旧 endpoint</span><br><span class="line">→ Connect 失败</span><br><span class="line">→ ChannelFactory 尝试候选 protocol</span><br><span class="line">→ 全部失败</span><br><span class="line">→ task FAILED</span><br><span class="line">→ SEND_DONE 500</span><br></pre></td></tr></table></figure>
+
+<p>下轮 <code>try_create_channel()</code> 会重新 refresh/建连。</p>
+<h3 id="4-2-D-在-RDMA-Write-中消失"><a href="#4-2-D-在-RDMA-Write-中消失" class="headerlink" title="4.2 D 在 RDMA Write 中消失"></a>4.2 D 在 RDMA Write 中消失</h3><p>预期 provider 通过错误 CQE/callback 结束 WR，future 抛异常。然后 task failed。</p>
+<p>风险：如果底层连接故障没有及时生成 callback，RDMA Direct <code>future.get()</code> 没有本层<br>timeout，clisend 线程会一直占用。</p>
+<h3 id="4-3-D-数据收完但-P→P-Scheduler-send-done-断开"><a href="#4-3-D-数据收完但-P→P-Scheduler-send-done-断开" class="headerlink" title="4.3 D 数据收完但 P→P-Scheduler send_done 断开"></a>4.3 D 数据收完但 P→P-Scheduler send_done 断开</h3><p>Blade-KVT send_done 长连接失败会重连再试一次。两次都失败时只 log：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">D KV 正确</span><br><span class="line">P 数据面已完成</span><br><span class="line">P Scheduler 不知道</span><br><span class="line">_SendingReq Future pending</span><br><span class="line">D Scheduler 仍等 KVTResp</span><br></pre></td></tr></table></figure>
+
+<p>这是典型“数据成功、控制面丢 completion”。要靠上层 deadline/watchdog 打破。</p>
+<h3 id="4-4-P-在-D-等-KVTResp-时消失"><a href="#4-4-P-在-D-等-KVTResp-时消失" class="headerlink" title="4.4 P 在 D 等 KVTResp 时消失"></a>4.4 P 在 D 等 KVTResp 时消失</h3><p>若 socket 收到 EOF，D <code>_kvt_rpc</code> 捕获 <code>IncompleteReadError</code>，重试一次；再失败则<br><code>RuntimeError("kvt rpc failed")</code>，包装进 D 本地 <code>IoRet.ex</code>，请求 abort。</p>
+<p>若连接半开且无读 timeout，可能依赖 OS TCP keepalive/timeout，响应时间不可控。</p>
+<h3 id="4-5-D-收到部分-KV-后-P-消失"><a href="#4-5-D-收到部分-KV-后-P-消失" class="headerlink" title="4.5 D 收到部分 KV 后 P 消失"></a>4.5 D 收到部分 KV 后 P 消失</h3><p>D Block 可能被部分写入。正确处理不是“用已到部分继续 decode”，而是：</p>
+<ul>
+<li>request load 失败；</li>
+<li>不把 Block 加入 prefix cache；</li>
+<li>abort 后释放/以后零化或覆盖；</li>
+<li>late WR/completion 不得把已复用 Block 污染。</li>
+</ul>
+<p>最后一点需要 transport teardown 与 Block release fence 协调。当前高层通过等待 P<br>完成后才让 D request 可运行，但失败后的 late DMA 安全仍依赖 Barex/provider 的连接<br>错误语义和释放时序，需要专项故障注入。</p>
+<h2 id="5-404-与-410：避免“永远等一个不会出现的-P-Request”"><a href="#5-404-与-410：避免“永远等一个不会出现的-P-Request”" class="headerlink" title="5. 404 与 410：避免“永远等一个不会出现的 P Request”"></a>5. 404 与 410：避免“永远等一个不会出现的 P Request”</h2><p>dash 模式 D 可能比 P 早到。</p>
+<h3 id="404-Not-Found"><a href="#404-Not-Found" class="headerlink" title="404 Not Found"></a>404 Not Found</h3><p>含义：“P 当前找不到，但可能只是请求还没到。”D 按 delay list 重试。</p>
+<h3 id="410-Gone"><a href="#410-Gone" class="headerlink" title="410 Gone"></a>410 Gone</h3><p>P <code>_gone_reqs</code> 记录曾存在但已经 abort/timeout 的 reqid。含义：“以后也不会出现，<br>不要再等。”D 立即失败。</p>
+<p>LRU：</p>
+<ul>
+<li>TTL 由 <code>VLLM_KVT_GONE_REQ_TTL_S</code>；</li>
+<li>最大 8192，防止 abort 风暴导致无界内存；</li>
+<li>TTL 过期后又退化为 404；</li>
+<li>TTL=0 关闭该保护，保留旧行为。</li>
+</ul>
+<p>这是用有限 tombstone 解决分布式“未到达”与“已删除”歧义。</p>
+<h2 id="6-request-abort-与正在进行的-I-O"><a href="#6-request-abort-与正在进行的-I-O" class="headerlink" title="6. request abort 与正在进行的 I/O"></a>6. request abort 与正在进行的 I/O</h2><p>D 的 <code>_abort_prefill()</code>：</p>
+<ol>
+<li>从 Request 参数读取之前选中的 P 地址；</li>
+<li>按 peer 分组 reqid；</li>
+<li>并发发 <code>ABORT_REQS_REQ</code>；</li>
+<li>每个 peer 尝试两次；</li>
+<li>失败只 log，不阻塞本地 abort 完成。</li>
+</ol>
+<p>因此 abort RPC 是 best effort。设计理由：</p>
+<ul>
+<li>用户取消不能永远等待故障 P；</li>
+<li>P 仍有自己的 timeout/gone 清理；</li>
+<li>本地必须先释放服务能力。</li>
+</ul>
+<p>代价是远端可能短时间继续计算/发送，要求 Block/连接层能容忍 late activity。</p>
+<h2 id="7-finish-save-竞态"><a href="#7-finish-save-竞态" class="headerlink" title="7. finish/save 竞态"></a>7. finish/save 竞态</h2><p>四种事件排序：</p>
+<table>
+<thead>
+<tr>
+<th>顺序</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>save → finish</td>
+<td><code>_PD_SAVED=True</code>，finish 立即回 done</td>
+</tr>
+<tr>
+<td>finish → save</td>
+<td>先回 pending，保存 finish 信息；save 后发空输出 done</td>
+</tr>
+<tr>
+<td>abort → save</td>
+<td>abort 输出立即；extra ref 保护 Block，save 后 teardown</td>
+</tr>
+<tr>
+<td>save error → finish</td>
+<td>save failure 记入 IoRet/统计，按失败/abort 路径收尾</td>
+</tr>
+</tbody></table>
+<p>关键不变量：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">每个 _setup_save 必须恰好有一次 _try_teardown_save</span><br><span class="line">每次 teardown 必须释放一次额外 Block ref</span><br></pre></td></tr></table></figure>
+
+<p>重复 teardown 会 log，不能重复减 refcount。</p>
+<h2 id="8-duplicate-unknown-completion"><a href="#8-duplicate-unknown-completion" class="headerlink" title="8. duplicate/unknown completion"></a>8. duplicate/unknown completion</h2><p><code>try_advance()</code> 检查：</p>
+<ul>
+<li>reqid 不在 state dict：unknown，log 并忽略；</li>
+<li>同 worker 已达到期望 signal 数：duplicate，忽略；</li>
+<li>source 缺失或不在 expected set：忽略；</li>
+<li>同 worker 同 source 重复：忽略。</li>
+</ul>
+<p>这样 late/retry completion 不会：</p>
+<ul>
+<li>把计数加两次而过早完成；</li>
+<li>对已释放请求再次 teardown；</li>
+<li>用错误 backend source 冒充另一个 source。</li>
+</ul>
+<p>但“忽略”也意味着如果发送方标错 source，真正所需 source 永远缺失，仍需 watchdog 报出<br>missing source，而不能只靠 warning。</p>
+<h2 id="9-多-TP-worker-中一个失败"><a href="#9-多-TP-worker-中一个失败" class="headerlink" title="9. 多 TP worker 中一个失败"></a>9. 多 TP worker 中一个失败</h2><p><code>IoState.merge()</code> 汇聚所有 ready worker signal：</p>
+<ul>
+<li>任一 <code>ex</code> 优先成为总错误；</li>
+<li><code>n</code> 取最小值，避免部分 rank 声称更多 token；</li>
+<li>P&lt;D 时也检查同一 P worker 对所有 fan-out target 的 signal。</li>
+</ul>
+<p>如果一个 worker 明确返回失败，整个 request 失败；如果一个 worker完全不返回，当前<br>没有上层 barrier timeout，request pending。</p>
+<h2 id="10-Block-不足与长时间传输形成反压"><a href="#10-Block-不足与长时间传输形成反压" class="headerlink" title="10. Block 不足与长时间传输形成反压"></a>10. Block 不足与长时间传输形成反压</h2><p>不是所有“卡住”都是网络错误：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">慢网络</span><br><span class="line">→ P save extra refs 长时间不释放</span><br><span class="line">→ free blocks 下降</span><br><span class="line">→ Hybrid _waiting allocate 返回 None</span><br><span class="line">→ 新请求不能启动 load/save</span><br></pre></td></tr></table></figure>
+
+<p>这是一条合法 backpressure。判断它与死锁的区别要看：</p>
+<ul>
+<li>in-flight completion 是否仍增长；</li>
+<li>oldest saving age；</li>
+<li>free block 是否随 completion 回升；</li>
+<li>clisend/CQ thread 是否有进展。</li>
+</ul>
+<h2 id="11-async-scheduling-和-substep-corner-cases"><a href="#11-async-scheduling-和-substep-corner-cases" class="headerlink" title="11. async scheduling 和 substep corner cases"></a>11. async scheduling 和 substep corner cases</h2><h3 id="bypass-比主-step-先到"><a href="#bypass-比主-step-先到" class="headerlink" title="bypass 比主 step 先到"></a>bypass 比主 step 先到</h3><p>放入 <code>pending_step_metas_</code>，主 step 创建时按递增 substepid 附加。</p>
+<h3 id="bypass-比主-step-晚太多"><a href="#bypass-比主-step-晚太多" class="headerlink" title="bypass 比主 step 晚太多"></a>bypass 比主 step 晚太多</h3><p>当前 step 已结束，转成独立 freeze Step，所有层直接 ready。</p>
+<h3 id="flush-时-pending-substep-仍存在"><a href="#flush-时-pending-substep-仍存在" class="headerlink" title="flush 时 pending substep 仍存在"></a>flush 时 pending substep 仍存在</h3><p>代码 <code>assert(pending_step_metas_.empty())</code>。违反说明 step 协调协议出错，debug build<br>会立即暴露；release 下 assert 可能消失，因此生产还应有指标/运行时错误。</p>
+<h3 id="sched-tokens-0-且没有-task"><a href="#sched-tokens-0-且没有-task" class="headerlink" title="sched_tokens=0 且没有 task"></a>sched_tokens=0 且没有 task</h3><p>返回 <code>EMPTY_STEP_ID</code>，不创建无意义 Step/线程等待。若 sched_tokens&gt;0 即使当前无发送<br>任务也创建 Step，因为 bypass 可能稍后附加。</p>
+<h2 id="12-多模态-placeholder-跨-PD-边界"><a href="#12-多模态-placeholder-跨-PD-边界" class="headerlink" title="12. 多模态 placeholder 跨 PD 边界"></a>12. 多模态 placeholder 跨 PD 边界</h2><p>混合模型保留 <code>gamma+1</code> token 在 D 重算。如果切分点落在一个 multimodal placeholder<br>内部，P/D 看到的特征边界不一致。</p>
+<p>当前：</p>
+<ul>
+<li>显式 remote-prefill：raise，失败；</li>
+<li>可本地 fallback 场景：warning 后不做远端 prefill。</li>
+</ul>
+<p>这是语义 corner case，不是网络能修复的问题。</p>
+<h2 id="13-短-prompt"><a href="#13-短-prompt" class="headerlink" title="13. 短 prompt"></a>13. 短 prompt</h2><p>若 prompt 不超过 <code>gamma+1</code>：</p>
+<ul>
+<li>普通 disagg 可 fallback 到 D 本地 prefill；</li>
+<li>显式 remote-prefill 配置则报错；</li>
+<li>不应发 0/负 token 的 KVT task。</li>
+</ul>
+<h2 id="14-cache-shape-TP-不兼容"><a href="#14-cache-shape-TP-不兼容" class="headerlink" title="14. cache shape / TP 不兼容"></a>14. cache shape / TP 不兼容</h2><p>Blade-KVT 对不同 cache shape 选择不同 <code>parse_block</code>：</p>
+<ul>
+<li>Flash/Ragged/FlashInfer；</li>
+<li>Qwen3-Next hybrid GDN；</li>
+<li>DPSK sparse MLA 多 tensor；</li>
+<li>Kimi K3 MLA；</li>
+<li>Kimi K3 + Eagle；</li>
+<li>TurboQuant。</li>
+</ul>
+<p>例如 Kimi K3 + Eagle 当前要求 P/D TP 相等，staged RDMA 也不支持 inactive tensor<br>slots。遇到不支持的组合应 fail fast，不能退化成“按普通 MLA 发”，否则传输层成功但<br>KV layout 错误。</p>
+<h2 id="15-已有测试覆盖与缺口"><a href="#15-已有测试覆盖与缺口" class="headerlink" title="15. 已有测试覆盖与缺口"></a>15. 已有测试覆盖与缺口</h2><p>已有上游/本地测试覆盖：</p>
+<ul>
+<li>remote prefill/decode 基本生命周期；</li>
+<li>prefix cache 与 partial Block；</li>
+<li>abort 期间 Block 引用；</li>
+<li>load 失败恢复；</li>
+<li>invalid block 与 cache pollution；</li>
+<li>Hybrid abort/save 引用泄漏；</li>
+<li>migration 与 Hybrid connector 功能。</li>
+</ul>
+<p>建议补充的故障注入矩阵：</p>
+<table>
+<thead>
+<tr>
+<th>故障点</th>
+<th>断开时机</th>
+<th>必查结果</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>D server</td>
+<td>建连前/写中/写后</td>
+<td>P future、send_done、Block ref</td>
+</tr>
+<tr>
+<td>P scheduler RPC</td>
+<td>数据前/数据后</td>
+<td>D deadline、P orphan state</td>
+</tr>
+<tr>
+<td>send_done RPC</td>
+<td>首次/重连也失败</td>
+<td><code>_SendingReq</code> watchdog</td>
+</tr>
+<tr>
+<td>单 TP worker</td>
+<td>不发/重复发/错 source</td>
+<td>barrier timeout 与诊断</td>
+</tr>
+<tr>
+<td>CUDA Event</td>
+<td>漏 record/错 stream/乱序</td>
+<td>wait-layer 能否定位 layer</td>
+</tr>
+<tr>
+<td>zero kernel</td>
+<td>load 前/中/后</td>
+<td>KV 对比不被清零覆盖</td>
+</tr>
+<tr>
+<td>abort</td>
+<td>load 前/写中/KVTResp 后</td>
+<td>late completion 去重与 Block 安全</td>
+</tr>
+</tbody></table>
+<h2 id="16-自检"><a href="#16-自检" class="headerlink" title="16. 自检"></a>16. 自检</h2><ol>
+<li>为什么“数据传完但 send_done 丢失”比普通传输失败更难发现？</li>
+<li>404/410 的 tombstone 为什么要 TTL 和容量上限？</li>
+<li>abort RPC 为什么是 best effort？</li>
+<li>某 TP rank 明确失败与完全沉默，当前行为有何不同？</li>
+<li>如何区分合法显存反压与永久 hang？</li>
+</ol>
+</div><div class="article-licensing box"><div class="licensing-title"><p>08 错误传播与 corner cases：断连、超时、取消和迟到完成</p><p><a href="https://llx-08.github.io/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-08-errors-and-corner-cases/">https://llx-08.github.io/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-08-errors-and-corner-cases/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-07-30</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-07-30</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/vLLM/">vLLM</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Blade-KVT/">Blade-KVT</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/">PD 分离</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/KV-Cache/">KV Cache</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Hybrid-Connector/">Hybrid Connector</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-07-hybrid-asyncio-and-no-hang/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">07 Hybrid Connector 的 Python 协程：如何工作，如何避免静默 hang</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-09-debugging-testing-code-map/"><span class="level-item">09 调试、测试与代码地图：从现象定位到具体状态</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">82</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">4</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">22</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/"><span class="level-start"><span class="level-item">vllm、Blade-kvt与PD分离</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-30T00:00:00.000Z">2026-07-30</time></p><p class="title"><a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-00-architecture-and-terms/">00 架构与术语：先把每个对象放回正确的层</a></p><p class="categories"><a href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/">vllm、Blade-kvt与PD分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-30T00:00:00.000Z">2026-07-30</time></p><p class="title"><a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-01-request-lifecycle/">01 请求生命周期：Hybrid Connector 如何接管、等待并交还请求</a></p><p class="categories"><a href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/">vllm、Blade-kvt与PD分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-30T00:00:00.000Z">2026-07-30</time></p><p class="title"><a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-02-kv-block-lifecycle/">02 KV Block 生命周期：分配、缓存、引用、零化与安全释放</a></p><p class="categories"><a href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/">vllm、Blade-kvt与PD分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-30T00:00:00.000Z">2026-07-30</time></p><p class="title"><a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-03-pd-control-plane/">03 PD 控制面：rendezvous、RPC、step/substep 与 TP 映射</a></p><p class="categories"><a href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/">vllm、Blade-kvt与PD分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-30T00:00:00.000Z">2026-07-30</time></p><p class="title"><a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-05-kv-receive-and-completion/">05 KV 接收路径与完成语义：TCP、RDMA Direct、staged RDMA</a></p><p class="categories"><a href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/">vllm、Blade-kvt与PD分离</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">54</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Blade-KVT/"><span class="tag">Blade-KVT</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Hybrid-Connector/"><span class="tag">Hybrid Connector</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/KV-Cache/"><span class="tag">KV Cache</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/"><span class="tag">PD 分离</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">50</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

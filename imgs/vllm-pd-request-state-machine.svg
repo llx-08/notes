@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760">
+  <defs>
+    <style>.bg{fill:#f8fafc}.title{font:700 28px system-ui;fill:#0f172a}.b{fill:#fff;stroke:#64748b;stroke-width:2}.load{fill:#dbeafe;stroke:#2563eb;stroke-width:2}.save{fill:#dcfce7;stroke:#059669;stroke-width:2}.err{fill:#fee2e2;stroke:#dc2626;stroke-width:2}.h{font:700 17px system-ui;fill:#0f172a}.t{font:13px system-ui;fill:#475569}.a{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#m)}.e{stroke:#dc2626}</style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0L0 6L9 3z" fill="#334155"/></marker>
+  </defs>
+  <rect class="bg" width="1400" height="760"/><text class="title" x="50" y="50">Hybrid Connector 请求状态机（同一请求可同时有 load 与 save）</text>
+  <rect class="b" x="70" y="110" rx="12" width="200" height="82"/><text class="h" x="100" y="145">EngineCore.add</text><text class="t" x="100" y="170">connector 判定操作</text>
+  <rect class="b" x="340" y="110" rx="12" width="210" height="82"/><text class="h" x="380" y="145">HC _waiting</text><text class="t" x="368" y="170">尚未进入普通 Scheduler</text>
+  <path class="a" d="M270 151L340 151"/>
+
+  <rect class="load" x="640" y="80" rx="12" width="210" height="100"/><text class="h" x="685" y="118">_loading</text><text class="t" x="665" y="145">D 已分配 Block</text><text class="t" x="665" y="165">coroutine 发起 P RPC</text>
+  <rect class="save" x="640" y="230" rx="12" width="210" height="100"/><text class="h" x="690" y="268">_saving</text><text class="t" x="665" y="295">P Block 额外引用</text><text class="t" x="665" y="315">等待所有发送 signal</text>
+  <path class="a" d="M550 142C590 142 600 130 640 130"/><path class="a" d="M550 160C590 190 600 280 640 280"/>
+
+  <rect class="load" x="940" y="80" rx="12" width="190" height="100"/><text class="h" x="990" y="118">_loaded</text><text class="t" x="963" y="145">IoRet + token count</text><text class="t" x="963" y="165">等待 Core step 提交</text>
+  <rect class="save" x="940" y="230" rx="12" width="190" height="100"/><text class="h" x="992" y="268">_saved</text><text class="t" x="963" y="295">finish/save 两事件 join</text><text class="t" x="963" y="315">释放 extra ref</text>
+  <path class="a" d="M850 130L940 130"/><path class="a" d="M850 280L940 280"/>
+
+  <rect class="b" x="1180" y="110" rx="12" width="170" height="100"/><text class="h" x="1204" y="148">普通 Scheduler</text><text class="t" x="1210" y="175">waiting/running</text><text class="t" x="1210" y="195">forward/decode</text>
+  <path class="a" d="M1130 130L1180 145"/>
+
+  <rect class="b" x="1180" y="280" rx="12" width="170" height="90"/><text class="h" x="1231" y="318">finish</text><text class="t" x="1202" y="344">request output/free</text>
+  <path class="a" d="M1265 210L1265 280"/><path class="a" d="M1130 280C1160 280 1160 315 1180 315"/>
+
+  <rect class="err" x="510" y="500" rx="14" width="350" height="125"/><text class="h" x="620" y="540">_aborting</text>
+  <text class="t" x="545" y="568">waiting / loading / scheduler / saving 分阶段清理</text><text class="t" x="545" y="593">失败请求回普通 Scheduler 后走统一 free 路径</text>
+  <path class="a e" d="M745 180C745 390 685 420 685 500"/><path class="a e" d="M1035 180C1035 440 860 470 820 500"/>
+  <path class="a e" d="M745 330C745 430 730 450 720 500"/><path class="a e" d="M1265 370C1265 610 950 610 860 585"/>
+
+  <text class="t" x="70" y="700">不变量：load/save 控制状态、backend cleanup rc、GPU Block refcount 各自独立收尾。</text>
+</svg>
