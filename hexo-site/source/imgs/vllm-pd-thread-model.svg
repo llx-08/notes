@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="790" viewBox="0 0 1480 790">
+  <defs><style>.bg{fill:#f8fafc}.title{font:700 28px system-ui;fill:#0f172a}.lane{fill:#fff;stroke:#cbd5e1;stroke-width:2}.h{font:700 16px system-ui;fill:#0f172a}.t{font:13px system-ui;fill:#475569}.work{fill:#dbeafe;stroke:#2563eb;stroke-width:1.5}.wait{fill:#ffedd5;stroke:#ea580c;stroke-width:1.5}.io{fill:#dcfce7;stroke:#059669;stroke-width:1.5}.a{stroke:#64748b;stroke-width:2;fill:none;marker-end:url(#m)}.dash{stroke-dasharray:6 5}</style><marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0L0 6L9 3z" fill="#64748b"/></marker></defs>
+  <rect class="bg" width="1480" height="790"/><text class="title" x="45" y="50">P Worker 内的线程与流水线：阻塞发生在专用线程，不阻塞 model launch 主线</text>
+  <g transform="translate(40 90)"><rect class="lane" rx="10" width="1400" height="90"/><text class="h" x="15" y="28">Model execution thread</text>
+    <rect class="work" x="190" y="18" rx="8" width="170" height="50"/><text class="t" x="215" y="48">launch layer 0</text>
+    <rect class="work" x="390" y="18" rx="8" width="170" height="50"/><text class="t" x="415" y="48">record Event 0</text>
+    <rect class="work" x="590" y="18" rx="8" width="170" height="50"/><text class="t" x="615" y="48">launch layer 1</text>
+    <rect class="work" x="790" y="18" rx="8" width="170" height="50"/><text class="t" x="815" y="48">record Event 1</text>
+    <rect class="work" x="990" y="18" rx="8" width="170" height="50"/><text class="t" x="1025" y="48">continue...</text></g>
+  <g transform="translate(40 205)"><rect class="lane" rx="10" width="1400" height="90"/><text class="h" x="15" y="28">GPU stream</text>
+    <rect class="work" x="260" y="18" rx="8" width="230" height="50"/><text class="t" x="315" y="48">compute layer 0</text>
+    <rect class="wait" x="490" y="18" rx="8" width="55" height="50"/><text class="t" x="505" y="48">E0</text>
+    <rect class="work" x="545" y="18" rx="8" width="230" height="50"/><text class="t" x="600" y="48">compute layer 1</text>
+    <rect class="wait" x="775" y="18" rx="8" width="55" height="50"/><text class="t" x="790" y="48">E1</text></g>
+  <g transform="translate(40 320)"><rect class="lane" rx="10" width="1400" height="90"/><text class="h" x="15" y="28">Blade-KVT wait-layer thread</text>
+    <rect class="wait" x="390" y="18" rx="8" width="155" height="50"/><text class="t" x="412" y="40">wait record0</text><text class="t" x="412" y="58">wait CUDA E0</text>
+    <rect class="wait" x="775" y="18" rx="8" width="155" height="50"/><text class="t" x="797" y="40">wait record1</text><text class="t" x="797" y="58">wait CUDA E1</text></g>
+  <g transform="translate(40 435)"><rect class="lane" rx="10" width="1400" height="90"/><text class="h" x="15" y="28">Barex clisend target thread</text>
+    <rect class="wait" x="250" y="18" rx="8" width="180" height="50"/><text class="t" x="280" y="48">wait data layer 0</text>
+    <rect class="io" x="545" y="18" rx="8" width="230" height="50"/><text class="t" x="592" y="48">send_data layer 0</text>
+    <rect class="io" x="930" y="18" rx="8" width="230" height="50"/><text class="t" x="977" y="48">send_data layer 1</text></g>
+  <g transform="translate(40 550)"><rect class="lane" rx="10" width="1400" height="90"/><text class="h" x="15" y="28">Barex progress / CQ</text>
+    <rect class="io" x="650" y="18" rx="8" width="210" height="50"/><text class="t" x="695" y="48">WQE / network</text>
+    <rect class="io" x="1050" y="18" rx="8" width="210" height="50"/><text class="t" x="1092" y="48">CQ callback</text></g>
+  <path class="a dash" d="M530 270L505 338"/><path class="a dash" d="M585 388L625 453"/><path class="a dash" d="M800 270L850 338"/><path class="a dash" d="M970 388L1020 453"/><path class="a dash" d="M1120 503L1170 568"/>
+  <rect x="40" y="685" rx="12" width="1400" height="65" fill="#fff" stroke="#94a3b8" stroke-width="2"/>
+  <text class="t" x="70" y="715">model thread 继续 launch；wait-layer 线程可能在 CUDA synchronize 内 active wait；target thread 在 data_signal/flush 阻塞；</text>
+  <text class="t" x="70" y="738">网络 progress 由 Barex 线程推进。一个“wait”不能笼统描述为整个进程被阻塞。</text>
+</svg>

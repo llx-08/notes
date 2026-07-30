@@ -10,6 +10,8 @@ Sources:
      ``nccl-pcie-barex-learning-`` (its ``README.md`` is the series index).
   4) ``cuda_cute_nvidia_learning/*.md`` series → posts with slug prefix
      ``cuda-cute-nvidia-learning-`` (its ``README.md`` is the series index).
+  5) ``vllm_blade_kvt_pd_learning/*.md`` series → posts with slug prefix
+     ``vllm-blade-kvt-pd-learning-`` (its ``README.md`` is the series index).
 
 Convention:
   - Root ``foo_bar.md`` → slug ``foo-bar``.
@@ -65,6 +67,20 @@ SERIES = (
             "GPU",
             "Tensor Core",
             "NVIDIA",
+            "学习笔记",
+        ],
+    },
+    {
+        "directory": "vllm_blade_kvt_pd_learning",
+        "slug_prefix": "vllm-blade-kvt-pd-learning",
+        "category": "vllm、Blade-kvt与PD分离",
+        "tags": [
+            "vLLM",
+            "Blade-KVT",
+            "PD 分离",
+            "KV Cache",
+            "Hybrid Connector",
+            "Barex",
             "学习笔记",
         ],
     },

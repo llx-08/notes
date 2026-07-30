@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="650" viewBox="0 0 1400 650">
+  <defs><style>.bg{fill:#f8fafc}.title{font:700 28px system-ui;fill:#0f172a}.h{font:700 18px system-ui;fill:#0f172a}.t{font:14px system-ui;fill:#475569}.b{fill:#fff;stroke:#64748b;stroke-width:2}.p{fill:#dbeafe;stroke:#2563eb;stroke-width:2}.d{fill:#dcfce7;stroke:#059669;stroke-width:2}.a{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#m)}</style><marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0L0 6L9 3z" fill="#334155"/></marker></defs>
+  <rect class="bg" width="1400" height="650"/><text class="title" x="50" y="50">P 源 Block 与 D 目标 Block 的生命周期并不相同</text>
+  <text class="h" x="60" y="105">P：发送期间保护“源数据不被复用”</text>
+  <rect class="p" x="60" y="135" rx="12" width="210" height="90"/><text class="h" x="94" y="173">Scheduler owner</text><text class="t" x="98" y="199">ref_cnt = 1</text>
+  <rect class="p" x="340" y="135" rx="12" width="220" height="90"/><text class="h" x="378" y="173">_setup_save</text><text class="t" x="378" y="199">ref_cnt 1 → 2</text>
+  <rect class="p" x="630" y="135" rx="12" width="220" height="90"/><text class="h" x="661" y="173">request finish</text><text class="t" x="668" y="199">ref_cnt 2 → 1</text>
+  <rect class="p" x="920" y="135" rx="12" width="230" height="90"/><text class="h" x="957" y="173">send complete</text><text class="t" x="951" y="199">teardown: 1 → 0</text>
+  <rect class="b" x="1210" y="135" rx="12" width="150" height="90"/><text class="h" x="1242" y="173">free queue</text><text class="t" x="1237" y="199">可缓存/驱逐</text>
+  <path class="a" d="M270 180L340 180"/><path class="a" d="M560 180L630 180"/><path class="a" d="M850 180L920 180"/><path class="a" d="M1150 180L1210 180"/>
+
+  <text class="h" x="60" y="320">D：目标 Block 先分配，外部写完后才可加入 prefix cache</text>
+  <rect class="d" x="60" y="350" rx="12" width="210" height="100"/><text class="h" x="105" y="390">allocate</text><text class="t" x="87" y="417">ref=1，hash 为空</text><text class="t" x="83" y="438">skip external zeroing</text>
+  <rect class="d" x="350" y="350" rx="12" width="220" height="100"/><text class="h" x="391" y="390">告诉 P Block IDs</text><text class="t" x="390" y="417">仍不可被 cache hit</text>
+  <rect class="d" x="650" y="350" rx="12" width="220" height="100"/><text class="h" x="695" y="390">P 写入 D GPU</text><text class="t" x="686" y="417">partial 时不可运行</text>
+  <rect class="d" x="950" y="350" rx="12" width="210" height="100"/><text class="h" x="996" y="390">mark_loaded</text><text class="t" x="982" y="417">更新 computed tokens</text><text class="t" x="992" y="438">有效完整块可 cache</text>
+  <rect class="b" x="1230" y="350" rx="12" width="130" height="100"/><text class="h" x="1250" y="390">Scheduler</text><text class="t" x="1252" y="417">开始 decode</text>
+  <path class="a" d="M270 400L350 400"/><path class="a" d="M570 400L650 400"/><path class="a" d="M870 400L950 400"/><path class="a" d="M1160 400L1230 400"/>
+  <rect class="b" x="310" y="525" rx="12" width="780" height="70"/><text class="t" x="340" y="557">额外保护：GPU in-flight kernel 的迟到写入由 deferred-free fence 解决；</text><text class="t" x="340" y="580">它与 P save extra ref、D external-load zero exclusion 是三类不同的所有权问题。</text>
+</svg>

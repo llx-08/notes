@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="820" viewBox="0 0 1440 820">
+  <defs>
+    <style>
+      .bg{fill:#f8fafc}.title{font:700 30px system-ui;fill:#0f172a}.sub{font:15px system-ui;fill:#475569}
+      .h{font:700 19px system-ui;fill:#fff}.t{font:15px system-ui;fill:#0f172a}.s{font:13px system-ui;fill:#475569}
+      .p{fill:#2563eb}.d{fill:#059669}.mid{fill:#fff;stroke:#94a3b8;stroke-width:2}.ctrl{stroke:#7c3aed;stroke-width:3;fill:none;marker-end:url(#a)}
+      .data{stroke:#ea580c;stroke-width:5;fill:none;marker-end:url(#b)}.dash{stroke-dasharray:9 7}
+    </style>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#7c3aed"/></marker>
+    <marker id="b" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#ea580c"/></marker>
+  </defs>
+  <rect class="bg" width="1440" height="820"/>
+  <text class="title" x="60" y="55">vLLM、Blade-KVT 与 PD 分离：控制面和数据面</text>
+  <text class="sub" x="60" y="83">紫色：请求/元数据/completion　橙色：KV 字节</text>
+
+  <rect class="p" x="70" y="120" rx="16" width="540" height="62"/><text class="h" x="95" y="158">Prefill 实例（P）：生产 KV</text>
+  <rect class="d" x="830" y="120" rx="16" width="540" height="62"/><text class="h" x="855" y="158">Decode 实例（D）：消费 KV</text>
+
+  <rect class="mid" x="90" y="220" rx="14" width="500" height="115"/>
+  <text class="t" x="115" y="253">P Scheduler / HybridScheduler / PBackend</text>
+  <text class="s" x="115" y="281">Request 状态、P Block、PReqMeta、TP 完成汇聚</text>
+  <text class="s" x="115" y="307">等待 SEND_DONE，最后回复 KVTResp</text>
+
+  <rect class="mid" x="850" y="220" rx="14" width="500" height="115"/>
+  <text class="t" x="875" y="253">D Scheduler / HybridScheduler / DBackend</text>
+  <text class="s" x="875" y="281">先分配 D Block，再把 Block ID / WorkerInfo 告诉 P</text>
+  <text class="s" x="875" y="307">KVTResp 后 mark_loaded，才交还普通 Scheduler</text>
+
+  <rect class="mid" x="90" y="410" rx="14" width="500" height="120"/>
+  <text class="t" x="115" y="443">P Worker / KVT Client</text>
+  <text class="s" x="115" y="471">GPU forward → CUDA Event → 按 layer 发送</text>
+  <text class="s" x="115" y="497">Block ID → IpcBlock → Barex TCP/RDMA</text>
+
+  <rect class="mid" x="850" y="410" rx="14" width="500" height="120"/>
+  <text class="t" x="875" y="443">D Worker / KVT Server</text>
+  <text class="s" x="875" y="471">注册 D GPU KV tensor 与 endpoint</text>
+  <text class="s" x="875" y="497">RDMA Direct 落 GPU；TCP/staged 再 H2D scatter</text>
+
+  <rect class="mid" x="390" y="650" rx="18" width="660" height="95"/>
+  <text class="t" x="420" y="687">Barex / RNIC / PCIe / 网络</text>
+  <text class="s" x="420" y="716">MR、QP、WQE、CQE、TCP/RDMA connection 与 callback</text>
+
+  <path class="ctrl" d="M850 260 C740 205 700 205 590 260"/>
+  <text class="s" x="625" y="205">PREFILL / TRANSFER_KV RPC</text>
+  <path class="ctrl" d="M590 310 C700 365 740 365 850 310"/>
+  <text class="s" x="654" y="382">KVTResp</text>
+  <path class="ctrl dash" d="M340 335 L340 410"/>
+  <text class="s" x="355" y="382">metadata</text>
+  <path class="ctrl dash" d="M1100 410 L1100 335"/>
+  <text class="s" x="1115" y="382">worker info</text>
+
+  <path class="data" d="M340 530 C360 620 480 650 560 650"/>
+  <path class="data" d="M880 650 C960 650 1080 620 1100 530"/>
+  <text class="t" x="615" y="620">KV Cache 字节</text>
+
+  <rect x="90" y="770" width="1260" height="2" fill="#cbd5e1"/>
+  <text class="s" x="90" y="800">关键：transport completion ≠ SEND_DONE ≠ KVTResp ≠ request finish</text>
+</svg>

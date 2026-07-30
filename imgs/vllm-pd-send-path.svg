@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="740" viewBox="0 0 1480 740">
+  <defs><style>.bg{fill:#f8fafc}.title{font:700 28px system-ui;fill:#0f172a}.lane{fill:#fff;stroke:#cbd5e1;stroke-width:2}.h{font:700 17px system-ui;fill:#0f172a}.t{font:13px system-ui;fill:#475569}.a{stroke:#2563eb;stroke-width:3;fill:none;marker-end:url(#m)}.ev{fill:#ffedd5;stroke:#ea580c;stroke-width:2}</style><marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0L0 6L9 3z" fill="#2563eb"/></marker></defs>
+  <rect class="bg" width="1480" height="740"/><text class="title" x="45" y="50">P 侧：metadata、layer ready 与数据发送的汇合</text>
+  <rect class="lane" x="40" y="85" rx="12" width="320" height="600"/><text class="h" x="65" y="120">vLLM Scheduler / Worker</text>
+  <rect class="lane" x="390" y="85" rx="12" width="320" height="600"/><text class="h" x="415" y="120">Blade-KVT Client / Step</text>
+  <rect class="lane" x="740" y="85" rx="12" width="320" height="600"/><text class="h" x="765" y="120">TargetMgr / KvSendStub</text>
+  <rect class="lane" x="1090" y="85" rx="12" width="350" height="600"/><text class="h" x="1115" y="120">Channel / Barex / RNIC</text>
+
+  <rect class="ev" x="70" y="160" rx="10" width="250" height="65"/><text class="t" x="95" y="188">build KVTPMeta</text><text class="t" x="95" y="208">freeze / abort / nonfreeze</text>
+  <path class="a" d="M320 192L420 192"/>
+  <rect class="ev" x="420" y="160" rx="10" width="250" height="65"/><text class="t" x="445" y="188">submit_req_send2 / delta</text><text class="t" x="445" y="208">暂存并按 target 分组</text>
+  <path class="a" d="M670 192L770 192"/>
+  <rect class="ev" x="770" y="160" rx="10" width="250" height="65"/><text class="t" x="795" y="188">TargetMgr 单线程</text><text class="t" x="795" y="208">target + thread_hint</text>
+
+  <rect class="ev" x="70" y="285" rx="10" width="250" height="65"/><text class="t" x="95" y="313">start_send_step</text><text class="t" x="95" y="333">model forward 同时进行</text>
+  <path class="a" d="M320 317L420 317"/>
+  <rect class="ev" x="420" y="285" rx="10" width="250" height="65"/><text class="t" x="445" y="313">Step + StepGuard</text><text class="t" x="445" y="333">wait-layer thread</text>
+  <path class="a" d="M670 317L770 317"/>
+  <rect class="ev" x="770" y="285" rx="10" width="250" height="65"/><text class="t" x="795" y="313">KvSendStub::send_batch</text><text class="t" x="795" y="333">parse_block/register_data</text>
+
+  <rect class="ev" x="70" y="410" rx="10" width="250" height="65"/><text class="t" x="95" y="438">record Event[layer]</text><text class="t" x="95" y="458">notify_event_record</text>
+  <path class="a" d="M320 442L420 442"/>
+  <rect class="ev" x="420" y="410" rx="10" width="250" height="65"/><text class="t" x="445" y="438">CUDA Event complete</text><text class="t" x="445" y="458">data_signal release</text>
+  <path class="a" d="M670 442L770 442"/>
+  <rect class="ev" x="770" y="410" rx="10" width="250" height="65"/><text class="t" x="795" y="438">wait_layer_ready</text><text class="t" x="795" y="458">send_data(layer)</text>
+  <path class="a" d="M1020 442L1120 442"/>
+  <rect class="ev" x="1120" y="410" rx="10" width="280" height="65"/><text class="t" x="1145" y="438">TCP gather+Send 或</text><text class="t" x="1145" y="458">RDMA WriteBatch</text>
+
+  <rect class="ev" x="1120" y="545" rx="10" width="280" height="65"/><text class="t" x="1145" y="573">CQ/callback → future ready</text><text class="t" x="1145" y="593">channel flush 返回</text>
+  <path class="a" d="M1120 578L1020 578"/>
+  <rect class="ev" x="770" y="545" rx="10" width="250" height="65"/><text class="t" x="795" y="573">ReqState OK/FAILED</text><text class="t" x="795" y="593">SEND_DONE RPC</text>
+  <path class="a" d="M770 578C600 650 330 650 220 475"/>
+  <text class="t" x="345" y="658">PBackend 聚合所有 TP/target → KVTResp</text>
+</svg>
