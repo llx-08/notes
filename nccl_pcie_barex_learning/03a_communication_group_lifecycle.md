@@ -1,6 +1,6 @@
 # 03a. 通信组是怎样构建和变化的：PyTorch、NCCL 与 DeepEP
 
-> 本章回答一个看似简单、实际上跨越很多层的问题：  
+> 本章回答一个看似简单、实际上跨越很多层的问题：
 > “一组 GPU 是怎样成为一个通信 group 的？运行中能不能加入或删除节点？”
 
 先给结论：
@@ -207,15 +207,165 @@ world 信息，默认 ProcessGroup 才能建立。
 
 ### 3.2 rendezvous 不是 AllReduce
 
-rendezvous 解决的是：
+#### 3.2.1 这个单词是什么意思
 
-1. 哪些 worker 属于这一代 WorkerGroup；
-2. 这一代的 `RANK/WORLD_SIZE` 是什么；
-3. 大家使用哪个 Store；
-4. 谁已经到齐，何时可以开始初始化数据面。
+`rendezvous` 原意是“约定在某处会合”。在分布式系统中，它表示：
 
-它不负责执行大 tensor 的 AllReduce。可以把 rendezvous 看成“建群和发群成员
-编号”，把 NCCL 看成“群建立后实际传数据”。
+> 原本彼此独立、甚至不知道其他成员地址的进程或节点，先到一个大家都知道的
+> 会合点登记；等本轮参与者满足条件后，所有成员得到一致的成员视图和启动信息。
+
+可以把它理解成一次线上会议的签到阶段：
+
+```text
+会前：
+  每个人只知道会议号和会议入口
+
+签到：
+  我属于哪个作业？
+  这一轮有哪些成员？
+  人是否到齐？
+  每个人的编号是什么？
+  后续去哪里交换初始化信息？
+
+签到完成：
+  所有人得到同一份参会名单和编号，开始建立真正的数据通道
+```
+
+因此，rendezvous 的重点不是“两个进程建立了一条 payload 连接”，而是
+**发现成员、形成一致意见并为后续初始化提供共同起点**。
+
+#### 3.2.2 它具体要完成哪些事情
+
+TorchElastic 官方把 rendezvous 概括为“分布式同步原语 + peer discovery”。它通常
+包含以下职责：
+
+1. **身份隔离**：通过 `run_id/rdzv_id` 确定自己加入的是哪个作业，防止两个作业
+   在同一个后端中串线；
+2. **成员发现**：记录本轮到达的节点/agent，形成这一代 WorkerGroup；
+3. **准入与等待**：未达到 `min_nodes` 时等待；达到条件后完成本轮，超过超时则
+   失败；到得太晚的节点通常等待下一轮；
+4. **一致成员视图**：所有参与者对“本轮有哪些成员”得出相同结论；
+5. **分配角色和编号**：为本轮产生 rank/world size 等信息。弹性重启后 rank
+   可能重新分配，不能把它当永久身份；
+6. **提供 bootstrap Store**：本轮成员得到一个共享 key-value Store，用它继续
+   交换 NCCL unique ID、地址等初始化元数据。
+
+注意“rendezvous backend”和“返回给通信初始化使用的 Store”在概念上不同：
+
+```text
+rendezvous backend
+  保存谁正在参加、这一轮是否完成等会合状态
+  例如 c10d/TCPStore 或 etcd 支撑的 backend
+
+completed rendezvous 返回的 Store
+  只供这一轮已接纳成员共享
+  用于初始化作业控制面和数据面
+```
+
+具体实现中它们可能复用同一个底层服务，但不要因此把两个职责混为一谈。
+
+#### 3.2.3 两台机器、8 个 GPU 的例子
+
+假设 A、B 两台机器各运行 4 个 worker：
+
+```bash
+# node A
+torchrun \
+  --nnodes=2 --nproc-per-node=4 \
+  --rdzv-backend=c10d \
+  --rdzv-endpoint=node-a:29400 \
+  --rdzv-id=job-42 \
+  train.py
+
+# node B：关键 rendezvous 参数必须与 A 一致
+torchrun \
+  --nnodes=2 --nproc-per-node=4 \
+  --rdzv-backend=c10d \
+  --rdzv-endpoint=node-a:29400 \
+  --rdzv-id=job-42 \
+  train.py
+```
+
+可以用下面的流程理解：
+
+```text
+node A agent ─┐
+              ├─ 进入 job-42 的 rendezvous
+node B agent ─┘
+                    │
+                    ├─ 等待 2 个 node 到齐
+                    ├─ 对成员列表和节点角色达成一致
+                    ├─ 得到 Store / master 地址等 bootstrap 信息
+                    └─ 派生 8 个 worker 的运行环境
+                         RANK=0..7
+                         WORLD_SIZE=8
+                         LOCAL_RANK=0..3
+                              │
+                              ▼
+                    init_process_group("nccl")
+                              │
+                              ├─ 通过 Store 交换 NCCL unique ID
+                              ├─ 创建 NCCL communicator/连接资源
+                              └─ 之后才执行 AllReduce 等 payload 通信
+```
+
+如果只有 node A 到达，A 不能假装 `WORLD_SIZE=8` 后独自开始，否则后续初始化会
+一直等缺失成员；rendezvous 会在等待条件不满足时继续阻塞或最终超时。
+
+如果 B 使用另一个 `rdzv-id`，它加入的是另一间“会议室”，不会成为 `job-42`
+的成员。如果 endpoint、端口、防火墙或 DNS 有问题，成员甚至到不了同一个会合点。
+
+#### 3.2.4 固定初始化和弹性 rendezvous 的区别
+
+“rendezvous”在 PyTorch 资料中有宽窄两种用法：
+
+| 场景 | 成员与 rank 从哪里来 | rendezvous 主要做什么 |
+|---|---|---|
+| 固定 `env://` 初始化 | launcher 已设置 `RANK/WORLD_SIZE` | 让已知成员连接 Store，交换建立 ProcessGroup 所需的元数据 |
+| TorchElastic dynamic rendezvous | 根据本轮到达且被接纳的节点产生 | peer discovery、准入、等待、形成 membership，并返回 Store/rank/world size |
+
+因此，普通 `env://` 并不一定在运行时“选出八个人”；八个人及其 rank 可能早已由
+launcher/调度系统确定。这里仍常把连接公共 Store、发现 peer 和交换 bootstrap
+信息的阶段统称为 rendezvous。
+
+弹性场景则更强调 membership：
+
+```text
+第一代：A + B，WORLD_SIZE=8
+  → B 故障或 C 请求加入
+  → 结束/停止当前 worker group
+  → re-rendezvous
+第二代：A + C，重新得到成员列表与 rank
+```
+
+这不是把 C 热插入一个正在进行的 NCCL AllReduce。旧 communicator 中的
+collective 要先停止，框架再为新一代创建 ProcessGroup/NCCL communicator。
+
+#### 3.2.5 rendezvous、Store、barrier 和 NCCL 的边界
+
+这四个概念最容易混淆：
+
+| 对象/操作 | 回答的问题 | 是否搬运模型 tensor |
+|---|---|---:|
+| rendezvous | 谁属于本轮？何时可以开始？ | 否 |
+| Store | 小型 key/value 元数据放在哪里交换？ | 否 |
+| rendezvous 内部的 join barrier | 本轮所需成员是否到齐？ | 否 |
+| `dist.barrier()` | 已建立 ProcessGroup 的所有 rank 是否到达某个程序点？ | 否 |
+| NCCL collective | GPU tensor 怎样做 AllReduce/AllGather 等？ | 是 |
+
+所以：
+
+```text
+rendezvous 完成
+  ≠ NCCL communicator 已经全部建好
+  ≠ 第一次 collective 已经成功
+  ≠ GPU 间已经传输了模型 payload
+```
+
+最简记忆：
+
+> rendezvous 是“会合、点名、定座位”；Store 是“共享公告板”；
+> NCCL communicator 是“数据传输班组”；AllReduce 才是“正式搬运和计算数据”。
 
 ### 3.3 `device_id` 会影响 NCCL 初始化时机
 
