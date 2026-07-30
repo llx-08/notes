@@ -166,6 +166,11 @@ Barex callback 成功：
 - TCP Send：消息发送操作完成，但 Blade-KVT TCP 还要求对端响应；
 - 不等于 D 应用已经执行 decode。
 
+这里的“本地完成语义”不是“数据刚离开 P 的 RNIC”。对 RC RDMA WRITE 来说，正常的
+成功 CQE 建立在 RDMA transport 已完成远端操作的基础上；远端 rkey、地址或 QP
+状态等可检测错误，会通过 NAK/retry/error CQE 反映到发送端。它仍然不是“D 上的
+GPU kernel 已经读取并验证过每个字节”。
+
 ### C. Blade-KVT batch completion
 
 `channel->flush()` 返回，`KvSendStub` 将 request 标记 OK/FAILED，并发 `SEND_DONE`。
@@ -184,6 +189,102 @@ RNIC 已满足该 transport 的完成条件。这个 ACK 不是 D 侧 CQE 返回
 - D 可能没有对应 receive CQE（one-sided WRITE）；
 - 网络 ACK 由 RNIC 协议栈处理；
 - `SEND_DONE` 是 Blade-KVT 应用层另发的 TCP RPC。
+
+### 8.1 “数据到达 D RNIC 后，RNIC→GPU 又失败”会怎样
+
+先修正一个容易造成误解的两段式想象：
+
+```text
+错误想象：
+网络到达 D RNIC → P 立刻收到成功 callback
+                 → D RNIC 再慢慢写 GPU，写失败也与 P 无关
+
+更准确的抽象：
+P post RDMA WRITE
+  → 网络可靠传输
+  → D RNIC 校验 remote address/rkey
+  → D RNIC 发起对 GPU BAR/HBM 的 peer DMA 写
+  → RDMA transport 满足成功条件
+  → P 的 send CQ 产生 IBV_WC_SUCCESS
+  → Barex DoneCallback(Status::OK)
+```
+
+也就是说，对一个正常工作的 RC/GPUDirect RDMA 栈，发送端成功 callback 不应只表示
+“包到达了 D 网卡”。如果错误能被 RNIC、PCIe、peer-memory provider 或 QP 检测，并且
+发生在 WR 尚未成功完成时，通常会表现成：
+
+```text
+D 目标 rkey/地址无效、权限错误、QP/链路故障、可报告的设备错误
+  → remote access/operation/retry/fatal 等 WC error
+  → Barex HandleWcStatusError
+  → DoneCallback(error)
+  → Blade-KVT promise.set_exception()
+  → RDMAChannel::flush() 的 future.get() 抛异常
+  → KvSendStub catch
+  → ch.reset() + ReqState::FAILED
+  → SEND_DONE code=500
+```
+
+对应当前源码：
+
+- Barex `XContextImpl::ProcessOneIoEvent()` 只有在 `wc.status ==
+  IBV_WC_SUCCESS` 时才进入 `HandleWriteComplete()` 并调用
+  `DoneCallback(Status::OK())`；
+- 非成功 WC 进入 `HandleWcStatusError()`，callback 携带
+  `BAREX_ERR_WC_STATUS`，并销毁 channel；
+- Blade-KVT `rdma_channel.cpp::WriteBatch()` 将 callback error 写入
+  promise；
+- `RDMAChannel::flush()` 的 `future.get()` 把异常抛给
+  `KvSendStub::do_task()`；
+- 最终请求状态变成 `FAILED`，request 级 `send-done` 使用 `code=500`。
+
+但是，成功 CQE 有明确边界。它不能覆盖成功完成之后才发生、或硬件本身无法检测/无法
+归因给这个 WR 的问题：
+
+1. D GPU 在 CQE 之后 reset、进程退出或目标 Block 被错误地提前释放/复用；
+2. GPU kernel 与 GPUDirect RDMA 并发读写同一范围，造成可见性或数据竞争；
+3. 合法地址内写入了错误 offset，transport 成功但业务布局错误；
+4. 静默数据损坏，没有任何一层产生 error syndrome；
+5. 底层已经报告成功，稍后才出现 PCIe AER/GPU Xid；已产生的成功 CQE不会被
+   “撤销并重发成失败”。
+
+Direct `WriteBatch` 又明确“不通知 receiver”，因此 D Worker 没有一个逐 WRITE
+callback 可以在上述情况发生后主动把失败回传给 P。`SEND_DONE` 也不是 D 发出的
+确认；它是 P 在 `flush()` 成功后自己发出的业务通知。因此默认路径的实际语义是：
+
+```text
+SEND_DONE success
+≈ P 观察到所有 RDMA WR 成功完成，并据此声明该 request 的数据面完成
+≠ D GPU kernel 已读取并验证 KV 内容
+```
+
+若系统需要更强的端到端保证，可以增加：
+
+- **接收端内容校验**：Blade-KVT 已有 `BLLM_KVTRANS_CRC=1`。P 在 write
+  completions 后请求 D 通过 GDR CPU 映射读取目标范围并计算 CRC；CRC 不同会使
+  `flush()` 失败，从而发送 `code=500`。该开关默认值是 `0`，而且在 GDR 映射或
+  tensor 布局不满足时当前实现会降级，不能把“配置了 CRC”直接等同于“每次都实际
+  校验”；
+- **D 侧 request-ready ACK**：D 在完成必要的 memory ordering、范围/版本校验后，
+  再向 P 或 Scheduler 回 ACK。这样完成语义比发送端 CQE更强，但会多一次控制面
+  往返；
+- **Block generation/epoch**：把 request、Block ID 与 generation 绑定，拒绝迟到
+  DMA 或过期完成对已经复用的 Block 生效；
+- **GPU/PCIe health monitoring**：将 Xid、PCIe AER、RNIC async event 与受影响的
+  in-flight request 关联；无法精确关联时，至少让相关 worker/channel fail-stop，
+  不继续把可疑 KV 标记为可用。
+
+还要单独处理**内存可见性**。NVIDIA GPUDirect RDMA 文档指出，第三方设备写 GPU
+内存与 GPU kernel 并发访问时可能观察到旧值、部分值或乱序值；必须让 RDMA 完成先
+对将要提交依赖 kernel 的 CPU 控制线程成立，再通过 CUDA work submission/
+synchronization 建立正确顺序。这属于同步协议问题，不一定产生 RDMA error CQE。
+
+官方参考：
+
+- NVIDIA GPUDirect RDMA，Synchronization and Memory Ordering：
+  <https://docs.nvidia.com/cuda/gpudirect-rdma/#synchronization-and-memory-ordering>
+- `ibv_poll_cq(3)` 的 WC status 与错误字段：
+  <https://man7.org/linux/man-pages/man3/ibv_poll_cq.3.html>
 
 ## 9. 接收端断开时可能看到什么
 
