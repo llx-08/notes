@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="900" viewBox="0 0 1520 900" role="img" aria-labelledby="title desc">
+  <title id="title">DCP 能不能开，只看 KV head 有没有被 TP 复制</title>
+  <desc id="desc">能开 DCP 的条件是 tp 超过 KV head 数产生了完整序列副本。开了之后：DCP group 之间仍按 TP 分不同 KV head；group 之内同一套 KV head 按 token 交错。不是每张卡同时把 head 和 token 各切一刀。</desc>
+  <defs>
+    <style>
+      .title { font:700 26px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .h { font:700 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+      .ok { fill:#059669; } .no { fill:#dc2626; } .mid { fill:#d97706; }
+    </style>
+  </defs>
+  <rect width="1520" height="900" fill="#f8fafc"/>
+  <text x="40" y="44" class="title">能不能开 DCP，看的是 KV head 冗余，不是 Q head 够不够切</text>
+  <text x="40" y="72" class="s">冗余度 R = tp / num_kv_heads（MLA 的 num_kv_heads 当作 1）。只有 R &gt;= 2 才能把「重复的那份完整序列」拿去按 token 交错。dcp 最大就是 R。</text>
+
+  <rect x="40" y="96" width="1440" height="196" rx="16" fill="#fff" stroke="#dc2626"/>
+  <rect x="40" y="96" width="220" height="196" rx="16" fill="#dc2626"/>
+  <text x="150" y="180" text-anchor="middle" class="wh">不能开 DCP</text>
+  <text x="150" y="208" text-anchor="middle" class="wh">R = 1</text>
+  <text x="280" y="132" class="h">MHA / GQA：tp &lt;= num_kv_heads，例如 32 KV head、tp=8</text>
+  <text x="280" y="160" class="t">每张卡拿互不相同的若干 KV head，各自存这些 head 的完整序列。没有副本，没有东西可以拿去切 token。</text>
+  <text x="280" y="188" class="mono">r0: KV head 0-3 全序列     r1: KV head 4-7 全序列     ...</text>
+  <text x="280" y="216" class="t">Q head 照样按 TP 切。这和能不能开 DCP 无关：tp=8、Q=32 很常见，照样不能开。</text>
+  <text x="280" y="244" class="s">约束写成 (tp // num_kv_heads) &gt;= dcp。这里 8//32=0，dcp 只能是 1。</text>
+  <text x="280" y="268" class="s">注意：比较的是 KV head 个数，不是 Q head，更不是 head_dim。</text>
+
+  <rect x="40" y="312" width="1440" height="220" rx="16" fill="#fff" stroke="#d97706"/>
+  <rect x="40" y="312" width="220" height="220" rx="16" fill="#d97706"/>
+  <text x="150" y="400" text-anchor="middle" class="wh">可以开 DCP</text>
+  <text x="150" y="428" text-anchor="middle" class="wh">R = 2</text>
+  <text x="280" y="348" class="h">GQA：4 KV head、tp=8  →  最多 dcp=2</text>
+  <text x="280" y="376" class="t">每 2 张卡原先共享同一份 KV head 的完整序列。开 dcp=2 后，这两张卡组成一个 DCP group：</text>
+  <text x="280" y="404" class="mono">dcp group 0 (r0,r1): 都是 KV head 0，token 交错 [t0 t2...] / [t1 t3...]</text>
+  <text x="280" y="428" class="mono">dcp group 1 (r2,r3): 都是 KV head 1，token 交错</text>
+  <text x="280" y="452" class="mono">dcp group 2 / 3: 同理，KV head 2 / 3</text>
+  <text x="280" y="480" class="t">group 之间：仍按 TP 分不同 KV head。group 之内：不再按 head 切，只按 token 交错。</text>
+  <text x="280" y="504" class="s">一张卡的 cache = 1 个 KV head × 一半 token。不是「既切了一部分 head 又切了这些 head 的一部分 token」那种十字切割。</text>
+
+  <rect x="40" y="552" width="1440" height="200" rx="16" fill="#fff" stroke="#059669"/>
+  <rect x="40" y="552" width="220" height="200" rx="16" fill="#059669"/>
+  <text x="150" y="632" text-anchor="middle" class="wh">可以开 DCP</text>
+  <text x="150" y="660" text-anchor="middle" class="wh">R = tp</text>
+  <text x="280" y="588" class="h">MLA：1 个 KV latent、tp=8  →  最多 dcp=8</text>
+  <text x="280" y="616" class="t">所有卡原先都存同一份完整 KV。这是 DCP 最划算的场景。常见配置 tp=8 dcp=2：</text>
+  <text x="280" y="644" class="mono">4 个 DCP group，每组 2 卡。组内：同一份 latent，token 交错。</text>
+  <text x="280" y="672" class="t">Q 仍然 128 head / 8 = 每卡 16 个。tp=8 &lt; 128 个 Q head，完全不影响开 DCP。</text>
+  <text x="280" y="700" class="s">一张卡的 cache = 1 份 latent × 一半 token。head 维还在，但组内各卡的这一维内容相同。</text>
+  <text x="280" y="724" class="s">dcp=8 时变成 1 个大 group，8 卡交错切同一份 latent，Q 仍每卡 16 head，靠 AllGather 或 qrep 补齐。</text>
+
+  <rect x="40" y="772" width="1440" height="100" rx="16" fill="#f5f3ff" stroke="#7c3aed"/>
+  <text x="60" y="808" class="h">开了 DCP 之后，不是「head 切 × token 切」叠在同一张卡上各切一刀</text>
+  <text x="60" y="836" class="t">层次是：先按 TP 把不同 KV head 分给不同 DCP group；再在 group 内把同一套 KV head 的序列按 token 交错。一张卡只落在其中一个 group 里，所以它看到的就是「自己那套 KV head + 交错后的那一半 token」。</text>
+  <text x="60" y="860" class="s">Q head 的 TP 切分一直都在，和 DCP 正交：它决定 AllGather Q，不决定 KV cache layout。</text>
+</svg>
