@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="820" viewBox="0 0 1520 820" role="img" aria-labelledby="title desc">
+  <title id="title">DCP 不算两块小三角：decode 只拆开因果矩阵的最后一行</title>
+  <desc id="desc">完整因果下三角里，decode 只计算最新 query 那一行。这一行的列（K）按奇偶分到两个 rank，各自做 partial softmax，再用 LSE 合成完整的一行。</desc>
+  <defs>
+    <style>
+      .title { font:700 26px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .h { font:700 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#fff; }
+      .cell { font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+    </style>
+  </defs>
+  <rect width="1520" height="820" fill="#f8fafc"/>
+  <text x="40" y="44" class="title">因果下三角没有被切成两块：decode 只算最后一行</text>
+  <text x="40" y="72" class="s">Q 不按 token 切。decode 每步只有最新那一个 query。奇偶切开的是这一行的 K 列，不是两张小三角。</text>
+
+  <rect x="40" y="96" width="720" height="500" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="128" class="h">完整因果矩阵（6 个 token）</text>
+  <text x="60" y="152" class="s">蓝色列 = rank0 的 K；绿色列 = rank1 的 K。红框 = decode 真正在算的那一行。</text>
+
+  <g transform="translate(90,175)" font-family="ui-monospace,Menlo,monospace">
+    <text x="70" y="18" class="s">k0</text>
+    <text x="118" y="18" class="s">k1</text>
+    <text x="166" y="18" class="s">k2</text>
+    <text x="214" y="18" class="s">k3</text>
+    <text x="262" y="18" class="s">k4</text>
+    <text x="310" y="18" class="s">k5</text>
+    <text x="70" y="36" class="s">r0</text>
+    <text x="118" y="36" class="s">r1</text>
+    <text x="166" y="36" class="s">r0</text>
+    <text x="214" y="36" class="s">r1</text>
+    <text x="262" y="36" class="s">r0</text>
+    <text x="310" y="36" class="s">r1</text>
+
+    <text x="-8" y="68" class="s">q0</text>
+    <rect x="50" y="48" width="40" height="32" fill="#dbeafe"/><text x="70" y="68" text-anchor="middle" class="cell">*</text>
+    <rect x="98" y="48" width="40" height="32" fill="#f1f5f9"/><text x="118" y="68" text-anchor="middle" class="cell">.</text>
+    <rect x="146" y="48" width="40" height="32" fill="#f1f5f9"/><text x="166" y="68" text-anchor="middle" class="cell">.</text>
+    <rect x="194" y="48" width="40" height="32" fill="#f1f5f9"/><text x="214" y="68" text-anchor="middle" class="cell">.</text>
+    <rect x="242" y="48" width="40" height="32" fill="#f1f5f9"/><text x="262" y="68" text-anchor="middle" class="cell">.</text>
+    <rect x="290" y="48" width="40" height="32" fill="#f1f5f9"/><text x="310" y="68" text-anchor="middle" class="cell">.</text>
+
+    <text x="-8" y="108" class="s">q1</text>
+    <rect x="50" y="88" width="40" height="32" fill="#dbeafe"/><text x="70" y="108" text-anchor="middle" class="cell">*</text>
+    <rect x="98" y="88" width="40" height="32" fill="#d1fae5"/><text x="118" y="108" text-anchor="middle" class="cell">*</text>
+    <rect x="146" y="88" width="40" height="32" fill="#f1f5f9"/><text x="166" y="108" text-anchor="middle" class="cell">.</text>
+    <rect x="194" y="88" width="40" height="32" fill="#f1f5f9"/><text x="214" y="108" text-anchor="middle" class="cell">.</text>
+    <rect x="242" y="88" width="40" height="32" fill="#f1f5f9"/><text x="262" y="108" text-anchor="middle" class="cell">.</text>
+    <rect x="290" y="88" width="40" height="32" fill="#f1f5f9"/><text x="310" y="108" text-anchor="middle" class="cell">.</text>
+
+    <text x="-8" y="148" class="s">q2</text>
+    <rect x="50" y="128" width="40" height="32" fill="#dbeafe"/><text x="70" y="148" text-anchor="middle" class="cell">*</text>
+    <rect x="98" y="128" width="40" height="32" fill="#d1fae5"/><text x="118" y="148" text-anchor="middle" class="cell">*</text>
+    <rect x="146" y="128" width="40" height="32" fill="#dbeafe"/><text x="166" y="148" text-anchor="middle" class="cell">*</text>
+    <rect x="194" y="128" width="40" height="32" fill="#f1f5f9"/><text x="214" y="148" text-anchor="middle" class="cell">.</text>
+    <rect x="242" y="128" width="40" height="32" fill="#f1f5f9"/><text x="262" y="148" text-anchor="middle" class="cell">.</text>
+    <rect x="290" y="128" width="40" height="32" fill="#f1f5f9"/><text x="310" y="148" text-anchor="middle" class="cell">.</text>
+
+    <text x="-8" y="188" class="s">q3</text>
+    <rect x="50" y="168" width="40" height="32" fill="#dbeafe"/><text x="70" y="188" text-anchor="middle" class="cell">*</text>
+    <rect x="98" y="168" width="40" height="32" fill="#d1fae5"/><text x="118" y="188" text-anchor="middle" class="cell">*</text>
+    <rect x="146" y="168" width="40" height="32" fill="#dbeafe"/><text x="166" y="188" text-anchor="middle" class="cell">*</text>
+    <rect x="194" y="168" width="40" height="32" fill="#d1fae5"/><text x="214" y="188" text-anchor="middle" class="cell">*</text>
+    <rect x="242" y="168" width="40" height="32" fill="#f1f5f9"/><text x="262" y="188" text-anchor="middle" class="cell">.</text>
+    <rect x="290" y="168" width="40" height="32" fill="#f1f5f9"/><text x="310" y="188" text-anchor="middle" class="cell">.</text>
+
+    <text x="-8" y="228" class="s">q4</text>
+    <rect x="50" y="208" width="40" height="32" fill="#dbeafe"/><text x="70" y="228" text-anchor="middle" class="cell">*</text>
+    <rect x="98" y="208" width="40" height="32" fill="#d1fae5"/><text x="118" y="228" text-anchor="middle" class="cell">*</text>
+    <rect x="146" y="208" width="40" height="32" fill="#dbeafe"/><text x="166" y="228" text-anchor="middle" class="cell">*</text>
+    <rect x="194" y="208" width="40" height="32" fill="#d1fae5"/><text x="214" y="228" text-anchor="middle" class="cell">*</text>
+    <rect x="242" y="208" width="40" height="32" fill="#dbeafe"/><text x="262" y="228" text-anchor="middle" class="cell">*</text>
+    <rect x="290" y="208" width="40" height="32" fill="#f1f5f9"/><text x="310" y="228" text-anchor="middle" class="cell">.</text>
+
+    <text x="-8" y="276" class="s">q5</text>
+    <rect x="42" y="248" width="304" height="48" fill="none" stroke="#dc2626" stroke-width="3" rx="6"/>
+    <rect x="50" y="256" width="40" height="32" fill="#2563eb"/><text x="70" y="276" text-anchor="middle" class="wh">*</text>
+    <rect x="98" y="256" width="40" height="32" fill="#059669"/><text x="118" y="276" text-anchor="middle" class="wh">*</text>
+    <rect x="146" y="256" width="40" height="32" fill="#2563eb"/><text x="166" y="276" text-anchor="middle" class="wh">*</text>
+    <rect x="194" y="256" width="40" height="32" fill="#059669"/><text x="214" y="276" text-anchor="middle" class="wh">*</text>
+    <rect x="242" y="256" width="40" height="32" fill="#2563eb"/><text x="262" y="276" text-anchor="middle" class="wh">*</text>
+    <rect x="290" y="256" width="40" height="32" fill="#059669"/><text x="310" y="276" text-anchor="middle" class="wh">*</text>
+  </g>
+  <text x="60" y="520" class="t">红框这一行：同一个 q5，去点全部历史 K。因果性已经成立，因为这些 K 都在 q5 之前（含自身）。</text>
+  <text x="60" y="548" class="t">上面那些行是 prefill 才会整张算的。DCP decode 不去动它们。</text>
+  <text x="60" y="576" class="s">kernel 对本地 KV 用 causal=False：从它的视角，这就是 1 个 Q 点 3 个已经合法的 K。</text>
+
+  <rect x="780" y="96" width="700" height="500" rx="16" fill="#fff" stroke="#dc2626"/>
+  <text x="800" y="128" class="h">错误想象 vs 实际拆法</text>
+
+  <rect x="800" y="148" width="660" height="150" rx="12" fill="#fef2f2" stroke="#dc2626"/>
+  <text x="820" y="176" class="h">错：两张小三角再拼回去</text>
+  <text x="820" y="204" class="t">rank0 拿 q0,q2,q4 对 k0,k2,k4 做自己的下三角</text>
+  <text x="820" y="228" class="t">rank1 拿 q1,q3,q5 对 k1,k3,k5 做自己的下三角</text>
+  <text x="820" y="256" class="t">这会把 Q 也按序列切开。DCP 不这么干。</text>
+  <text x="820" y="280" class="s">那种切法是序列并行 / ring attention 的另一种故事。</text>
+
+  <rect x="800" y="314" width="660" height="250" rx="12" fill="#ecfdf5" stroke="#059669"/>
+  <text x="820" y="342" class="h">对：同一行拆成两段 partial softmax</text>
+  <text x="820" y="372" class="mono">rank0: q5 x [k0, k2, k4]  -&gt; o0, lse0</text>
+  <text x="820" y="396" class="mono">rank1: q5 x [k1, k3, k5]  -&gt; o1, lse1</text>
+  <text x="820" y="428" class="t">AllGather(lse0, lse1)，本地算出 lse_g</text>
+  <text x="820" y="452" class="mono">o* = o0*exp(lse0-lse_g) + o1*exp(lse1-lse_g)</text>
+  <text x="820" y="480" class="t">加法发生在 ReduceScatter(out) 里，同时把 head 切回 TP。</text>
+  <text x="820" y="508" class="s">合并的是「这一行里偶数列的贡献」和「奇数列的贡献」，</text>
+  <text x="820" y="532" class="s">不是两块三角矩阵。</text>
+
+  <rect x="40" y="616" width="1440" height="174" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="648" class="h">为什么 prefill 不能靠同一套「拆最后一行」</text>
+  <text x="60" y="676" class="t">整张下三角里每一行的合法 K 集合都不同：q2 不能看 k4。KV 再按奇偶切开，每张卡还得按全局位置做 mask，很脏。</text>
+  <text x="60" y="704" class="t">所以 chunked prefill 直接 AllGather 历史 KV，在完整序列上算普通因果注意力。gathered 结果进 workspace，算完丢掉，不写回分片 cache。</text>
+  <text x="60" y="732" class="t">GQA decode 还多一段：历史 cache 走上面的「拆最后一行」（causal=False）；当前 step 的 dense K/V 在本 rank 做因果；两次结果再本地 merge_attn_states。</text>
+  <text x="60" y="760" class="s">MLA decode 新 token 的 latent 已经进所属 rank 的 cache，不必拆这两段。</text>
+</svg>

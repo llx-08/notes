@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="900" viewBox="0 0 1520 900" role="img" aria-labelledby="title desc">
+  <title id="title">Decode 一步里 KV cache 保持切开，通信只搬 Q、LSE 和 out</title>
+  <desc id="desc">每个 rank 的 KV cache 在 attention 计算全程保持交错分片、紧凑存放。AllGather 的是 Q 和 LSE，ReduceScatter 的是 attention 输出。KV 字节不跨 rank。</desc>
+  <defs>
+    <marker id="arrp" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#7c3aed"/></marker>
+    <marker id="arrk" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#db2777"/></marker>
+    <marker id="arrg" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#059669"/></marker>
+    <style>
+      .title { font:700 26px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .h { font:700 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+      .panel { font:700 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+    </style>
+  </defs>
+  <rect width="1520" height="900" fill="#f8fafc"/>
+  <text x="40" y="44" class="title">Decode 一步：KV cache 钉在本地，搬走的是激活而不是 cache</text>
+  <text x="40" y="72" class="s">tp=2, dcp=2, I=1。正在 decode 第 8 个 token（下标 7）。KV 按奇偶切开后紧凑存放；attention 期间这两块 cache 既不 gather 也不交换。</text>
+
+  <rect x="40" y="96" width="700" height="40" rx="12" fill="#1d4ed8"/>
+  <text x="390" y="122" text-anchor="middle" class="panel">rank0  本职 Q head = h0    KV 归属 = 偶数位</text>
+  <rect x="780" y="96" width="700" height="40" rx="12" fill="#047857"/>
+  <text x="1130" y="122" text-anchor="middle" class="panel">rank1  本职 Q head = h1    KV 归属 = 奇数位</text>
+
+  <rect x="40" y="152" width="700" height="210" rx="16" fill="#fff" stroke="#ea580c" stroke-width="3"/>
+  <text x="60" y="180" class="h">本 rank 的 KV cache（计算全程不变）</text>
+  <text x="60" y="204" class="s">物理 page 里紧凑排列，没有给奇数 token 留空洞</text>
+  <rect x="60" y="220" width="70" height="44" rx="8" fill="#ea580c"/><text x="95" y="247" text-anchor="middle" class="wh">t0</text>
+  <rect x="140" y="220" width="70" height="44" rx="8" fill="#ea580c"/><text x="175" y="247" text-anchor="middle" class="wh">t2</text>
+  <rect x="220" y="220" width="70" height="44" rx="8" fill="#ea580c"/><text x="255" y="247" text-anchor="middle" class="wh">t4</text>
+  <rect x="300" y="220" width="70" height="44" rx="8" fill="#ea580c"/><text x="335" y="247" text-anchor="middle" class="wh">t6</text>
+  <rect x="380" y="220" width="70" height="44" rx="8" fill="#ffedd5" stroke="#ea580c"/><text x="415" y="247" text-anchor="middle" class="mono">空</text>
+  <text x="60" y="290" class="mono">slot 0,1,2,3  =  逻辑 t0,t2,t4,t6</text>
+  <text x="60" y="314" class="t">kernel 只看到 seqused_k=4 的连续 KV，不知道它们在全局是偶数位。</text>
+  <text x="60" y="338" class="t">新 token t7 不属于 rank0，本步不往这里写。</text>
+
+  <rect x="780" y="152" width="700" height="210" rx="16" fill="#fff" stroke="#ea580c" stroke-width="3"/>
+  <text x="800" y="180" class="h">本 rank 的 KV cache（计算全程不变）</text>
+  <text x="800" y="204" class="s">物理 page 里紧凑排列，没有给偶数 token 留空洞</text>
+  <rect x="800" y="220" width="70" height="44" rx="8" fill="#ea580c"/><text x="835" y="247" text-anchor="middle" class="wh">t1</text>
+  <rect x="880" y="220" width="70" height="44" rx="8" fill="#ea580c"/><text x="915" y="247" text-anchor="middle" class="wh">t3</text>
+  <rect x="960" y="220" width="70" height="44" rx="8" fill="#ea580c"/><text x="995" y="247" text-anchor="middle" class="wh">t5</text>
+  <rect x="1040" y="220" width="70" height="44" rx="8" fill="#c2410c"/><text x="1075" y="247" text-anchor="middle" class="wh">t7</text>
+  <rect x="1120" y="220" width="70" height="44" rx="8" fill="#ffedd5" stroke="#ea580c"/><text x="1155" y="247" text-anchor="middle" class="mono">空</text>
+  <text x="800" y="290" class="mono">slot 0,1,2,3  =  逻辑 t1,t3,t5,t7</text>
+  <text x="800" y="314" class="t">t7 归 rank1，MLA 路径下它的 latent 已经写进这份 cache。</text>
+  <text x="800" y="338" class="t">GQA 则当前 K/V 还是 dense tensor，历史才在 cache 里。</text>
+
+  <rect x="40" y="384" width="1440" height="36" rx="8" fill="#fff7ed" stroke="#ea580c"/>
+  <text x="760" y="408" text-anchor="middle" class="h">橙色框 = KV cache。Decode attention 期间这两块既不 AllGather，也不交换。</text>
+
+  <rect x="40" y="440" width="1440" height="250" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="472" class="h">真正跨 rank 的三步通信（默认 AG+RS；KV 不在其中）</text>
+
+  <rect x="60" y="492" width="430" height="170" rx="12" fill="#f5f3ff" stroke="#7c3aed"/>
+  <text x="80" y="522" class="h">1. 开头 AllGather(Q)</text>
+  <text x="80" y="548" class="t">沿 head 维把 q[h0]、q[h1] 凑齐</text>
+  <text x="80" y="572" class="t">两边都能对本地 KV 算全部 head</text>
+  <text x="80" y="596" class="mono">[B, H_local, 576] -&gt; [B, H_group, 576]</text>
+  <text x="80" y="620" class="s">qrep 开启则跳过这一步</text>
+  <text x="80" y="644" class="s">decode 时 B=1，字节很少</text>
+
+  <rect x="510" y="492" width="430" height="170" rx="12" fill="#fdf2f8" stroke="#db2777"/>
+  <text x="530" y="522" class="h">2. 本地 attn 之后 AllGather(LSE)</text>
+  <text x="530" y="548" class="t">每 head 一个 fp32 标量</text>
+  <text x="530" y="572" class="t">score / logits / KV 都不传</text>
+  <text x="530" y="596" class="mono">[B, H] fp32，大约几十到几百字节</text>
+  <text x="530" y="620" class="s">然后本地 o *= exp(lse_local - lse_g)</text>
+  <text x="530" y="644" class="s">A2A 路径把 LSE 打包进 out，省掉这次</text>
+
+  <rect x="960" y="492" width="490" height="170" rx="12" fill="#ecfdf5" stroke="#059669"/>
+  <text x="980" y="522" class="h">3. 最后 ReduceScatter(out)</text>
+  <text x="980" y="548" class="t">跨 rank 求和 + 按 TP 切回 head</text>
+  <text x="980" y="572" class="t">rank0 留下 h0，rank1 留下 h1</text>
+  <text x="980" y="596" class="mono">[B, H_group, 512] -&gt; [B, H_local, 512]</text>
+  <text x="980" y="620" class="s">这是通信主体，也是「合并」发生的地方</text>
+  <text x="980" y="644" class="s">A2A 用一次 all_to_all_single 取代 2+3</text>
+
+  <rect x="40" y="710" width="1440" height="160" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="742" class="h">跨 step 时 cache 怎么长：每个新 token 只写进一个 rank</text>
+  <text x="60" y="770" class="t">decode t8（偶数）-&gt; 只追加到 rank0 的 slot 4；decode t9（奇数）-&gt; 只追加到 rank1 的 slot 4。另一张卡的 cache 这一步完全不动。</text>
+  <text x="60" y="798" class="t">所以「中途」每个 rank 的 KV cache 永远是自己那条交错子序列，长度约 seq_len / dcp。它不是半成品全局 cache，也不需要在 step 结束时拼回去。</text>
+  <text x="60" y="826" class="s">例外只有 chunked prefill：那时才 AllGather 历史 KV 到 workspace，算完普通因果注意力。那份 gathered KV 是临时 workspace，不会写回各 rank 的分片 cache。</text>
+  <text x="60" y="850" class="s">GQA 当前 step 的 K/V 以 dense tensor 进 kernel，不经过 DCP cache；算完后再按交错规则写入所属 rank。</text>
+</svg>
