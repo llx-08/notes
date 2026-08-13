@@ -91,6 +91,28 @@ tp=8, dcp=2  →  4 个 DCP group，每组 2 个 rank：
         （Qwen3-235B num_kv_heads=4，tp=8 → dcp <= 2）
 ```
 
+### 什么时候能开 DCP：只看 KV head 有没有被 TP 复制
+
+冗余度 `R = tp / num_kv_heads`（MLA 把 `num_kv_heads` 当作 1）。**只有 `R >= 2` 才能开 DCP**，且 `dcp` 最大就是 `R`。比较的是 **KV head 个数**，不是 Q head，更不是 `head_dim`。
+
+![能不能开 DCP，看 KV head 冗余；开了之后 group 之间分 head、group 之内交错 token](/imgs/vllm-dcp-when-and-how.svg)
+
+| 情况 | R | 能不能开 DCP | 一张卡上的 KV cache |
+|---|---|---|---|
+| MHA/GQA，`tp <= num_kv_heads`（如 32 KV head、tp=8） | 1 | **不能**。每卡拿互不相同的 KV head，没有副本可切 | 若干 **独有** KV head × **完整**序列 |
+| GQA，4 KV head、tp=8 | 2 | 可以，`dcp<=2` | 1 个 KV head × **一半**交错 token |
+| MLA，1 KV latent、tp=8 | 8 | 可以，`dcp<=8`；常见 dcp=2 | 1 份 latent × `1/dcp` 交错 token |
+
+所以：
+
+- `tp < Q head 数` **几乎总是如此**（DeepSeek-V3：tp=8、Q=128），**完全不妨碍开 DCP**。Q 不够均分的是 AllGather / qrep 的事。
+- `tp <= KV head 数` 才开不了：没有「同一套 KV 的完整副本」可以拿去换 token 交错。
+- 开了 DCP 也**不是**「每张卡把 head 和 token 各切一刀」的十字分割。层次是：
+  1. **DCP group 之间**（这是 TP）：不同 group 拿不同 KV head；
+  2. **group 之内**（这是 DCP）：同一套 KV head，按 token 交错。
+
+一张卡只属于一个 group，所以它看到的就是「自己那套 KV head + 交错后的那一半 token」。
+
 ---
 
 ## 2. KV cache 到底怎么切：**交错**，不是连续大段
@@ -746,6 +768,7 @@ VLLM_DCP_Q_REPLICATE=1              # 冗余 q_proj，省掉 decode 的 Q all-ga
 9. ❌ "decode 时要把切开的 KV gather 回来再算 attention" → KV cache 全程钉在本地。通信只搬 Q、LSE、out
 10. ❌ "奇偶 token 各自做因果小三角再拼回去" → decode 只拆因果矩阵的**最后一行**（同一个 Q 点被切开的 K）；Q 不按序列切
 11. ❌ "DCP 把 KV cache 改成没有 head 维、只按 token 排" → 切分轴确实是 token 交错；tensor 仍带 `local_kv_heads` / latent。组内各 rank 的 head 维内容相同，不同 KV head 若还在，是 TP 在 DCP group **之间**切的
+12. ❌ "tp < Q head 数就不能开 DCP" / "开了 DCP 每张卡既按 head 切又按 token 切" → 能不能开只看 `tp / num_kv_heads`。开了之后是「group 之间分 KV head，group 之内交错 token」，一张卡不会对同一份 KV 做十字切割
 
 **实现坑（社区都踩过）**
 | 坑 | 修复 |
