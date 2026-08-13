@@ -17,7 +17,7 @@
 
 <!-- more -->
 
-读这篇可以按图走：为什么切（图 1）→ 怎么切、block 怎么管（图 2）→ 一步里 KV 长什么样、通信搬什么（图 3）→ 因果三角其实只拆最后一行（图 4）→ decode 四步与 LSE（图 5、图 6）→ 通信怎么收（图 7、图 8）→ GQA 与 prefill（图 9、图 10）。ASCII 图保留作精确对照。
+读这篇可以按图走：为什么切（图 1）→ 怎么切、block 怎么管（图 2）→ 一步里 KV 长什么样、通信搬什么（图 3）→ 因果三角其实只拆最后一行（图 4）→ decode 四步与 LSE（图 5、图 6）→ 通信怎么收（图 7、图 8）→ Q 激活 AllGather vs 权重复制（图 9）→ GQA 与 prefill（图 10、图 11）。ASCII 图保留作精确对照。
 
 ---
 
@@ -272,6 +272,7 @@ Prefill 不能靠同一套「拆最后一行」：整张下三角里每一行的
 
   ★ 为什么便宜：decode 时 B = 1 token/请求，Q 只有 1×H_local×576 那么大
     （MLA: 576 = kv_lora_rank 512 + qk_rope_head_dim 64）
+    ★ 这里 AllGather 的是 **Q 激活**，不是 q_proj 权重。权重仍按 TP 切开，见 §5。
 
 
 ════════════════ Step 2：本地 attention（各算全部 head，但只对本地 KV）════════════════
@@ -518,11 +519,40 @@ collective    3 次                              2 次
 
 ---
 
-## 5. 把 Q AllGather 也省掉：`VLLM_DCP_Q_REPLICATE`（PR #45964）
+## 5. AllGather 的是 Q 激活，不是权重；要省掉它才复制 `q_proj`
 
-思路：让 `q_proj` / `q_b_proj` 在 DCP group 内**冗余计算**，这样每个 rank 天生就有整组的 Q head，decode 直接跳过 all-gather。
+DCP 挂在 TP 下面，所以 **Q head 默认就是按 TP 切开的**：每张卡只存、只算出自己的 `H_local` 个 head。Decode 却要在每张卡上对**本地那一半 KV** 算**整组 head** 的 partial softmax，所以缺另一半 Q。缺的补法有两种：
+
+1. **默认**：权重不动，把当前 token 的 Q **激活** AllGather 过来（§3 Step 1）
+2. **可选 `VLLM_DCP_Q_REPLICATE`**：在 DCP group 内把 `q_proj` / `q_b_proj` **权重复制一份**，本地直接算出整组 Q，跳过 AllGather（PR #45964）
+
+这两种对显存的含义完全不同。
+
+![AllGather 的是 Q 激活；qrep 才复制 q_proj 权重](imgs/vllm-dcp-q-ag-vs-weights.svg)
+
+### 5.1 默认路径：权重仍按 TP 切开
+
+`q_proj` 是 `ColumnParallelLinear`，沿 **output / head 维** 切开。AllGather 发生在 GEMM **之后**，对象是形状 `[B, H_local, 576]` 的激活，不是权重矩阵。
+
+```
+tp=8, dcp=2, DeepSeek-V3，1 个 decode token，bf16：
+
+  常驻：q_b_proj 权重     每卡只持有 16/128 的列  →  不因 AllGather 变大
+  临时：GEMM 出口 Q        [1, 16, 576]  ≈ 18 KB
+  临时：AllGather 后 Q     [1, 32, 576]  ≈ 37 KB   ← 多出来的 18 KB 是激活
+```
+
+AllGather 之后每张卡「看起来有 32 个 Q head」，那是这一步的激活 buffer。下一步会被覆盖或释放，**不会在 GPU 上长驻一份完整 q_proj**。
+
+`o_proj` / `v_up` 同样始终按 TP 切开。所以 Step 4 必须 `ReduceScatter(out)`：既把 partial attention 加完，也把 head 维收回 `H_local`，下游线性层的权重布局一行都不用改。
+
+KV 不能走「每张卡放全量」这条路——那就回到纯 TP 的 KV 冗余，DCP 没了。Q 可以复制，是因为 Q **没有 cache**，每步都从 hidden 现场投影；复制只影响 `q_proj` 这一层的常驻权重。
+
+### 5.2 可选：组内复制权重，跳过 AllGather
 
 ![VLLM_DCP_Q_REPLICATE：组内共享 q_proj 权重](imgs/vllm-dcp-qrep.svg)
+
+思路：让 `q_proj` / `q_b_proj` 在 DCP group 内**冗余存放、冗余计算**，每个 rank 天生就有整组 Q head。
 
 `vllm/model_executor/layers/linear.py:598-636`：
 
@@ -545,7 +575,7 @@ tp=8, dcp=2，总共 128 head：
     r2: head 32-47                         r2: head 32-63 ┐
     r3: head 48-63                         r3: head 32-63 ┘
     ...                                    ...
-    decode 必须 AllGather(Q)               decode 直接跳过 AllGather ✅
+    decode 必须 AllGather(Q 激活)          decode 直接跳过 AllGather ✅
                                            prefill 用 _local_view() 切回自己那 16 个
 ```
 
@@ -555,9 +585,24 @@ qrep_enabled = (envs.VLLM_DCP_Q_REPLICATE
                 and parallel_config.decode_context_parallel_size > 1
                 and parallel_config.prefill_context_parallel_size <= 1)
 ```
-调用点 `mla_attention.py:945-947`：`if not qrep_decode: mqa_q = self.dcp_manager.query_gather(mqa_q)`
+调用点：`if not qrep_decode: mqa_q = self.dcp_manager.query_gather(mqa_q)`。MLA 里 `forward` 仍按复制后的权重算出整组 head；prefill 再 `_local_view()` 切回本职 head。
 
-代价：q_proj 的 GEMM 多算 dcp 倍。decode 时 batch 小、这块 GEMM 便宜，换掉一次通信通常划算——但这是**要实测的 trade-off**，不是无条件的赢。
+### 5.3 为什么默认不把 Q head 全量放到每张卡上
+
+这正是上一问的答案：**可以，而且已经实现了，但默认关着。** 原因是两笔账不对称。
+
+| | 默认 AllGather 激活 | `VLLM_DCP_Q_REPLICATE` |
+|---|---|---|
+| 常驻显存 | q_proj 仍按 TP 切，不涨 | 组内 q_proj 复制 `dcp` 倍 |
+| DeepSeek-V3 tp=8 dcp=2 | 0 额外权重 | `q_b_proj` 每层多约 9.4 MB × 61 层 ≈ **0.57 GB / GPU** |
+| 每步额外激活 | ~18 KB，用完即弃 | 无 AllGather buffer |
+| Decode GEMM | 只算 `H_local` | 多算 `dcp` 倍（B=1，通常仍便宜） |
+| Prefill GEMM | 只算 `H_local` | 先算出整组 head 再切掉，长 prompt 更亏 |
+| 通信 | 多一次小 AllGather | 0 |
+
+DCP 真正省下的是 **KV cache（GB 级）**。Q AllGather 争的只是「要不要为了跳过一次几十 KB 的 collective，常驻几百 MB 权重」。decode 很 latency-bound、NCCL 启动开销明显时再开 qrep；PCP>1 时代码直接禁用，因为 prefill 的 Q 很长，复制权重还要多算大 GEMM。
+
+GQA 的 q 通常和 k/v 融在 `qkv_proj` 里，社区这条 qrep 主要接在 MLA 的 `q_proj` / `q_b_proj` 上。GQA decode 仍然 AllGather 的是 query **激活**。
 
 ---
 
@@ -674,10 +719,11 @@ VLLM_DCP_Q_REPLICATE=1              # 冗余 q_proj，省掉 decode 的 Q all-ga
 3. ❌ "KV 按连续大段切"（博客画法）→ 实际是按 `I` **交错**，为了负载均衡
 4. ❌ "合并是近似的" → 数学上**精确等价**，见 §3.4 推导与验算
 5. ❌ "Q all-gather 是瓶颈" → decode 时 B 很小；真正的通信主体是 `[B, H, 512]` 的 out。Q 的痛点是多一次 collective，不是 payload
-6. ❌ "DCP 和 PCP 是同一件事" → DCP 特化 decode（短 Q，可 RS 收回 head）；PCP 切 prefill 长 context，head 维切不动时只能 AR
-7. ❌ "virtual block 让每张卡存稀疏 KV" → scheduler 放大的是记账单位，worker 把属于自己的 token **紧凑**重排；物理 page 大小不变，cache 里没有空洞
-8. ❌ "decode 时要把切开的 KV gather 回来再算 attention" → KV cache 全程钉在本地。通信只搬 Q、LSE、out
-9. ❌ "奇偶 token 各自做因果小三角再拼回去" → decode 只拆因果矩阵的**最后一行**（同一个 Q 点被切开的 K）；Q 不按序列切
+6. ❌ "AllGather Q 之后每张卡常驻了全部 Q head 权重" → gather 的是当前 token 的 **Q 激活**（KB 级，用完即弃）；`q_proj` 权重默认仍按 TP 切开。要复制权重请开 `VLLM_DCP_Q_REPLICATE`，见 §5
+7. ❌ "DCP 和 PCP 是同一件事" → DCP 特化 decode（短 Q，可 RS 收回 head）；PCP 切 prefill 长 context，head 维切不动时只能 AR
+8. ❌ "virtual block 让每张卡存稀疏 KV" → scheduler 放大的是记账单位，worker 把属于自己的 token **紧凑**重排；物理 page 大小不变，cache 里没有空洞
+9. ❌ "decode 时要把切开的 KV gather 回来再算 attention" → KV cache 全程钉在本地。通信只搬 Q、LSE、out
+10. ❌ "奇偶 token 各自做因果小三角再拼回去" → decode 只拆因果矩阵的**最后一行**（同一个 Q 点被切开的 K）；Q 不按序列切
 
 **实现坑（社区都踩过）**
 | 坑 | 修复 |
