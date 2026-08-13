@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="780" viewBox="0 0 1520 780" role="img" aria-labelledby="title desc">
+  <title id="title">DCP 的 KV cache 按 token 交错，不按 head 切；这份 layout 在 decode 全程保持</title>
+  <desc id="desc">DCP group 内各 rank 持有同一套 KV head 的不同 token。物理 page 沿 token 维紧凑交错存放，decode 期间不改回按序列连续的布局。Q head 仍按 TP 切开。GQA 的不同 KV head 在不同 DCP group 之间，那是 TP，不是 DCP。</desc>
+  <defs>
+    <style>
+      .title { font:700 26px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .h { font:700 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+      .panel { font:700 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+    </style>
+  </defs>
+  <rect width="1520" height="780" fill="#f8fafc"/>
+  <text x="40" y="44" class="title">两根轴：token 交给 DCP 交错，head 仍是 TP 的事</text>
+  <text x="40" y="72" class="s">你看到的 [t0 t2 t4 t6] / [t1 t3 t5 t7] 就是 decode 全程的 KV cache layout，不会再拼回按序列连续的全量 cache。</text>
+
+  <rect x="40" y="96" width="710" height="40" rx="12" fill="#ea580c"/>
+  <text x="395" y="122" text-anchor="middle" class="panel">DCP 切的轴：token / 序列维</text>
+  <rect x="770" y="96" width="710" height="40" rx="12" fill="#2563eb"/>
+  <text x="1125" y="122" text-anchor="middle" class="panel">TP 切的轴：Q head（KV head 组内相同）</text>
+
+  <rect x="40" y="152" width="710" height="360" rx="16" fill="#fff" stroke="#ea580c"/>
+  <text x="60" y="184" class="h">同一个 DCP group 里，KV head 是同一份</text>
+  <text x="60" y="208" class="s">MLA 等价 1 个 KV head；GQA 组内那几个 rank 本来就共享同一套 KV head。</text>
+  <text x="60" y="240" class="mono">rank0 page:  t0  t2  t4  t6     空...</text>
+  <rect x="60" y="252" width="64" height="36" rx="6" fill="#ea580c"/><text x="92" y="275" text-anchor="middle" class="wh">t0</text>
+  <rect x="132" y="252" width="64" height="36" rx="6" fill="#ea580c"/><text x="164" y="275" text-anchor="middle" class="wh">t2</text>
+  <rect x="204" y="252" width="64" height="36" rx="6" fill="#ea580c"/><text x="236" y="275" text-anchor="middle" class="wh">t4</text>
+  <rect x="276" y="252" width="64" height="36" rx="6" fill="#ea580c"/><text x="308" y="275" text-anchor="middle" class="wh">t6</text>
+  <rect x="348" y="252" width="64" height="36" rx="6" fill="#ffedd5" stroke="#ea580c"/><text x="380" y="275" text-anchor="middle" class="s">空</text>
+  <text x="60" y="318" class="mono">rank1 page:  t1  t3  t5  t7     空...</text>
+  <rect x="60" y="330" width="64" height="36" rx="6" fill="#c2410c"/><text x="92" y="353" text-anchor="middle" class="wh">t1</text>
+  <rect x="132" y="330" width="64" height="36" rx="6" fill="#c2410c"/><text x="164" y="353" text-anchor="middle" class="wh">t3</text>
+  <rect x="204" y="330" width="64" height="36" rx="6" fill="#c2410c"/><text x="236" y="353" text-anchor="middle" class="wh">t5</text>
+  <rect x="276" y="330" width="64" height="36" rx="6" fill="#c2410c"/><text x="308" y="353" text-anchor="middle" class="wh">t7</text>
+  <rect x="348" y="330" width="64" height="36" rx="6" fill="#ffedd5" stroke="#ea580c"/><text x="380" y="353" text-anchor="middle" class="s">空</text>
+  <text x="60" y="392" class="t">物理 tensor 仍是 [blocks, block_size, local_kv_heads, dim]。</text>
+  <text x="60" y="416" class="t">DCP 改的是 block_size 那一维里装哪些 token，不是把 head 维拆掉。</text>
+  <text x="60" y="440" class="t">新 token 只追加到所属 rank 的下一个紧凑 slot。layout 规则不变。</text>
+  <text x="60" y="464" class="s">chunked prefill 的 gathered KV 是临时 workspace，算完丢掉，不写回这份分片 cache。</text>
+
+  <rect x="770" y="152" width="710" height="360" rx="16" fill="#fff" stroke="#2563eb"/>
+  <text x="790" y="184" class="h">组内 Q 仍按 TP 切开；KV head 并不按 DCP 再切</text>
+  <text x="790" y="216" class="t">tp=2 dcp=2 的同一个 group：</text>
+  <rect x="790" y="232" width="320" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="950" y="262" text-anchor="middle" class="h">rank0  Q = h0</text>
+  <text x="950" y="284" text-anchor="middle" class="s">KV = 交错后的偶数 token</text>
+  <rect x="1130" y="232" width="320" height="70" rx="10" fill="#d1fae5" stroke="#059669"/>
+  <text x="1290" y="262" text-anchor="middle" class="h">rank1  Q = h1</text>
+  <text x="1290" y="284" text-anchor="middle" class="s">KV = 交错后的奇数 token</text>
+  <text x="790" y="332" class="t">两边的 KV 是同一套 head 的不同 token，不是「rank0 持有一部分 head 的全序列」。</text>
+  <text x="790" y="360" class="t">GQA tp=8、4 个 KV head、dcp=2：四个 DCP group 各管自己的 KV head。</text>
+  <text x="790" y="384" class="t">group 之间的 KV head 切分是 TP 干的；group 之内才改成 token 交错。</text>
+  <text x="790" y="416" class="h">一句话：DCP 只切开「本来完全重复的那份 KV」。 </text>
+  <text x="790" y="444" class="s">能开 dcp=N，是因为组内 N 张卡原先各自存着同一套 KV head 的完整序列。</text>
+  <text x="790" y="468" class="s">Q head 不够重复，所以继续按 TP 切，靠 AllGather 激活或 qrep 补齐。</text>
+
+  <rect x="40" y="532" width="1440" height="218" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="564" class="h">「保持不变」指什么</text>
+  <text x="60" y="592" class="t">1. 存放规则不变：token pos 永远归 rank (pos // I) % dcp，本地永远紧凑，没有「算完再按 head 重排」这一步。</text>
+  <text x="60" y="620" class="t">2. 内容会变长：每个新 decode token 只在所属 rank 的 page 末尾追加一个 slot，另一张卡的 page 这一步完全不动。</text>
+  <text x="60" y="648" class="t">3. 没有第三种 layout：不会在 decode 中途变成「每张卡一份按序列连续的全量 KV」，那是 prefill workspace 的临时行为。</text>
+  <text x="60" y="676" class="t">4. head 维还在：MLA 是 latent（等价 1 个 KV head）；GQA 是 TP 留下的 local_kv_heads。DCP 没有把 KV cache 变成「无 head、纯 token 列表」。</text>
+  <text x="60" y="704" class="s">所以你的那句话对了一半：DCP 的切分轴确实是 token 交错，不是 attn head；但 tensor 里 head/latent 维仍然在，只是组内各 rank 的这一维内容相同。</text>
+</svg>

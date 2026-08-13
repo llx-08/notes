@@ -208,6 +208,21 @@ rank1 物理 page（紧凑）:  [ t1 | t3 | t5 | t7 | 空... ]
                               本步新写入的是 t7，只追加到 rank1
 ```
 
+**对，decode 全程就是这份 layout，不会再改回「每张卡一份按序列连续的全量 KV」。** 但要分清两根轴：
+
+![DCP 按 token 交错，不按 head 切；head 维仍在](/imgs/vllm-dcp-layout-axes.svg)
+
+- **DCP 切的是 token / 序列维**，不是 attn head。组内各 rank 持有的是**同一套 KV head** 的不同 token。能开 `dcp=N`，正是因为这 N 张卡原先各自存着同一套 KV 的完整序列（TP 切不下去的冗余）。
+- **Q head 仍按 TP 切开。** 所以才要 AllGather Q 激活（或 qrep）。KV 在组内没有「按 head 再切一刀」。
+- 物理 tensor 仍是 `[num_blocks, block_size, local_kv_heads, dim]`（MLA 的 `local_kv_heads` 等价 1，存的是 latent）。DCP 改的是 `block_size` 那一维里装哪些 token，不是把 head 维拆掉。
+- GQA 若 `tp=8, num_kv_heads=4, dcp=2`：四个 DCP group 各管自己的 KV head——那是 **TP 在 group 之间切 head**；每个 group 内部的两张卡才改成 token 交错。
+
+「保持不变」更精确的说法：
+
+1. **存放规则不变**：`pos` 永远归 rank `(pos // I) % dcp`，本地永远紧凑，没有「算完再按 head 重排」。
+2. **内容会变长**：新 token 只追加到所属 rank 的下一个 slot。
+3. **没有第三种 decode layout**：按序列连续的全量 KV 只出现在 chunked prefill 的临时 workspace 里，算完丢掉，不写回分片 cache。
+
 计算过程中这两块 cache **原样拿去点乘**：
 
 - kernel 的 `seqused_k` 是本地长度（这里两边都是 4），看到的就是连续 4 个 KV slot
@@ -730,6 +745,7 @@ VLLM_DCP_Q_REPLICATE=1              # 冗余 q_proj，省掉 decode 的 Q all-ga
 8. ❌ "virtual block 让每张卡存稀疏 KV" → scheduler 放大的是记账单位，worker 把属于自己的 token **紧凑**重排；物理 page 大小不变，cache 里没有空洞
 9. ❌ "decode 时要把切开的 KV gather 回来再算 attention" → KV cache 全程钉在本地。通信只搬 Q、LSE、out
 10. ❌ "奇偶 token 各自做因果小三角再拼回去" → decode 只拆因果矩阵的**最后一行**（同一个 Q 点被切开的 K）；Q 不按序列切
+11. ❌ "DCP 把 KV cache 改成没有 head 维、只按 token 排" → 切分轴确实是 token 交错；tensor 仍带 `local_kv_heads` / latent。组内各 rank 的 head 维内容相同，不同 KV head 若还在，是 TP 在 DCP group **之间**切的
 
 **实现坑（社区都踩过）**
 | 坑 | 修复 |
