@@ -15,6 +15,10 @@
 
 如果你熟悉 FlashAttention 的 split-K / flash-decoding，那 DCP 就是**把 split-K 的那些 split 从"一个 GPU 内的不同 CTA"搬到了"不同 GPU"**，合并公式一模一样，只是 reduce 从 shared memory 变成了 NCCL。
 
+<!-- more -->
+
+读这篇可以按图走：为什么切（图 1）→ 怎么切（图 2）→ decode 怎么算（图 3、图 4）→ 通信怎么收（图 5、图 6）→ GQA 与 prefill 的特例（图 7、图 8）。ASCII 图保留作精确对照，矢量图用来建立空间直觉。
+
 ---
 
 ## 1. 为什么需要它：TP 下 KV 是冗余的
@@ -37,6 +41,8 @@ GQA（Qwen3-235B, num_kv_heads=4）：tp=8 时每 2 个 rank 共享同一份 KV 
 ```
 
 DCP 做的事：**把这份冗余换成序列切分**。
+
+![TP 下 KV 冗余 vs DCP 沿序列切开](imgs/vllm-dcp-tp-vs-dcp.svg)
 
 ```
 tp=4, dcp=4（MLA）：
@@ -85,6 +91,8 @@ tp=8, dcp=2  →  4 个 DCP group，每组 2 个 rank：
 
 ⚠️ 博客里画的是 "tokens 0–50K / 50K–100K / …" 的连续分段，**实际代码是按 `cp_kv_cache_interleave_size`（记作 `I`，默认 1）粒度 round-robin 交错**。
 
+![交错切分、负载均衡与 virtual block 的紧凑存放](imgs/vllm-dcp-interleave.svg)
+
 ### 调度侧：逻辑 block 放大 dcp 倍
 
 `vllm/v1/core/single_type_kv_cache_manager.py:79-80`
@@ -95,6 +103,8 @@ if dcp_world_size > 1:
 ```
 
 也就是说 scheduler 眼里的一个 block 变成了 `block_size * dcp` 个 token，这个 virtual block 的内容被摊到组内所有 rank 上，每个 rank 各自存 `block_size` 个。**block 的分配/引用计数/prefix cache 逻辑因此完全不用改**——组内所有 rank 共享同一个 block table。
+
+落到每张卡上，local 偏移是**紧凑重排**后的：rank0 的 slot `0,1,2,…` 依次是 `t0, t4, t8,…`，中间没有给别的 rank 留空洞。`PAD_SLOT_ID` 只出现在「这个 token 不属于我」的写入 mapping 上，不会把 KV cache 变成稀疏数组。
 
 ### worker 侧：slot mapping 决定 token 归属
 
@@ -167,6 +177,8 @@ local_len = base + remainder
 ### 3.1 全景图（dcp=2，每 rank 2 个 Q head，1 个 decode token）
 
 用最小例子：`H_local = 2`，`dcp = 2` → 组内共 4 个 head（h0..h3）；序列 8 个 token，I=1。
+
+![Decode 四步：AllGather Q、本地 attention、AllGather LSE、ReduceScatter](imgs/vllm-dcp-decode-pipeline.svg)
 
 ```
 ════════════════ Step 0：起点 ════════════════
@@ -273,7 +285,19 @@ kv_lora_rank=512, qk_rope_head_dim=64, B=num_decode_tokens
 
 **注意 `v_up` 投影在 combine 之后做**：所以跨 rank 搬运的是 512 维的 latent，而不是 128 维的 value。这一步没省通信（512 > 128），但避免了在每个 rank 上重复做 32 个 head 的 `v_up` GEMM。
 
+具体通信量（上表同一配置，1 个 decode token，bf16）：
+
+```
+Q AllGather      16 * 576 * 2 B   = 18.4 KB     ← 字节不多，但多一次 collective
+LSE AllGather    32 * 4 B         = 128 B       ← 可以忽略，独立小消息才疼
+out ReduceScatter ~16 * 512 * 2 B = 16.4 KB     ← 真正的通信主体
+```
+
+所以「Q all-gather 是瓶颈」通常不成立：痛的是 **collective 次数** 和 **out 的 512 维 latent**，不是 Q 的字节数。`VLLM_DCP_Q_REPLICATE` 和 A2A 都是在砍次数，不是在砍 Q 的 payload。
+
 ### 3.3 为什么 LSE 加权是**精确**的（不是近似）
+
+![LSE 加权合并：局部 softmax 乘上各 rank 抢到的概率质量](imgs/vllm-dcp-lse-combine.svg)
 
 设 head `h` 的全部 key 被切成 N 个不相交集合 `S_1..S_N`，`s_j` 是 scaled score：
 
@@ -362,6 +386,10 @@ CUDA graph 场景下 padding 出来的行也走同一条路（`row_indices >= qu
 
 ### AG+RS vs A2A
 
+![默认 AG+RS 对比一次打包 A2A](imgs/vllm-dcp-agrs-vs-a2a.svg)
+
+PCP（Prefill Context Parallel）是另一条切 context 的路，不要和 DCP 混成「都叫 CP」。prefill 的 query 本身很长，不能靠「AllGather 很短的 Q、再按 head ReduceScatter」这套 decode 特化；head 维经常切不动，所以 combine 走 `cp_lse_ag_out_ar`（AllGather LSE + AllReduce out）。DCP 和 PCP 可以叠，但约束更严，本文只把 PCP 当作「为什么还有 AR 这条路径」的背景。
+
 ```
 【AG + RS】common.py:225-263          两次集合通信
 
@@ -415,6 +443,8 @@ collective    3 次                              2 次
 
 思路：让 `q_proj` / `q_b_proj` 在 DCP group 内**冗余计算**，这样每个 rank 天生就有整组的 Q head，decode 直接跳过 all-gather。
 
+![VLLM_DCP_Q_REPLICATE：组内共享 q_proj 权重](imgs/vllm-dcp-qrep.svg)
+
 `vllm/model_executor/layers/linear.py:598-636`：
 
 ```python
@@ -458,6 +488,10 @@ qrep_enabled = (envs.VLLM_DCP_Q_REPLICATE
 
 GQA 下当前 step 新产生的 K/V 是以 dense tensor 传进 `forward` 的（本 rank 手里就有完整的），只有 **cache 里的历史 context** 是 DCP 切分的。于是必须拆两段算，再本地 merge：
 
+![GQA 两段 attention：cache 走 DCP，当前 token 本地 causal，再 LSE merge](imgs/vllm-dcp-gqa-two-pass.svg)
+
+decode 的新 query 一定在全部 cached KV 之后，所以 context 段对本地 KV 做非因果 attention 是对的——那些 key 全部合法。当前 token 段则可能同一 step 里有多个 query（chunked prefill / spec decode），彼此之间仍要 causal。两段的 key 集合不相交，最后一次 `merge_attn_states` 又是 3.3 节那套公式，只是纯本地、零通信。
+
 ```
                      ┌── context 段：KV 来自 cache，DCP 切分 ────────────────┐
                      │  query_across_dcp = AllGather(query, dim=1)          │
@@ -497,6 +531,9 @@ GQA 下当前 step 新产生的 K/V 是以 dense tensor 传进 `forward` 的（�
 ## 7. Prefill / chunked context：这里要**倒付**通信
 
 DCP 下本地 KV 不完整，chunked prefill 需要访问完整历史 KV，只能拉全。
+
+![Decode 保持 KV 切开；chunked prefill 要 all-gather 历史 KV](imgs/vllm-dcp-decode-vs-prefill.svg)
+
 `vllm/model_executor/layers/attention/mla_attention.py:2106-2128`：
 
 ```python
@@ -520,6 +557,8 @@ chunked_prefill_workspace 布局（dcp=4）：
 ```
 
 **所以 DCP 只在 decode 省显存/省带宽，prefill 要额外掏一次 KV all-gather**。这就是它叫 **Decode** CP 的原因，也是它天然适合和 PD 分离配合的原因——把 prefill 摘出去，DCP 的代价就消失了，只剩收益。
+
+和 PD 分离叠在一起时，P 产出的是按序列排好的 KV；D 的每个 rank 只该收下 `(pos // I) % dcp == my_rank` 的 token，写进自己那份紧凑 cache。写错 slot 通常不会立刻 crash，attention 会静默算偏。社区 KV connector 的 global↔block 换算在 DCP 下修过多次（`#46394`, `#41549`, `#45371`）。内部栈上「D 节点开 DCP 时，P→D 的 KV 怎么按交错规则散布」仍待实测，见 §11。
 
 ---
 
@@ -555,7 +594,9 @@ VLLM_DCP_Q_REPLICATE=1              # 冗余 q_proj，省掉 decode 的 Q all-ga
 2. ❌ "rank 之间要交换 attention score / logits" → 只交换每个 (token, head) **一个 LSE 标量**
 3. ❌ "KV 按连续大段切"（博客画法）→ 实际是按 `I` **交错**，为了负载均衡
 4. ❌ "合并是近似的" → 数学上**精确等价**，见 §3.3 推导与验算
-5. ❌ "Q all-gather 是瓶颈" → decode 时 B 很小；真正的通信主体是 `[B, H, 512]` 的 out
+5. ❌ "Q all-gather 是瓶颈" → decode 时 B 很小；真正的通信主体是 `[B, H, 512]` 的 out。Q 的痛点是多一次 collective，不是 payload
+6. ❌ "DCP 和 PCP 是同一件事" → DCP 特化 decode（短 Q，可 RS 收回 head）；PCP 切 prefill 长 context，head 维切不动时只能 AR
+7. ❌ "virtual block 让每张卡存稀疏 KV" → scheduler 放大 block，worker 把属于自己的 token **紧凑**重排，cache 里没有空洞
 
 **实现坑（社区都踩过）**
 | 坑 | 修复 |

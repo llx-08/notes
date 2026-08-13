@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="760" viewBox="0 0 1480 760" role="img" aria-labelledby="title desc">
+  <title id="title">GQA 路径拆成 context 段和当前 token 段再本地 merge</title>
+  <desc id="desc">历史 KV 在 cache 里按 DCP 切开，当前 step 的 K/V 是 dense tensor、尚未切分。必须先对 cache 做 DCP combine，再和当前 token 的 causal attention 做一次本地 LSE 合并。</desc>
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+    <style>
+      .title { font:700 26px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .h { font:700 16px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 14px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+    </style>
+  </defs>
+  <rect width="1480" height="760" fill="#f8fafc"/>
+  <text x="40" y="44" class="title">GQA 为什么要算两遍：cache 切了，当前 token 还没切</text>
+  <text x="40" y="72" class="s">MLA 走 forward_mqa 时新 token 的 latent 已经写进 cache，所以不需要这套两段结构。</text>
+
+  <rect x="40" y="96" width="200" height="80" rx="14" fill="#1d4ed8"/>
+  <text x="140" y="132" text-anchor="middle" class="wh">query</text>
+  <text x="140" y="156" text-anchor="middle" class="wh">[T, H_local, D]</text>
+
+  <rect x="280" y="96" width="1160" height="250" rx="16" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="300" y="128" class="h">context 段：KV 来自 cache，DCP 切分</text>
+  <text x="300" y="156" class="mono">1. query_across_dcp = AllGather(query, dim=1)</text>
+  <text x="300" y="180" class="mono">2. flash_attn_varlen_func(q=query_across_dcp, k/v=cache, seqused_k=dcp_context_kv_lens, causal=False)</text>
+  <text x="300" y="204" class="t">这段 KV 全都在当前 query 之前，天然满足因果性，不必再 mask。</text>
+  <text x="300" y="228" class="mono">3. dcp_combine(...)  做正文 3 节那套 LSE 合并</text>
+  <text x="300" y="260" class="h">得到 context_out_cor [T, H_local, D]、context_lse_cor</text>
+  <text x="300" y="288" class="s">FA 返回的 lse 是 [H, B]，DCP combine 要 [B, H]，前后各 transpose 一次。</text>
+  <text x="300" y="312" class="s">max_dcp_context_kv_len == 0（纯 prefill、无历史）走快速路径，完全不做 DCP 通信。</text>
+
+  <rect x="280" y="370" width="1160" height="180" rx="16" fill="#ecfdf5" stroke="#059669"/>
+  <text x="300" y="402" class="h">当前 token 段：KV 是本 step 的 dense tensor，未切分</text>
+  <text x="300" y="430" class="mono">flash_attn_varlen_func(q=query, k=key, v=value, cu_seqlens_k=cu_seqlens_q, causal=attn_metadata.causal)</text>
+  <text x="300" y="458" class="t">这里必须 causal：同一 step 里多个 query token 之间仍有先后。</text>
+  <text x="300" y="490" class="h">得到 query_out [T, H_local, D]、query_lse</text>
+  <text x="300" y="518" class="s">不经过 DCP collective。本 rank 手里已经有完整的当前 K/V。</text>
+
+  <path d="M140 176 L140 620 L280 620" fill="none" stroke="#334155" stroke-width="3" marker-end="url(#a)"/>
+  <path d="M860 346 L860 560" fill="none" stroke="#334155" stroke-width="3" marker-end="url(#a)"/>
+  <path d="M860 550 L860 620" fill="none" stroke="#334155" stroke-width="3"/>
+
+  <rect x="280" y="580" width="1160" height="140" rx="16" fill="#f5f3ff" stroke="#7c3aed"/>
+  <text x="300" y="614" class="h">本地 merge_attn_states：又一次 LSE 加权，但零通信</text>
+  <text x="300" y="644" class="mono">prefix = context_out_cor / context_lse_cor</text>
+  <text x="300" y="668" class="mono">suffix = query_out / query_lse</text>
+  <text x="300" y="696" class="t">语义就是 flash-decoding 的 prefix/suffix 合并。两段的 key 集合不相交，公式与 3.3 节相同。</text>
+</svg>

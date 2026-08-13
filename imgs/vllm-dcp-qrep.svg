@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="620" viewBox="0 0 1480 620" role="img" aria-labelledby="title desc">
+  <title id="title">VLLM_DCP_Q_REPLICATE：DCP group 内冗余计算 Q，省掉 AllGather</title>
+  <desc id="desc">普通 ColumnParallelLinear 按 TP rank 切 q_proj。DCPGroupColumnParallelLinear 按 DCP group 切，组内权重相同，每个 rank 天生就有整组 Q head。</desc>
+  <defs>
+    <style>
+      .title { font:700 26px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .panel { font:700 16px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+      .h { font:700 14px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+    </style>
+  </defs>
+  <rect width="1480" height="620" fill="#f8fafc"/>
+  <text x="40" y="44" class="title">把 Q AllGather 换成组内冗余的 q_proj</text>
+  <text x="40" y="72" class="s">tp=8, dcp=2, 128 head。decode 时 GEMM 小、通信启动开销大，多算一倍 q_proj 常常划算；prefill 仍用 _local_view() 切回自己那 16 个 head。</text>
+
+  <rect x="40" y="96" width="690" height="40" rx="12" fill="#64748b"/>
+  <text x="385" y="122" text-anchor="middle" class="panel">普通 ColumnParallelLinear</text>
+  <rect x="750" y="96" width="690" height="40" rx="12" fill="#2563eb"/>
+  <text x="1095" y="122" text-anchor="middle" class="panel">DCPGroupColumnParallelLinear</text>
+
+  <rect x="40" y="152" width="690" height="340" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <g transform="translate(70,180)">
+    <rect x="0" y="0" width="300" height="44" rx="8" fill="#dbeafe" stroke="#2563eb"/><text x="150" y="28" text-anchor="middle" class="h">r0  head 0-15</text>
+    <rect x="320" y="0" width="300" height="44" rx="8" fill="#bfdbfe" stroke="#2563eb"/><text x="470" y="28" text-anchor="middle" class="h">r1  head 16-31</text>
+    <rect x="0" y="56" width="300" height="44" rx="8" fill="#d1fae5" stroke="#059669"/><text x="150" y="84" text-anchor="middle" class="h">r2  head 32-47</text>
+    <rect x="320" y="56" width="300" height="44" rx="8" fill="#a7f3d0" stroke="#059669"/><text x="470" y="84" text-anchor="middle" class="h">r3  head 48-63</text>
+    <rect x="0" y="112" width="300" height="44" rx="8" fill="#ffedd5" stroke="#d97706"/><text x="150" y="140" text-anchor="middle" class="h">r4  head 64-79</text>
+    <rect x="320" y="112" width="300" height="44" rx="8" fill="#fed7aa" stroke="#d97706"/><text x="470" y="140" text-anchor="middle" class="h">r5  head 80-95</text>
+    <rect x="0" y="168" width="300" height="44" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text x="150" y="196" text-anchor="middle" class="h">r6  head 96-111</text>
+    <rect x="320" y="168" width="300" height="44" rx="8" fill="#ddd6fe" stroke="#7c3aed"/><text x="470" y="196" text-anchor="middle" class="h">r7  head 112-127</text>
+    <text x="0" y="244" class="t">每个 rank 只有自己的 16 个 Q head</text>
+    <text x="0" y="270" class="h">decode 必须 AllGather(Q) 才能对本地 KV 算全部 head</text>
+  </g>
+
+  <rect x="750" y="152" width="690" height="340" rx="16" fill="#fff" stroke="#2563eb"/>
+  <g transform="translate(780,180)">
+    <rect x="0" y="0" width="300" height="44" rx="8" fill="#dbeafe" stroke="#2563eb"/><text x="150" y="28" text-anchor="middle" class="h">r0  head 0-31</text>
+    <rect x="320" y="0" width="300" height="44" rx="8" fill="#dbeafe" stroke="#2563eb"/><text x="470" y="28" text-anchor="middle" class="h">r1  head 0-31</text>
+    <text x="630" y="28" class="s">同权重</text>
+    <rect x="0" y="56" width="300" height="44" rx="8" fill="#d1fae5" stroke="#059669"/><text x="150" y="84" text-anchor="middle" class="h">r2  head 32-63</text>
+    <rect x="320" y="56" width="300" height="44" rx="8" fill="#d1fae5" stroke="#059669"/><text x="470" y="84" text-anchor="middle" class="h">r3  head 32-63</text>
+    <text x="630" y="84" class="s">同权重</text>
+    <rect x="0" y="112" width="300" height="44" rx="8" fill="#ffedd5" stroke="#d97706"/><text x="150" y="140" text-anchor="middle" class="h">r4  head 64-95</text>
+    <rect x="320" y="112" width="300" height="44" rx="8" fill="#ffedd5" stroke="#d97706"/><text x="470" y="140" text-anchor="middle" class="h">r5  head 64-95</text>
+    <text x="630" y="140" class="s">同权重</text>
+    <rect x="0" y="168" width="300" height="44" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text x="150" y="196" text-anchor="middle" class="h">r6  head 96-127</text>
+    <rect x="320" y="168" width="300" height="44" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text x="470" y="196" text-anchor="middle" class="h">r7  head 96-127</text>
+    <text x="630" y="196" class="s">同权重</text>
+    <text x="0" y="244" class="t">tp_rank = rank // dcp，tp_size = world / dcp</text>
+    <text x="0" y="270" class="h">decode 天生就有整组 Q，跳过 AllGather</text>
+  </g>
+
+  <rect x="40" y="512" width="1400" height="84" rx="14" fill="#fff7ed" stroke="#ea580c"/>
+  <text x="60" y="544" class="h">代价：q_proj GEMM 多算 dcp 倍。这是要实测的 trade-off，不是无条件的赢。</text>
+  <text x="60" y="572" class="s">启用条件：VLLM_DCP_Q_REPLICATE=1 且 dcp&gt;1 且 pcp&lt;=1。调用点 mla_attention.py：if not qrep_decode: query_gather(...)</text>
+</svg>

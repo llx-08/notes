@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="720" viewBox="0 0 1480 720" role="img" aria-labelledby="title desc">
+  <title id="title">TP 下 KV 冗余 vs DCP 沿序列切开</title>
+  <desc id="desc">MLA、tp=4 时四个 rank 的 Q head 按 TP 切开，但 KV 完全重复。加上 dcp=4 后，KV 沿序列维切开，每卡只存 1/4。</desc>
+  <defs>
+    <style>
+      .title { font:700 28px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .panel { font:700 18px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+      .h { font:700 14px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+    </style>
+  </defs>
+  <rect width="1480" height="720" fill="#f8fafc"/>
+  <text x="40" y="48" class="title">MLA tp=4：KV 冗余换成序列切分</text>
+  <text x="40" y="78" class="s">Q 仍按 head 切开（TP 语义不变）。DCP 动的是 KV 的序列维，不是 batch，也不是再加一维并行。</text>
+
+  <rect x="40" y="100" width="680" height="44" rx="12" fill="#64748b"/>
+  <text x="380" y="128" text-anchor="middle" class="panel">只有 TP=4：四份一模一样的 KV</text>
+  <rect x="760" y="100" width="680" height="44" rx="12" fill="#2563eb"/>
+  <text x="1100" y="128" text-anchor="middle" class="panel">TP=4 + DCP=4：每卡只留 1/4 KV</text>
+
+  <g transform="translate(55,165)">
+    <rect x="0" y="0" width="150" height="28" rx="8" fill="#1d4ed8"/><text x="75" y="19" text-anchor="middle" class="wh">rank 0</text>
+    <rect x="165" y="0" width="150" height="28" rx="8" fill="#1d4ed8"/><text x="240" y="19" text-anchor="middle" class="wh">rank 1</text>
+    <rect x="330" y="0" width="150" height="28" rx="8" fill="#1d4ed8"/><text x="405" y="19" text-anchor="middle" class="wh">rank 2</text>
+    <rect x="495" y="0" width="150" height="28" rx="8" fill="#1d4ed8"/><text x="570" y="19" text-anchor="middle" class="wh">rank 3</text>
+
+    <rect x="0" y="42" width="150" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <rect x="165" y="42" width="150" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <rect x="330" y="42" width="150" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <rect x="495" y="42" width="150" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <text x="75" y="70" text-anchor="middle" class="h">Q h0-31</text>
+    <text x="240" y="70" text-anchor="middle" class="h">Q h32-63</text>
+    <text x="405" y="70" text-anchor="middle" class="h">Q h64-95</text>
+    <text x="570" y="70" text-anchor="middle" class="h">Q h96-127</text>
+    <text x="75" y="94" text-anchor="middle" class="s">TP 切开</text>
+    <text x="240" y="94" text-anchor="middle" class="s">TP 切开</text>
+    <text x="405" y="94" text-anchor="middle" class="s">TP 切开</text>
+    <text x="570" y="94" text-anchor="middle" class="s">TP 切开</text>
+
+    <rect x="0" y="126" width="150" height="88" rx="10" fill="#ffedd5" stroke="#ea580c"/>
+    <rect x="165" y="126" width="150" height="88" rx="10" fill="#ffedd5" stroke="#ea580c"/>
+    <rect x="330" y="126" width="150" height="88" rx="10" fill="#ffedd5" stroke="#ea580c"/>
+    <rect x="495" y="126" width="150" height="88" rx="10" fill="#ffedd5" stroke="#ea580c"/>
+    <text x="75" y="158" text-anchor="middle" class="h">KV t0 ... tL-1</text>
+    <text x="240" y="158" text-anchor="middle" class="h">KV t0 ... tL-1</text>
+    <text x="405" y="158" text-anchor="middle" class="h">KV t0 ... tL-1</text>
+    <text x="570" y="158" text-anchor="middle" class="h">KV t0 ... tL-1</text>
+    <text x="75" y="184" text-anchor="middle" class="s">完整副本</text>
+    <text x="240" y="184" text-anchor="middle" class="s">完整副本</text>
+    <text x="405" y="184" text-anchor="middle" class="s">完整副本</text>
+    <text x="570" y="184" text-anchor="middle" class="s">完整副本</text>
+  </g>
+  <text x="380" y="410" text-anchor="middle" class="t">MLA 等价于 1 个 KV head：tp 超过它之后，KV 只能整份复制</text>
+  <rect x="160" y="430" width="440" height="36" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="380" y="453" text-anchor="middle" class="h">显存被浪费 4 倍，能塞的并发 / 上下文都少 4 倍</text>
+
+  <g transform="translate(775,165)">
+    <rect x="0" y="0" width="150" height="28" rx="8" fill="#1d4ed8"/><text x="75" y="19" text-anchor="middle" class="wh">rank 0</text>
+    <rect x="165" y="0" width="150" height="28" rx="8" fill="#047857"/><text x="240" y="19" text-anchor="middle" class="wh">rank 1</text>
+    <rect x="330" y="0" width="150" height="28" rx="8" fill="#b45309"/><text x="405" y="19" text-anchor="middle" class="wh">rank 2</text>
+    <rect x="495" y="0" width="150" height="28" rx="8" fill="#6d28d9"/><text x="570" y="19" text-anchor="middle" class="wh">rank 3</text>
+
+    <rect x="0" y="42" width="150" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <rect x="165" y="42" width="150" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <rect x="330" y="42" width="150" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <rect x="495" y="42" width="150" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <text x="75" y="70" text-anchor="middle" class="h">Q h0-31</text>
+    <text x="240" y="70" text-anchor="middle" class="h">Q h32-63</text>
+    <text x="405" y="70" text-anchor="middle" class="h">Q h64-95</text>
+    <text x="570" y="70" text-anchor="middle" class="h">Q h96-127</text>
+    <text x="75" y="94" text-anchor="middle" class="s">Q 切法不变</text>
+    <text x="240" y="94" text-anchor="middle" class="s">Q 切法不变</text>
+    <text x="405" y="94" text-anchor="middle" class="s">Q 切法不变</text>
+    <text x="570" y="94" text-anchor="middle" class="s">Q 切法不变</text>
+
+    <rect x="0" y="126" width="150" height="88" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <rect x="165" y="126" width="150" height="88" rx="10" fill="#d1fae5" stroke="#059669"/>
+    <rect x="330" y="126" width="150" height="88" rx="10" fill="#ffedd5" stroke="#d97706"/>
+    <rect x="495" y="126" width="150" height="88" rx="10" fill="#ede9fe" stroke="#7c3aed"/>
+    <text x="75" y="158" text-anchor="middle" class="h">KV 的 1/4</text>
+    <text x="240" y="158" text-anchor="middle" class="h">KV 的 1/4</text>
+    <text x="405" y="158" text-anchor="middle" class="h">KV 的 1/4</text>
+    <text x="570" y="158" text-anchor="middle" class="h">KV 的 1/4</text>
+    <text x="75" y="184" text-anchor="middle" class="s">交错后的本地片</text>
+    <text x="240" y="184" text-anchor="middle" class="s">交错后的本地片</text>
+    <text x="405" y="184" text-anchor="middle" class="s">交错后的本地片</text>
+    <text x="570" y="184" text-anchor="middle" class="s">交错后的本地片</text>
+  </g>
+  <text x="1100" y="410" text-anchor="middle" class="t">组内原本重复的 KV 被切开；Q 仍按 TP 分 head</text>
+  <rect x="880" y="430" width="440" height="36" rx="8" fill="#dcfce7" stroke="#059669"/>
+  <text x="1100" y="453" text-anchor="middle" class="h">同样显存 -&gt; 约 4 倍并发或 4 倍上下文</text>
+
+  <rect x="40" y="490" width="1400" height="200" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="524" class="h">DCP 不是新的并行维：它是 TP group 里的子群</text>
+  <text x="60" y="548" class="s">tp=8, dcp=2 -&gt; 4 个 DCP group，每组 2 个相邻 rank。约束：MLA 要 tp % dcp == 0；GQA 要 (tp / num_kv_heads) % dcp == 0。</text>
+
+  <g transform="translate(60,570)">
+    <rect x="0" y="0" width="88" height="52" rx="8" fill="#dbeafe" stroke="#2563eb"/><text x="44" y="22" text-anchor="middle" class="mono">r0</text><text x="44" y="42" text-anchor="middle" class="s">dcp0</text>
+    <rect x="96" y="0" width="88" height="52" rx="8" fill="#dbeafe" stroke="#2563eb"/><text x="140" y="22" text-anchor="middle" class="mono">r1</text><text x="140" y="42" text-anchor="middle" class="s">dcp0</text>
+    <rect x="220" y="0" width="88" height="52" rx="8" fill="#d1fae5" stroke="#059669"/><text x="264" y="22" text-anchor="middle" class="mono">r2</text><text x="264" y="42" text-anchor="middle" class="s">dcp1</text>
+    <rect x="316" y="0" width="88" height="52" rx="8" fill="#d1fae5" stroke="#059669"/><text x="360" y="22" text-anchor="middle" class="mono">r3</text><text x="360" y="42" text-anchor="middle" class="s">dcp1</text>
+    <rect x="440" y="0" width="88" height="52" rx="8" fill="#ffedd5" stroke="#d97706"/><text x="484" y="22" text-anchor="middle" class="mono">r4</text><text x="484" y="42" text-anchor="middle" class="s">dcp2</text>
+    <rect x="536" y="0" width="88" height="52" rx="8" fill="#ffedd5" stroke="#d97706"/><text x="580" y="22" text-anchor="middle" class="mono">r5</text><text x="580" y="42" text-anchor="middle" class="s">dcp2</text>
+    <rect x="660" y="0" width="88" height="52" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text x="704" y="22" text-anchor="middle" class="mono">r6</text><text x="704" y="42" text-anchor="middle" class="s">dcp3</text>
+    <rect x="756" y="0" width="88" height="52" rx="8" fill="#ede9fe" stroke="#7c3aed"/><text x="800" y="22" text-anchor="middle" class="mono">r7</text><text x="800" y="42" text-anchor="middle" class="s">dcp3</text>
+    <text x="0" y="84" class="s">同一个 DCP group 里的 rank，组内 KV 原本完全重复，现在沿序列切开；组与组之间仍是普通 TP。</text>
+    <text x="0" y="108" class="s">parallel_state.py 先把 ranks transpose，再 reshape(-1, dcp_size)，保证组成员在 TP 维上相邻。</text>
+  </g>
+</svg>

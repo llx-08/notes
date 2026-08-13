@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="780" viewBox="0 0 1480 780" role="img" aria-labelledby="title desc">
+  <title id="title">DCP combine：AllGather+ReduceScatter 对比 All-to-All</title>
+  <desc id="desc">默认路径先 AllGather LSE 再 ReduceScatter 输出。A2A 把 out 和 lse 打包进一次 all_to_all_single，每个 rank 只收自己那些 head 的 N 份 partial，然后纯本地加权。</desc>
+  <defs>
+    <style>
+      .title { font:700 28px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .panel { font:700 16px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+      .h { font:700 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+    </style>
+  </defs>
+  <rect width="1480" height="780" fill="#f8fafc"/>
+  <text x="40" y="46" class="title">combine 的两次集合通信 vs 一次打包 A2A</text>
+  <text x="40" y="74" class="s">decode 是 latency-bound：小消息的 NCCL 固定开销往往比多搬几个字节更疼。A2A 把 LSE 塞进 output buffer，省掉一次独立小 collective。</text>
+
+  <rect x="40" y="100" width="690" height="44" rx="12" fill="#64748b"/>
+  <text x="385" y="128" text-anchor="middle" class="panel">默认：AllGather(lse) + ReduceScatter(out)</text>
+  <rect x="750" y="100" width="690" height="44" rx="12" fill="#7c3aed"/>
+  <text x="1095" y="128" text-anchor="middle" class="panel">--dcp-comm-backend a2a：一次 all_to_all_single</text>
+
+  <rect x="40" y="160" width="690" height="430" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <g transform="translate(70,190)">
+    <rect x="0" y="0" width="630" height="56" rx="10" fill="#fdf2f8" stroke="#db2777"/>
+    <text x="20" y="24" class="h">1. AllGather(lse)   [B, H] fp32</text>
+    <text x="20" y="46" class="s">极小，但是一次独立 collective，有固定启动开销</text>
+
+    <rect x="0" y="72" width="630" height="56" rx="10" fill="#fff7ed" stroke="#ea580c"/>
+    <text x="20" y="96" class="h">2. 各 rank 本地缩放自己的 [B, H, D]</text>
+    <text x="20" y="118" class="s">o *= exp(lse_myrank - lse_g)    triton kernel 原地写回</text>
+
+    <rect x="0" y="144" width="630" height="56" rx="10" fill="#ecfdf5" stroke="#059669"/>
+    <text x="20" y="168" class="h">3. ReduceScatter(out, dim=1=head)</text>
+    <text x="20" y="190" class="s">搬 (N-1)/N * B * H * D，同时完成跨 rank 求和并切回 H_local</text>
+
+    <text x="0" y="232" class="t">rank0 发出：a[h0 h1 | h2 h3]</text>
+    <text x="0" y="256" class="t">rank1 发出：b[h0 h1 | h2 h3]</text>
+    <text x="0" y="288" class="mono">rank0 留下 a+b 的 h0,h1</text>
+    <text x="0" y="312" class="mono">rank1 留下 a+b 的 h2,h3</text>
+    <text x="0" y="348" class="s">collective 次数：Q gather + LSE gather + out RS = 3 次</text>
+    <text x="0" y="372" class="s">PCP 联用时 head 维切不动，RS 换成 AllReduce（cp_lse_ag_out_ar）</text>
+  </g>
+
+  <rect x="750" y="160" width="690" height="430" rx="16" fill="#fff" stroke="#7c3aed"/>
+  <g transform="translate(780,190)">
+    <rect x="0" y="0" width="630" height="70" rx="10" fill="#f5f3ff" stroke="#7c3aed"/>
+    <text x="20" y="24" class="h">1. 打包 send_buffer</text>
+    <text x="20" y="46" class="mono">[N, B, H_per_rank, D + lse_pack_dim]</text>
+    <text x="20" y="66" class="s">fp32 lse 塞进几个 output-dtype slot（bf16 -&gt; 2）</text>
+
+    <rect x="0" y="86" width="300" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <text x="20" y="112" class="h">发给 rank0</text>
+    <text x="20" y="136" class="s">o[h0,h1] + lse</text>
+    <rect x="320" y="86" width="310" height="70" rx="10" fill="#d1fae5" stroke="#059669"/>
+    <text x="340" y="112" class="h">发给 rank1</text>
+    <text x="340" y="136" class="s">o[h2,h3] + lse</text>
+
+    <rect x="0" y="172" width="630" height="56" rx="10" fill="#ede9fe" stroke="#7c3aed"/>
+    <text x="20" y="196" class="h">2. all_to_all_single(recv, send)   一次</text>
+    <text x="20" y="218" class="s">只发对方需要的 head 分片，LSE 搭 output 的车</text>
+
+    <rect x="0" y="244" width="630" height="88" rx="10" fill="#ecfdf5" stroke="#059669"/>
+    <text x="20" y="268" class="h">3. 纯本地加权  _dcp_a2a_unpack_combine</text>
+    <text x="20" y="292" class="t">rank0 手里：来自 r0/r1 的 o[h0,h1] 和两份 lse</text>
+    <text x="20" y="314" class="mono">out[h0,h1] = sum_n o_n * exp(lse_n - lse_g)</text>
+
+    <text x="0" y="360" class="s">collective 次数：Q gather + A2A = 2 次（qrep 开启则只剩 1 次）</text>
+    <text x="0" y="384" class="s">NVLS symmetric memory 路径再绕开 NCCL，直写 multicast</text>
+  </g>
+
+  <rect x="40" y="610" width="1400" height="140" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="644" class="h">DeepSeek-V3 量级，tp=8 dcp=2，1 个 decode token，bf16</text>
+  <text x="60" y="674" class="mono">Q AllGather     (N-1)*B*H_local*576*2  = 16 * 576 * 2 = 18.4 KB</text>
+  <text x="60" y="698" class="mono">LSE AllGather   (N-1)*B*H_group*4      = 32 * 4       = 128 B     (A2A 里打包同行，不再单独发)</text>
+  <text x="60" y="722" class="mono">out RS / A2A    ~0.5*B*H_group*512*2   = 16.4 KB      (A2A 再多 2 个 bf16 slot 装 lse，几乎可忽略)</text>
+  <text x="60" y="746" class="s">真正的通信主体是 [B, H, 512] 的 out，不是 Q，更不是 LSE。Q 的痛点是「多一次 collective」，不是字节数。</text>
+</svg>

@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="860" viewBox="0 0 1480 860" role="img" aria-labelledby="title desc">
+  <title id="title">DCP 按 token 交错切 KV，并在本地紧凑存放</title>
+  <desc id="desc">连续大段切会让短序列严重倾斜。实际按 interleave size I round-robin。scheduler 看到 virtual block，worker 把属于自己的 token 紧凑写进本地 cache。</desc>
+  <defs>
+    <style>
+      .title { font:700 28px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .h { font:700 16px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#fff; }
+      .panel { font:700 16px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+    </style>
+  </defs>
+  <rect width="1480" height="860" fill="#f8fafc"/>
+  <text x="40" y="48" class="title">KV 按 token 交错，不是连续大段</text>
+  <text x="40" y="76" class="s">归属规则：token 位置 pos 归 rank (pos // I) % dcp。默认 I=1，即逐 token round-robin。博客里的 0-50K / 50K-100K 画法与代码不符。</text>
+
+  <rect x="40" y="100" width="690" height="300" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <rect x="40" y="100" width="690" height="40" rx="16" fill="#64748b"/>
+  <rect x="40" y="124" width="690" height="16" fill="#64748b"/>
+  <text x="385" y="126" text-anchor="middle" class="panel">连续切（博客画法）seq_len=10, dcp=4</text>
+
+  <g transform="translate(70,165)">
+    <text x="0" y="18" class="h">rank0</text>
+    <rect x="80" y="0" width="44" height="28" rx="6" fill="#2563eb"/><text x="102" y="19" text-anchor="middle" class="wh">t0</text>
+    <rect x="128" y="0" width="44" height="28" rx="6" fill="#2563eb"/><text x="150" y="19" text-anchor="middle" class="wh">t1</text>
+    <rect x="176" y="0" width="44" height="28" rx="6" fill="#2563eb"/><text x="198" y="19" text-anchor="middle" class="wh">t2</text>
+    <text x="240" y="19" class="t">3 tokens</text>
+
+    <text x="0" y="62" class="h">rank1</text>
+    <rect x="80" y="44" width="44" height="28" rx="6" fill="#059669"/><text x="102" y="63" text-anchor="middle" class="wh">t3</text>
+    <rect x="128" y="44" width="44" height="28" rx="6" fill="#059669"/><text x="150" y="63" text-anchor="middle" class="wh">t4</text>
+    <rect x="176" y="44" width="44" height="28" rx="6" fill="#059669"/><text x="198" y="63" text-anchor="middle" class="wh">t5</text>
+    <text x="240" y="63" class="t">3 tokens</text>
+
+    <text x="0" y="106" class="h">rank2</text>
+    <rect x="80" y="88" width="44" height="28" rx="6" fill="#d97706"/><text x="102" y="107" text-anchor="middle" class="wh">t6</text>
+    <rect x="128" y="88" width="44" height="28" rx="6" fill="#d97706"/><text x="150" y="107" text-anchor="middle" class="wh">t7</text>
+    <rect x="176" y="88" width="44" height="28" rx="6" fill="#d97706"/><text x="198" y="107" text-anchor="middle" class="wh">t8</text>
+    <text x="240" y="107" class="t">3 tokens</text>
+
+    <text x="0" y="150" class="h">rank3</text>
+    <rect x="80" y="132" width="44" height="28" rx="6" fill="#7c3aed"/><text x="102" y="151" text-anchor="middle" class="wh">t9</text>
+    <text x="240" y="151" class="t">1 token  &lt;- 严重倾斜</text>
+
+    <text x="0" y="198" class="s">decode 同步等待最慢 rank。连续切让尾 rank 几乎空转，kernel 时间被它拖住。</text>
+  </g>
+
+  <rect x="750" y="100" width="690" height="300" rx="16" fill="#fff" stroke="#2563eb"/>
+  <rect x="750" y="100" width="690" height="40" rx="16" fill="#2563eb"/>
+  <rect x="750" y="124" width="690" height="16" fill="#2563eb"/>
+  <text x="1095" y="126" text-anchor="middle" class="panel">交错切（实际代码，I=1）</text>
+
+  <g transform="translate(780,165)">
+    <text x="0" y="18" class="h">rank0</text>
+    <rect x="80" y="0" width="44" height="28" rx="6" fill="#2563eb"/><text x="102" y="19" text-anchor="middle" class="wh">t0</text>
+    <rect x="128" y="0" width="44" height="28" rx="6" fill="#2563eb"/><text x="150" y="19" text-anchor="middle" class="wh">t4</text>
+    <rect x="176" y="0" width="44" height="28" rx="6" fill="#2563eb"/><text x="198" y="19" text-anchor="middle" class="wh">t8</text>
+    <text x="240" y="19" class="t">3 tokens</text>
+
+    <text x="0" y="62" class="h">rank1</text>
+    <rect x="80" y="44" width="44" height="28" rx="6" fill="#059669"/><text x="102" y="63" text-anchor="middle" class="wh">t1</text>
+    <rect x="128" y="44" width="44" height="28" rx="6" fill="#059669"/><text x="150" y="63" text-anchor="middle" class="wh">t5</text>
+    <rect x="176" y="44" width="44" height="28" rx="6" fill="#059669"/><text x="198" y="63" text-anchor="middle" class="wh">t9</text>
+    <text x="240" y="63" class="t">3 tokens</text>
+
+    <text x="0" y="106" class="h">rank2</text>
+    <rect x="80" y="88" width="44" height="28" rx="6" fill="#d97706"/><text x="102" y="107" text-anchor="middle" class="wh">t2</text>
+    <rect x="128" y="88" width="44" height="28" rx="6" fill="#d97706"/><text x="150" y="107" text-anchor="middle" class="wh">t6</text>
+    <text x="240" y="107" class="t">2 tokens</text>
+
+    <text x="0" y="150" class="h">rank3</text>
+    <rect x="80" y="132" width="44" height="28" rx="6" fill="#7c3aed"/><text x="102" y="151" text-anchor="middle" class="wh">t3</text>
+    <rect x="128" y="132" width="44" height="28" rx="6" fill="#7c3aed"/><text x="150" y="151" text-anchor="middle" class="wh">t7</text>
+    <text x="240" y="151" class="t">2 tokens</text>
+
+    <text x="0" y="198" class="s">各 rank 的 seqused_k 最多差 I。decode 每步增长也是轮转的，倾斜不会累积。</text>
+  </g>
+
+  <rect x="40" y="420" width="1400" height="130" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="450" class="h">逻辑序列上的颜色 = 归属 rank（dcp=4, I=1）</text>
+  <g transform="translate(60,470)">
+    <rect x="0" y="0" width="108" height="36" rx="6" fill="#2563eb"/><text x="54" y="23" text-anchor="middle" class="wh">0 rank0</text>
+    <rect x="114" y="0" width="108" height="36" rx="6" fill="#059669"/><text x="168" y="23" text-anchor="middle" class="wh">1 rank1</text>
+    <rect x="228" y="0" width="108" height="36" rx="6" fill="#d97706"/><text x="282" y="23" text-anchor="middle" class="wh">2 rank2</text>
+    <rect x="342" y="0" width="108" height="36" rx="6" fill="#7c3aed"/><text x="396" y="23" text-anchor="middle" class="wh">3 rank3</text>
+    <rect x="456" y="0" width="108" height="36" rx="6" fill="#2563eb"/><text x="510" y="23" text-anchor="middle" class="wh">4 rank0</text>
+    <rect x="570" y="0" width="108" height="36" rx="6" fill="#059669"/><text x="624" y="23" text-anchor="middle" class="wh">5 rank1</text>
+    <rect x="684" y="0" width="108" height="36" rx="6" fill="#d97706"/><text x="738" y="23" text-anchor="middle" class="wh">6 rank2</text>
+    <rect x="798" y="0" width="108" height="36" rx="6" fill="#7c3aed"/><text x="852" y="23" text-anchor="middle" class="wh">7 rank3</text>
+    <rect x="912" y="0" width="108" height="36" rx="6" fill="#2563eb"/><text x="966" y="23" text-anchor="middle" class="wh">8 rank0</text>
+    <rect x="1026" y="0" width="108" height="36" rx="6" fill="#059669"/><text x="1080" y="23" text-anchor="middle" class="wh">9 rank1</text>
+    <rect x="1140" y="0" width="108" height="36" rx="6" fill="#d97706"/><text x="1194" y="23" text-anchor="middle" class="wh">10 rank2</text>
+    <rect x="1254" y="0" width="108" height="36" rx="6" fill="#7c3aed"/><text x="1308" y="23" text-anchor="middle" class="wh">11 rank3</text>
+  </g>
+  <text x="60" y="530" class="s">I=2 时变成 [t0 t1]-&gt;rank0，[t2 t3]-&gt;rank1。本地访存更连续，但负载最多差 2 个 token。</text>
+
+  <rect x="40" y="570" width="1400" height="260" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="604" class="h">virtual block：scheduler 放大，worker 紧凑重排</text>
+  <text x="60" y="628" class="s">single_type_kv_cache_manager 把 block_size *= dcp。组内所有 rank 共享同一张 block table；prefix cache / 引用计数不用改。</text>
+
+  <g transform="translate(60,650)">
+    <text x="0" y="20" class="t">scheduler 眼里的 1 个 virtual block（dcp=4, 原 block=4 -&gt; 16 个 token）</text>
+    <rect x="0" y="36" width="52" height="28" rx="4" fill="#2563eb"/><text x="26" y="54" text-anchor="middle" class="wh">0</text>
+    <rect x="56" y="36" width="52" height="28" rx="4" fill="#059669"/><text x="82" y="54" text-anchor="middle" class="wh">1</text>
+    <rect x="112" y="36" width="52" height="28" rx="4" fill="#d97706"/><text x="138" y="54" text-anchor="middle" class="wh">2</text>
+    <rect x="168" y="36" width="52" height="28" rx="4" fill="#7c3aed"/><text x="194" y="54" text-anchor="middle" class="wh">3</text>
+    <rect x="224" y="36" width="52" height="28" rx="4" fill="#2563eb"/><text x="250" y="54" text-anchor="middle" class="wh">4</text>
+    <rect x="280" y="36" width="52" height="28" rx="4" fill="#059669"/><text x="306" y="54" text-anchor="middle" class="wh">5</text>
+    <rect x="336" y="36" width="52" height="28" rx="4" fill="#d97706"/><text x="362" y="54" text-anchor="middle" class="wh">6</text>
+    <rect x="392" y="36" width="52" height="28" rx="4" fill="#7c3aed"/><text x="418" y="54" text-anchor="middle" class="wh">7</text>
+    <rect x="448" y="36" width="52" height="28" rx="4" fill="#2563eb"/><text x="474" y="54" text-anchor="middle" class="wh">8</text>
+    <rect x="504" y="36" width="52" height="28" rx="4" fill="#059669"/><text x="530" y="54" text-anchor="middle" class="wh">9</text>
+    <rect x="560" y="36" width="52" height="28" rx="4" fill="#d97706"/><text x="586" y="54" text-anchor="middle" class="wh">10</text>
+    <rect x="616" y="36" width="52" height="28" rx="4" fill="#7c3aed"/><text x="642" y="54" text-anchor="middle" class="wh">11</text>
+    <rect x="672" y="36" width="52" height="28" rx="4" fill="#2563eb"/><text x="698" y="54" text-anchor="middle" class="wh">12</text>
+    <rect x="728" y="36" width="52" height="28" rx="4" fill="#059669"/><text x="754" y="54" text-anchor="middle" class="wh">13</text>
+    <rect x="784" y="36" width="52" height="28" rx="4" fill="#d97706"/><text x="810" y="54" text-anchor="middle" class="wh">14</text>
+    <rect x="840" y="36" width="52" height="28" rx="4" fill="#7c3aed"/><text x="866" y="54" text-anchor="middle" class="wh">15</text>
+
+    <text x="0" y="92" class="t">rank0 本地 cache：不属于自己的 token 被丢掉，剩下的紧凑排列。cache 里没有空洞。</text>
+    <rect x="0" y="108" width="70" height="32" rx="6" fill="#2563eb"/><text x="35" y="128" text-anchor="middle" class="wh">t0</text>
+    <rect x="78" y="108" width="70" height="32" rx="6" fill="#2563eb"/><text x="113" y="128" text-anchor="middle" class="wh">t4</text>
+    <rect x="156" y="108" width="70" height="32" rx="6" fill="#2563eb"/><text x="191" y="128" text-anchor="middle" class="wh">t8</text>
+    <rect x="234" y="108" width="70" height="32" rx="6" fill="#2563eb"/><text x="269" y="128" text-anchor="middle" class="wh">t12</text>
+    <text x="320" y="128" class="mono">slot 0,1,2,3  &lt;- 仍是原 block_size</text>
+
+    <text x="0" y="168" class="s">is_local == False 的位置写 PAD_SLOT_ID，只发生在「这次要写的 token 不属于我」的 mapping 上，不会在 KV cache 里留稀疏洞。</text>
+  </g>
+</svg>
