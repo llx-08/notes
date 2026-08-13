@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="700" viewBox="0 0 1480 700" role="img" aria-labelledby="title desc">
+  <title id="title">DCP 在 decode 省显存，在 prefill 要倒付 KV all-gather</title>
+  <desc id="desc">decode 时 Q 和 LSE 都很小，KV 保持切开。chunked prefill 需要完整历史 KV，只能在 DCP group 内 all-gather，workspace 还要额外放大 1/dcp。</desc>
+  <defs>
+    <style>
+      .title { font:700 26px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .panel { font:700 16px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+      .h { font:700 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 14px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+    </style>
+  </defs>
+  <rect width="1480" height="700" fill="#f8fafc"/>
+  <text x="40" y="44" class="title">为什么叫 Decode CP：收益在 decode，账单在 prefill</text>
+  <text x="40" y="72" class="s">这也是它天然适合和 PD 分离配合的原因——把 prefill 摘到 P 节点，D 节点开 DCP 就只剩收益。</text>
+
+  <rect x="40" y="96" width="690" height="40" rx="12" fill="#059669"/>
+  <text x="385" y="122" text-anchor="middle" class="panel">Decode：KV 保持切开</text>
+  <rect x="750" y="96" width="690" height="40" rx="12" fill="#dc2626"/>
+  <text x="1095" y="122" text-anchor="middle" class="panel">Chunked prefill：必须拉全历史 KV</text>
+
+  <rect x="40" y="152" width="690" height="300" rx="16" fill="#fff" stroke="#059669"/>
+  <g transform="translate(70,180)">
+    <rect x="0" y="0" width="200" height="70" rx="10" fill="#dbeafe" stroke="#2563eb"/>
+    <text x="100" y="30" text-anchor="middle" class="h">Q 很小</text>
+    <text x="100" y="52" text-anchor="middle" class="s">1 token x H_local x 576</text>
+    <rect x="220" y="0" width="200" height="70" rx="10" fill="#fce7f3" stroke="#db2777"/>
+    <text x="320" y="30" text-anchor="middle" class="h">LSE 更小</text>
+    <text x="320" y="52" text-anchor="middle" class="s">每 head 一个 fp32</text>
+    <rect x="440" y="0" width="200" height="70" rx="10" fill="#ffedd5" stroke="#ea580c"/>
+    <text x="540" y="30" text-anchor="middle" class="h">out 是主体</text>
+    <text x="540" y="52" text-anchor="middle" class="s">[B, H, 512] bf16</text>
+    <text x="0" y="110" class="t">本地 KV 继续交错存放，不用拼回去。</text>
+    <text x="0" y="138" class="t">attention 用 LSE 加权还原全局 softmax。</text>
+    <text x="0" y="166" class="h">省下的是 KV 显存和 KV 带宽，不是 Q 通信。</text>
+    <text x="0" y="198" class="s">qrep 还可以再砍掉 Q AllGather。剩下 AG+RS 或一次 A2A。</text>
+    <text x="0" y="226" class="s">同步等待仍然在：最慢 rank 的 local attn 决定一步的下限。</text>
+  </g>
+
+  <rect x="750" y="152" width="690" height="300" rx="16" fill="#fff" stroke="#dc2626"/>
+  <g transform="translate(780,180)">
+    <text x="0" y="20" class="h">chunked_prefill_workspace（dcp=4）</text>
+    <rect x="0" y="40" width="480" height="70" rx="10" fill="#fee2e2" stroke="#dc2626"/>
+    <text x="240" y="70" text-anchor="middle" class="h">gathered KV  workspace_size</text>
+    <text x="240" y="92" text-anchor="middle" class="s">all_gather_into_tensor 的落点</text>
+    <rect x="488" y="40" width="150" height="70" rx="10" fill="#ffedd5" stroke="#ea580c"/>
+    <text x="563" y="70" text-anchor="middle" class="h">local KV</text>
+    <text x="563" y="92" text-anchor="middle" class="s">ws / dcp</text>
+    <text x="0" y="140" class="t">本地 KV 不完整，chunked prefill 要看完整历史，只能拉全。</text>
+    <text x="0" y="168" class="mono">workspace 额外放大 1/dcp 当 send buffer</text>
+    <text x="0" y="196" class="s">mla_attention.py:2106 申请，:2749 真正 kv_gather。</text>
+    <text x="0" y="224" class="h">这就是 DCP 在 prefill 上要倒付的通信。</text>
+  </g>
+
+  <rect x="40" y="472" width="1400" height="196" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="508" class="h">和 PD 分离叠在一起时</text>
+  <text x="60" y="540" class="t">P 产出的是按序列排好的 KV；D 的每个 rank 只该收下 (pos // I) % dcp == my_rank 的 token，写进自己那份紧凑 cache。</text>
+  <text x="60" y="568" class="t">写错 slot 通常不会立刻 crash，attention 会静默算偏。社区 KV connector 的 global&lt;-&gt;block 换算在 DCP 下修过多次（#46394、#41549、#45371）。</text>
+  <text x="60" y="596" class="t">PCP（Prefill Context Parallel）是另一条切 context 的路：query 本身很长，不能靠「AllGather 很短的 Q、再按 head ReduceScatter」。head 维切不动时 combine 走 AllReduce。</text>
+  <text x="60" y="624" class="s">本文只把 PCP 当作「为什么还有 cp_lse_ag_out_ar」的背景。DCP+PCP 联用约束更严，不在这里展开。</text>
+  <text x="60" y="648" class="s">内部栈上「D 节点开 DCP 时，P-&gt;D 的 KV 怎么按交错规则散布」仍待实测，见文末 TODO。</text>
+</svg>

@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="980" viewBox="0 0 1520 980" role="img" aria-labelledby="title desc">
+  <title id="title">DCP decode 四步：AllGather Q、本地 attention、AllGather LSE、ReduceScatter</title>
+  <desc id="desc">dcp=2 的最小例子。Q 按 head 切开，KV 按序列交错切开。AllGather 把 Q head 凑齐，各 rank 对本地 KV 做 partial attention，再用 LSE 加权并通过 ReduceScatter 沿 head 维求和收回。</desc>
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#7c3aed"/></marker>
+    <style>
+      .title { font:700 28px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .step { font:700 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+      .h { font:700 14px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#0f172a; }
+      .t { font:13px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#334155; }
+      .s { font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#475569; }
+      .mono { font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#0f172a; }
+      .wh { font:700 12px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",sans-serif; fill:#fff; }
+    </style>
+  </defs>
+  <rect width="1520" height="980" fill="#f8fafc"/>
+  <text x="40" y="46" class="title">Decode 四步：AllGather Q -&gt; 本地 attn -&gt; AllGather LSE -&gt; ReduceScatter</text>
+  <text x="40" y="74" class="s">例子：dcp=2，每 rank 2 个 Q head，序列 8 token 交错。交换的不是 attention score，而是每个 (token, head) 一个 LSE 标量。</text>
+
+  <rect x="220" y="96" width="620" height="36" rx="10" fill="#1d4ed8"/>
+  <text x="530" y="120" text-anchor="middle" class="step">rank 0    本职 head = h0, h1</text>
+  <rect x="860" y="96" width="620" height="36" rx="10" fill="#047857"/>
+  <text x="1170" y="120" text-anchor="middle" class="step">rank 1    本职 head = h2, h3</text>
+
+  <rect x="40" y="150" width="160" height="120" rx="12" fill="#334155"/>
+  <text x="120" y="188" text-anchor="middle" class="step">Step 0</text>
+  <text x="120" y="212" text-anchor="middle" class="wh">起点</text>
+  <text x="120" y="236" text-anchor="middle" class="wh">谁都算不全</text>
+  <rect x="220" y="150" width="620" height="120" rx="12" fill="#fff" stroke="#cbd5e1"/>
+  <rect x="860" y="150" width="620" height="120" rx="12" fill="#fff" stroke="#cbd5e1"/>
+  <text x="240" y="178" class="h">Q：q[h0] q[h1]</text>
+  <text x="240" y="202" class="t">KV：t0 t2 t4 t6  （偶数位）</text>
+  <text x="240" y="226" class="s">有一半 head 的 Q，却只有一半 KV</text>
+  <text x="240" y="250" class="mono">mqa_q [B, 2, 576]</text>
+  <text x="880" y="178" class="h">Q：q[h2] q[h3]</text>
+  <text x="880" y="202" class="t">KV：t1 t3 t5 t7  （奇数位）</text>
+  <text x="880" y="226" class="s">另外一半 head 的 Q，也只有一半 KV</text>
+  <text x="880" y="250" class="mono">mqa_q [B, 2, 576]</text>
+
+  <rect x="40" y="290" width="160" height="140" rx="12" fill="#7c3aed"/>
+  <text x="120" y="328" text-anchor="middle" class="step">Step 1</text>
+  <text x="120" y="352" text-anchor="middle" class="wh">AllGather Q</text>
+  <text x="120" y="376" text-anchor="middle" class="wh">沿 head 维</text>
+  <text x="120" y="400" text-anchor="middle" class="wh">dim=1</text>
+  <rect x="220" y="290" width="620" height="140" rx="12" fill="#f5f3ff" stroke="#7c3aed"/>
+  <rect x="860" y="290" width="620" height="140" rx="12" fill="#f5f3ff" stroke="#7c3aed"/>
+  <text x="240" y="320" class="h">Q：q[h0] q[h1] q[h2] q[h3]</text>
+  <text x="240" y="344" class="t">KV 仍是 t0 t2 t4 t6</text>
+  <text x="240" y="368" class="s">head 维撑开 dcp 倍：[B,2,576] -&gt; [B,4,576]</text>
+  <text x="240" y="396" class="s">decode 时 B=1 token/请求，这次 gather 很便宜</text>
+  <text x="880" y="320" class="h">Q：q[h0] q[h1] q[h2] q[h3]</text>
+  <text x="880" y="344" class="t">KV 仍是 t1 t3 t5 t7</text>
+  <text x="880" y="368" class="s">两边拿到同一组完整 Q head</text>
+  <text x="880" y="396" class="s">MLA：576 = kv_lora_rank 512 + rope 64</text>
+  <path d="M840 360 L860 360" stroke="#7c3aed" stroke-width="3" marker-end="url(#arr)"/>
+  <path d="M840 360 L820 360" stroke="#7c3aed" stroke-width="3" marker-end="url(#arr)"/>
+
+  <rect x="40" y="450" width="160" height="150" rx="12" fill="#ea580c"/>
+  <text x="120" y="488" text-anchor="middle" class="step">Step 2</text>
+  <text x="120" y="512" text-anchor="middle" class="wh">本地 attention</text>
+  <text x="120" y="536" text-anchor="middle" class="wh">全部 head</text>
+  <text x="120" y="560" text-anchor="middle" class="wh">只对本地 KV</text>
+  <rect x="220" y="450" width="620" height="150" rx="12" fill="#fff7ed" stroke="#ea580c"/>
+  <rect x="860" y="450" width="620" height="150" rx="12" fill="#fff7ed" stroke="#ea580c"/>
+  <text x="240" y="480" class="h">o0[h0..h3]   lse0[h0..h3]</text>
+  <text x="240" y="506" class="t">softmax 分母只统计了偶数 token</text>
+  <text x="240" y="530" class="mono">o_n = sum_{j in S_n} exp(s_j) v_j / exp(lse_n)</text>
+  <text x="240" y="556" class="s">seqused_k = 本 rank 的本地长度</text>
+  <text x="240" y="580" class="s">结果是 partial，不是错，是半成品</text>
+  <text x="880" y="480" class="h">o1[h0..h3]   lse1[h0..h3]</text>
+  <text x="880" y="506" class="t">softmax 分母只统计了奇数 token</text>
+  <text x="880" y="530" class="mono">lse_n = log sum_{j in S_n} exp(s_j)</text>
+  <text x="880" y="556" class="s">FlashAttention split-K 的跨 GPU 版</text>
+  <text x="880" y="580" class="s">两份 partial 合在一起信息是完整的</text>
+
+  <rect x="40" y="620" width="160" height="140" rx="12" fill="#db2777"/>
+  <text x="120" y="656" text-anchor="middle" class="step">Step 3</text>
+  <text x="120" y="680" text-anchor="middle" class="wh">AllGather LSE</text>
+  <text x="120" y="704" text-anchor="middle" class="wh">本地缩放</text>
+  <text x="120" y="728" text-anchor="middle" class="wh">16 字节量级</text>
+  <rect x="220" y="620" width="620" height="140" rx="12" fill="#fdf2f8" stroke="#db2777"/>
+  <rect x="860" y="620" width="620" height="140" rx="12" fill="#fdf2f8" stroke="#db2777"/>
+  <text x="240" y="650" class="h">两边都有 lse0[h]、lse1[h]</text>
+  <text x="240" y="674" class="mono">lse_g = logsumexp_n(lse_n)</text>
+  <text x="240" y="698" class="mono">a[h] = o0[h] * exp(lse0[h] - lse_g[h])</text>
+  <text x="240" y="726" class="s">B=1, H=4, fp32 -&gt; AllGather 只有 16 字节</text>
+  <text x="880" y="650" class="h">算出同一个全局归一化因子</text>
+  <text x="880" y="674" class="t">attention score / logits 从未跨 rank</text>
+  <text x="880" y="698" class="mono">b[h] = o1[h] * exp(lse1[h] - lse_g[h])</text>
+  <text x="880" y="726" class="s">此时 a[h] + b[h] 已是精确答案，还差求和</text>
+  <path d="M840 690 L860 690" stroke="#db2777" stroke-width="3" marker-end="url(#arr)"/>
+  <path d="M840 690 L820 690" stroke="#db2777" stroke-width="3" marker-end="url(#arr)"/>
+
+  <rect x="40" y="780" width="160" height="170" rx="12" fill="#059669"/>
+  <text x="120" y="820" text-anchor="middle" class="step">Step 4</text>
+  <text x="120" y="844" text-anchor="middle" class="wh">ReduceScatter</text>
+  <text x="120" y="868" text-anchor="middle" class="wh">沿 head 维</text>
+  <text x="120" y="892" text-anchor="middle" class="wh">求和 + 收回</text>
+  <rect x="220" y="780" width="620" height="170" rx="12" fill="#ecfdf5" stroke="#059669"/>
+  <rect x="860" y="780" width="620" height="170" rx="12" fill="#ecfdf5" stroke="#059669"/>
+  <text x="240" y="810" class="h">留下本职 head：h0, h1</text>
+  <text x="240" y="836" class="mono">out = a[h0,h1] + b[h0,h1]</text>
+  <text x="240" y="862" class="t">形状回到 [B, 2, 512]，对上 v_up / o_proj</text>
+  <text x="240" y="886" class="s">TP 语义完全恢复，下游不用改</text>
+  <text x="240" y="910" class="s">比 AllReduce 少搬一半</text>
+  <text x="240" y="934" class="s">一箭双雕：跨 rank 求和 + 按 TP 切回 head</text>
+  <text x="880" y="810" class="h">留下本职 head：h2, h3</text>
+  <text x="880" y="836" class="mono">out = a[h2,h3] + b[h2,h3]</text>
+  <text x="880" y="862" class="t">Step 1 撑开的 head 维在这里收回</text>
+  <text x="880" y="886" class="s">博客名字：AllGather Q -&gt; Compute -&gt; AG+RS</text>
+  <text x="880" y="910" class="s">v_up 在 combine 之后做，搬的是 512 维 latent</text>
+  <text x="880" y="934" class="s">避免每个 rank 对 4 个 head 重复做 v_up GEMM</text>
+</svg>
