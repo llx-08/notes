@@ -17,7 +17,7 @@
 
 <!-- more -->
 
-读这篇可以按图走：为什么切（图 1）→ 怎么切（图 2）→ decode 怎么算（图 3、图 4）→ 通信怎么收（图 5、图 6）→ GQA 与 prefill 的特例（图 7、图 8）。ASCII 图保留作精确对照，矢量图用来建立空间直觉。
+读这篇可以按图走：为什么切（图 1）→ 怎么切、block 怎么管（图 2）→ 一步里 KV 长什么样、通信搬什么（图 3）→ 因果三角其实只拆最后一行（图 4）→ decode 四步与 LSE（图 5、图 6）→ 通信怎么收（图 7、图 8）→ GQA 与 prefill（图 9、图 10）。ASCII 图保留作精确对照。
 
 ---
 
@@ -93,18 +93,38 @@ tp=8, dcp=2  →  4 个 DCP group，每组 2 个 rank：
 
 ![交错切分、负载均衡与 virtual block 的紧凑存放](imgs/vllm-dcp-interleave.svg)
 
-### 调度侧：逻辑 block 放大 dcp 倍
+### 调度侧：两套 `block_size`，乘倍的是记账单位
 
-`vllm/v1/core/single_type_kv_cache_manager.py:79-80`
+这里其实有两套「block size」，名字一样，语义不同。
+
+- **物理 page**（GPU 上真分配的那块）：还是原来的 `kv_cache_spec.block_size`，比如 16 个 token slot。每张卡的 KV cache 就是很多个这样的 page，**物理大小没有变成 dcp 倍**。
+- **调度器眼里的 logical block**：开了 DCP 之后被乘上 `dcp`。它不负责存数据，只负责「什么时候该再要一个 page ID」。
+
+`vllm/v1/core/single_type_kv_cache_manager.py:59-60`：
 
 ```python
-if dcp_world_size > 1:
-    self.block_size *= dcp_world_size    # 一个 "virtual block" 横跨整个 DCP group
+if dcp_world_size * pcp_world_size > 1:
+    self.block_size *= dcp_world_size * pcp_world_size
 ```
 
-也就是说 scheduler 眼里的一个 block 变成了 `block_size * dcp` 个 token，这个 virtual block 的内容被摊到组内所有 rank 上，每个 rank 各自存 `block_size` 个。**block 的分配/引用计数/prefix cache 逻辑因此完全不用改**——组内所有 rank 共享同一个 block table。
+乘倍的目的就一句话：**让「1 个 block ID」=「DCP 组里每张卡上的 1 个写满的物理 page」。**
 
-落到每张卡上，local 偏移是**紧凑重排**后的：rank0 的 slot `0,1,2,…` 依次是 `t0, t4, t8,…`，中间没有给别的 rank 留空洞。`PAD_SLOT_ID` 只出现在「这个 token 不属于我」的写入 mapping 上，不会把 KV cache 变成稀疏数组。
+以 `block_size=4, dcp=2, I=1` 为例。逻辑序列 8 个 token：
+
+```
+逻辑位置:  0  1  2  3  4  5  6  7
+归属:     r0 r1 r0 r1 r0 r1 r0 r1
+rank0 写入自己 page: t0 t2 t4 t6   → 正好 4 个，填满 1 个物理 page
+rank1 写入自己 page: t1 t3 t5 t7   → 正好 4 个，填满 1 个物理 page
+```
+
+如果不乘：调度器仍按「每 4 个**逻辑** token 分配 1 个 block」，逻辑走到 4 就再发一个新 ID；但此时每张卡才存了 2 个 token，物理 page 半空。worker 侧 `virtual_block_size = 4 * 2 = 8`，会把 0–7 都映射进**同一个** page。调度器以为用了 2 个 block，worker 只用了 1 个 → block table、prefix cache、引用计数全对不齐。
+
+乘上之后：调度器认为 1 个 block 覆盖 8 个逻辑 token；交错后每张卡刚好 4 个，填满各自那个物理 page。**组内所有 rank 共用同一张 block table、同一个 block ID**。prefix cache 的 hash 粒度也变成「一整页在每张卡上都写满了」，分配/引用计数完全不用改。
+
+落到每张卡上，local 偏移是**紧凑重排**后的：rank0 的 slot `0,1,2,…` 依次是 `t0, t2, t4,…`，中间没有给别的 rank 留空洞。`PAD_SLOT_ID` 只出现在「这个 token 不属于我」的写入 mapping 上，不会把 KV cache 变成稀疏数组。
+
+调度器假装「block 变长了」；worker 负责「按交错规则填满原来那么大的 page」。
 
 ### worker 侧：slot mapping 决定 token 归属
 
@@ -168,13 +188,60 @@ local_len = base + remainder
 
 这个张量会作为 `seqused_k` 直接喂给 FA / FlashMLA kernel。
 
+### 一步 decode 里：每个 rank 的 KV cache 长什么样
+
+**Decode attention 期间，KV cache 始终保持切开，不会被 gather，也不会在 step 结束时拼回去。** 搬走的是 Q、LSE 和 attention 输出，不是 cache 里的 KV 字节。
+
+![Decode 一步里 KV cache 钉在本地，通信只搬 Q、LSE 和 out](imgs/vllm-dcp-kv-stays-comm-moves.svg)
+
+以 `tp=2, dcp=2, I=1`，正在 decode 第 8 个 token（下标 7）为例：
+
+```
+rank0 物理 page（紧凑）:  [ t0 | t2 | t4 | t6 | 空... ]
+rank1 物理 page（紧凑）:  [ t1 | t3 | t5 | t7 | 空... ]
+                              本步新写入的是 t7，只追加到 rank1
+```
+
+计算过程中这两块 cache **原样拿去点乘**：
+
+- kernel 的 `seqused_k` 是本地长度（这里两边都是 4），看到的就是连续 4 个 KV slot
+- kernel **不知道**它们在全局是偶数还是奇数；对它来说就是「1 个 Q × 4 个 K」
+- 另一张卡上的 KV 本 rank 根本读不到，也不需要读
+
+跨 step 时 cache 按 round-robin 往前长：下一个 token t8 只追加到 rank0 的下一个 slot；t9 只追加到 rank1。所以「中途」每个 rank 手里永远是自己那条交错子序列，长度约 `seq_len / dcp`。它不是半成品全局 cache。
+
+GQA 有一个局部例外：当前 step 新产生的 K/V 先以 **dense tensor** 进 kernel（本 rank 手里是完整的当前 token），历史才走上面那份切开的 cache；算完后再按 `(pos // I) % dcp` 写入所属 rank。MLA 则是新 token 的 latent 已经写进所属 rank 的 cache，decode 不必拆这两段。
+
 ---
 
 ## 3. ⭐ Decode 时 attention 怎么算（核心）
 
 代码：`vllm/model_executor/layers/attention/mla_attention.py:932-975`
 
-### 3.1 全景图（dcp=2，每 rank 2 个 Q head，1 个 decode token）
+### 3.1 因果下三角：decode 只拆最后一行，不是两块小三角
+
+Q **按 head 切，不按 token 切**。Decode 每步通常只有最新那一个 query。完整因果矩阵里，DCP 真正在算的是**最后一行**：同一个 `q_t` 去点全部历史 K。奇偶切开的是这一行的**列（K）**。
+
+![因果下三角没有被切成两块：decode 只算最后一行](imgs/vllm-dcp-causal-last-row.svg)
+
+```
+完整因果矩阵（6 token）          decode 真正在算的：
+
+     k0 k1 k2 k3 k4 k5                 q5 · [k0 k1 k2 k3 k4 k5]
+  q0  *  .  .  .  .  .                         r0 r1 r0 r1 r0 r1
+  q1  *  *  .  .  .  .
+  q2  *  *  *  .  .  .           拆成：
+  q3  *  *  *  *  .  .             rank0: q5 × [k0,k2,k4] → o0, lse0
+  q4  *  *  *  *  *  .             rank1: q5 × [k1,k3,k5] → o1, lse1
+  q5  *  *  *  *  *  *  ← 只算这行
+     r0 r1 r0 r1 r0 r1             再 LSE 加权加回来，得到完整的这一行
+```
+
+常见误解是：rank0 拿偶数 token 做自己的小三角、rank1 拿奇数 token 做自己的小三角，再把两块三角拼回去。**那会把 Q 也按序列切开，DCP 不这么干。** 因果性是靠「query 是最新 token，本地 K 全是历史」保证的；所以 context 段 kernel 用 `causal=False`。
+
+Prefill 不能靠同一套「拆最后一行」：整张下三角里每一行的合法 K 集合都不同（`q2` 不能看 `k4`）。所以 chunked prefill 直接 AllGather 历史 KV，在完整序列上算普通因果注意力。
+
+### 3.2 全景图（dcp=2，每 rank 2 个 Q head，1 个 decode token）
 
 用最小例子：`H_local = 2`，`dcp = 2` → 组内共 4 个 head（h0..h3）；序列 8 个 token，I=1。
 
@@ -239,7 +306,7 @@ local_len = base + remainder
        rank0: a[h] = o0[h] · exp(lse0[h] - lse_g[h])
        rank1: b[h] = o1[h] · exp(lse1[h] - lse_g[h])
 
-  此时 a[h] + b[h] 就是正确答案（见 §3.3 推导）—— 还差一次跨 rank 求和
+  此时 a[h] + b[h] 就是正确答案（见 §3.4 推导）—— 还差一次跨 rank 求和
 
 
 ════════════════ Step 4：ReduceScatter(out, dim=1=head) ════════════════
@@ -267,7 +334,19 @@ local_len = base + remainder
      这就是博客里那个名字的含义：AllGather Q → Compute → AllGather + ReduceScatter
 ```
 
-### 3.2 形状变化速查（MLA, DeepSeek-V3, tp=8, dcp=2）
+一步 decode 的通信清单（默认 `cp_lse_ag_out_rs`）：
+
+| 时机 | 操作 | 搬什么 | KV cache 是否参与 |
+|---|---|---|---|
+| attention 前 | `AllGather(Q, dim=1=head)` | 当前 decode token 的 Q heads | 否。qrep 开启则跳过 |
+| 本地计算 | `forward_mqa` / FA | 无通信 | **只读本 rank 切开的 cache** |
+| combine | `AllGather(LSE)` | 每 head 一个 fp32 | 否 |
+| combine | 本地 `o *= exp(lse_local - lse_g)` | 无通信 | 否 |
+| combine 结束 | `ReduceScatter(out, dim=1=head)` | 已缩放的 attention 输出 | 否。同时完成求和 + 按 TP 切回 head |
+
+A2A 后端把表里后两行通信收成一次 `all_to_all_single`（out 和 lse 打包）。PCP 联用时最后一步改成 `AllReduce(out)`。**没有任何一条路径在 decode 里 AllGather KV cache。**
+
+### 3.3 形状变化速查（MLA, DeepSeek-V3, tp=8, dcp=2）
 
 ```
 num_heads(total)=128, tp=8 → H_local=16;  dcp=2 → H_group=32
@@ -295,7 +374,7 @@ out ReduceScatter ~16 * 512 * 2 B = 16.4 KB     ← 真正的通信主体
 
 所以「Q all-gather 是瓶颈」通常不成立：痛的是 **collective 次数** 和 **out 的 512 维 latent**，不是 Q 的字节数。`VLLM_DCP_Q_REPLICATE` 和 A2A 都是在砍次数，不是在砍 Q 的 payload。
 
-### 3.3 为什么 LSE 加权是**精确**的（不是近似）
+### 3.4 为什么 LSE 加权是**精确**的（不是近似）
 
 ![LSE 加权合并：局部 softmax 乘上各 rank 抢到的概率质量](imgs/vllm-dcp-lse-combine.svg)
 
@@ -349,7 +428,7 @@ lse = log(sum(exp(lse))) + lse_max                   # 稳定版 logsumexp
 output = where(factor == 0.0, 0.0, output)           # 避免 0 * inf = NaN
 ```
 
-### 3.4 空分片：短序列的坑
+### 3.5 空分片：短序列的坑
 
 `mask_dcp_empty_shards_()`（`common.py:9-35`）在 all-gather 之前把**本地 KV 长度为 0 的行的 LSE 填成 `-inf`**：
 
@@ -490,7 +569,7 @@ GQA 下当前 step 新产生的 K/V 是以 dense tensor 传进 `forward` 的（�
 
 ![GQA 两段 attention：cache 走 DCP，当前 token 本地 causal，再 LSE merge](imgs/vllm-dcp-gqa-two-pass.svg)
 
-decode 的新 query 一定在全部 cached KV 之后，所以 context 段对本地 KV 做非因果 attention 是对的——那些 key 全部合法。当前 token 段则可能同一 step 里有多个 query（chunked prefill / spec decode），彼此之间仍要 causal。两段的 key 集合不相交，最后一次 `merge_attn_states` 又是 3.3 节那套公式，只是纯本地、零通信。
+decode 的新 query 一定在全部 cached KV 之后，所以 context 段对本地 KV 做非因果 attention 是对的——那些 key 全部合法。当前 token 段则可能同一 step 里有多个 query（chunked prefill / spec decode），彼此之间仍要 causal。两段的 key 集合不相交，最后一次 `merge_attn_states` 又是 §3.4 那套公式，只是纯本地、零通信。
 
 ```
                      ┌── context 段：KV 来自 cache，DCP 切分 ────────────────┐
@@ -593,10 +672,12 @@ VLLM_DCP_Q_REPLICATE=1              # 冗余 q_proj，省掉 decode 的 Q all-ga
 1. ❌ "DCP 是切 batch" → 切的是 **KV 序列维**；head 维只是被临时撑开又收回
 2. ❌ "rank 之间要交换 attention score / logits" → 只交换每个 (token, head) **一个 LSE 标量**
 3. ❌ "KV 按连续大段切"（博客画法）→ 实际是按 `I` **交错**，为了负载均衡
-4. ❌ "合并是近似的" → 数学上**精确等价**，见 §3.3 推导与验算
+4. ❌ "合并是近似的" → 数学上**精确等价**，见 §3.4 推导与验算
 5. ❌ "Q all-gather 是瓶颈" → decode 时 B 很小；真正的通信主体是 `[B, H, 512]` 的 out。Q 的痛点是多一次 collective，不是 payload
 6. ❌ "DCP 和 PCP 是同一件事" → DCP 特化 decode（短 Q，可 RS 收回 head）；PCP 切 prefill 长 context，head 维切不动时只能 AR
-7. ❌ "virtual block 让每张卡存稀疏 KV" → scheduler 放大 block，worker 把属于自己的 token **紧凑**重排，cache 里没有空洞
+7. ❌ "virtual block 让每张卡存稀疏 KV" → scheduler 放大的是记账单位，worker 把属于自己的 token **紧凑**重排；物理 page 大小不变，cache 里没有空洞
+8. ❌ "decode 时要把切开的 KV gather 回来再算 attention" → KV cache 全程钉在本地。通信只搬 Q、LSE、out
+9. ❌ "奇偶 token 各自做因果小三角再拼回去" → decode 只拆因果矩阵的**最后一行**（同一个 Q 点被切开的 K）；Q 不按序列切
 
 **实现坑（社区都踩过）**
 | 坑 | 修复 |
@@ -617,7 +698,7 @@ VLLM_DCP_Q_REPLICATE=1              # 冗余 q_proj，省掉 decode 的 Q all-ga
 vllm/distributed/parallel_state.py:1852        DCP group 构建（TP 内 transpose 分组）
 vllm/distributed/parallel_state.py:1397        get_dcp_group()
 
-vllm/v1/core/single_type_kv_cache_manager.py:79    block_size *= dcp（virtual block）
+vllm/v1/core/single_type_kv_cache_manager.py:59    block_size *= dcp（logical / virtual block）
 vllm/v1/worker/block_table.py:413                  slot mapping 交错归属 kernel
 vllm/v1/attention/backends/utils.py:964            get_dcp_local_seq_lens()
 
