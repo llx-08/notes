@@ -12,7 +12,7 @@
 - **QSA Q-block：共享路由。** 连续 `Bq` 个 Query 共用同一组 token-level Top-K，因此天然可以一起算。
 - **MiniMax MSA：反转路由。** 每个 Query 独立选择 KV blocks，再把 `Query → KV block` 反转成 `KV block → Query 列表`，把命中同一 block 的 Query 一起算。
 
-![三种执行方式总览](imgs/01_overview.svg)
+![三种执行方式总览](imgs/qsa-msa-01-overview.svg)
 
 ---
 
@@ -108,7 +108,7 @@ q0/q1/q2/q3 → [k1, k8,  k11]
 q4/q5/q6/q7 → [k2, k10, k14]
 ```
 
-![QSA 沿 Query 方向 pooling](imgs/02_pooling_axes.svg)
+![QSA 沿 Query 方向 pooling](imgs/qsa-msa-02-pooling-axes.svg)
 
 ### 3.2 Main Attention：一个 program 同时处理 Bq 个 Query
 
@@ -128,7 +128,7 @@ score : [Bq × G, BN]
 
 每一轮 Top-K tile 中，K/V 只 gather 一次，供 Bq 个 Query 复用。kernel grid 第一维也从约 `M` 下降为 `ceil(M/Bq)`。
 
-![QSA Q-block 完整 pipeline](imgs/03_qsa_qblock_pipeline.svg)
+![QSA Q-block 完整 pipeline](imgs/qsa-msa-03-qsa-qblock-pipeline.svg)
 
 ### 3.3 Causal mask 怎么办
 
@@ -219,7 +219,7 @@ K3 → q1
 
 这样 kernel 处理 K0 时只加载一次 K0/V0，然后连续计算 q0、q1、q3。处理 K2 时同理。
 
-![路由矩阵与转置](imgs/04_routing_matrix.svg)
+![路由矩阵与转置](imgs/qsa-msa-04-routing-matrix.svg)
 
 ### 4.3 KV-outer kernel 为什么需要两阶段合并
 
@@ -237,7 +237,7 @@ CTA(K2) 只能得到 q0 在 K2 上的 partial output 和 LSE
 
 热门 KV block 可能被大量 Query 选择。MSA scheduler 会把它的 Query 列表切成多个 chunk，分发给多个 CTA，并提前给每个 partial 分配输出 slot，从而避免 atomic write 冲突。
 
-![MSA KV-outer 完整 pipeline](imgs/05_msa_kv_outer_pipeline.svg)
+![MSA KV-outer 完整 pipeline](imgs/qsa-msa-05-msa-kv-outer-pipeline.svg)
 
 ### 4.4 MSA 如何填满 Tensor Core
 
@@ -268,7 +268,7 @@ CTA(K2) 只能得到 q0 在 K2 上的 partial output 和 LSE
 | 质量风险 | 共享 Top-K 改变每个 Q 的路由 | 不强迫 Query 共享路由，但 KV block 粒度更粗 |
 | 训练方式 | 对既有 QSA 的推理优化 | 原生可训练 Index Branch；KL、warmup、local block |
 
-![Kernel 与内存路径对比](imgs/06_kernel_memory_compare.svg)
+![Kernel 与内存路径对比](imgs/qsa-msa-06-kernel-memory-compare.svg)
 
 ---
 
