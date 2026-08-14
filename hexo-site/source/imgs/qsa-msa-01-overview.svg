@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1040" viewBox="0 0 1800 1040" role="img" aria-labelledby="title desc" data-doc="qsa-qblock-vs-minimax-msa">
+  <title id="title">原始 QSA、QSA Q-block 与 MiniMax MSA 总览</title>
+  <desc id="desc">三列比较三种 sparse attention 执行方式，展示路由、K/V 复用和 kernel 组织。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f8fafc"/><stop offset="1" stop-color="#eef2ff"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#334155" flood-opacity=".15"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#475569"/></marker>
+    <style>
+      .title{font:700 34px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;fill:#0f172a}.sub{font:500 18px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;fill:#475569}.head{font:700 25px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;fill:#fff}.label{font:600 18px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;fill:#0f172a}.small{font:500 15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;fill:#334155}.tiny{font:500 13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#334155}.box{fill:#fff;stroke:#cbd5e1;stroke-width:2;rx:16;filter:url(#shadow)}.arrow{stroke:#475569;stroke-width:2.5;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1800" height="1040" fill="url(#bg)"/>
+  <text x="900" y="58" text-anchor="middle" class="title">同一个目标：让一次 K/V 读取服务更多 Query</text>
+  <text x="900" y="91" text-anchor="middle" class="sub">区别在于：是否先强制 Query 共用路由，以及 kernel 是 Q-outer 还是 KV-outer</text>
+
+  <g transform="translate(45,130)">
+    <rect width="535" height="850" rx="24" fill="#fff" stroke="#94a3b8" stroke-width="2" filter="url(#shadow)"/>
+    <path d="M0 24Q0 0 24 0H511Q535 0 535 24V92H0Z" fill="#64748b"/>
+    <text x="267" y="42" text-anchor="middle" class="head">原始 token-level QSA</text><text x="267" y="72" text-anchor="middle" style="font:500 16px sans-serif;fill:#e2e8f0">每个 Query 独立 Top-K，Q-outer 执行</text>
+    <rect x="45" y="125" width="445" height="115" class="box"/><text x="267" y="157" text-anchor="middle" class="label">Indexer：score [M,N]</text>
+    <text x="75" y="191" class="tiny">q0 → k1, k6, k11</text><text x="75" y="216" class="tiny">q1 → k2, k7, k11</text>
+    <path d="M267 242V285" class="arrow"/>
+    <rect x="45" y="285" width="445" height="265" class="box"/><text x="267" y="320" text-anchor="middle" class="label">每个 Q 启动一个 attention program</text>
+    <g transform="translate(76,350)"><rect width="380" height="38" rx="8" fill="#dbeafe"/><text x="14" y="25" class="tiny">q0 program：load K/V {1,6,11}</text><rect y="50" width="380" height="38" rx="8" fill="#e0e7ff"/><text x="14" y="75" class="tiny">q1 program：load K/V {2,7,11}</text><rect y="100" width="380" height="38" rx="8" fill="#dbeafe"/><text x="14" y="125" class="tiny">q2 program：load K/V {1,8,12}</text><rect y="150" width="380" height="38" rx="8" fill="#e0e7ff"/><text x="14" y="175" class="tiny">q3 program：load K/V {3,8,13}</text></g>
+    <path d="M267 552V595" class="arrow"/>
+    <rect x="45" y="595" width="445" height="205" rx="16" fill="#fff7ed" stroke="#fb923c" stroke-width="2"/>
+    <text x="267" y="632" text-anchor="middle" class="label">问题</text><text x="75" y="671" class="small">• k1、k8、k11 被重复加载</text><text x="75" y="705" class="small">• MMA 的 M 维只有一个 Q×G</text><text x="75" y="739" class="small">• M 行 logits 和 M 次 Top-K</text><text x="75" y="773" class="small">• program 数量约 M×Hkv</text>
+  </g>
+
+  <g transform="translate(632,130)">
+    <rect width="535" height="850" rx="24" fill="#fff" stroke="#2563eb" stroke-width="3" filter="url(#shadow)"/>
+    <path d="M0 24Q0 0 24 0H511Q535 0 535 24V92H0Z" fill="#2563eb"/>
+    <text x="267" y="42" text-anchor="middle" class="head">QSA Q-block</text><text x="267" y="72" text-anchor="middle" style="font:500 16px sans-serif;fill:#dbeafe">先让连续 Query 共享 token-level Top-K</text>
+    <rect x="45" y="125" width="445" height="145" class="box"/><text x="267" y="157" text-anchor="middle" class="label">Indexer：沿 Q 维 max-pool</text>
+    <text x="75" y="193" class="tiny">Q0={q0..q3} → max rows → k1,k8,k11</text><text x="75" y="221" class="tiny">indices[q0..q3] 完全相同</text><text x="75" y="249" class="small">logits 输出：[M/Bq,N]</text>
+    <path d="M267 272V315" class="arrow"/>
+    <rect x="45" y="315" width="445" height="245" class="box"/><text x="267" y="350" text-anchor="middle" class="label">一个 program 处理 Bq 个连续 Q</text>
+    <g transform="translate(75,380)"><rect width="390" height="54" rx="10" fill="#dbeafe"/><text x="18" y="23" class="tiny">Q tile = [q0,q1,q2,q3] × G heads</text><text x="18" y="43" class="tiny">load indices 一次：{k1,k8,k11}</text><path d="M195 56V91" class="arrow"/><rect y="93" width="390" height="62" rx="10" fill="#bfdbfe"/><text x="195" y="119" text-anchor="middle" class="tiny">K/V tile 只 gather 一次</text><text x="195" y="143" text-anchor="middle" class="tiny">同时完成 Bq×G 行 QK / PV</text></g>
+    <path d="M267 562V605" class="arrow"/>
+    <rect x="45" y="605" width="445" height="195" rx="16" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+    <text x="267" y="642" text-anchor="middle" class="label">收益与代价</text><text x="75" y="681" class="small">✓ logits/Top-K/program/indices 约降 Bq 倍</text><text x="75" y="715" class="small">✓ K/V 在连续 Query 间复用</text><text x="75" y="749" class="small">△ 强制共享路由，选择语义发生变化</text><text x="75" y="783" class="small">△ 较早 Q 可能被 causal mask 掉部分 Top-K</text>
+  </g>
+
+  <g transform="translate(1219,130)">
+    <rect width="535" height="850" rx="24" fill="#fff" stroke="#7c3aed" stroke-width="3" filter="url(#shadow)"/>
+    <path d="M0 24Q0 0 24 0H511Q535 0 535 24V92H0Z" fill="#7c3aed"/>
+    <text x="267" y="42" text-anchor="middle" class="head">MiniMax MSA</text><text x="267" y="72" text-anchor="middle" style="font:500 16px sans-serif;fill:#ede9fe">保留独立路由，再按 KV block 聚合 Query</text>
+    <rect x="45" y="125" width="445" height="150" class="box"/><text x="267" y="157" text-anchor="middle" class="label">Indexer：沿 K block 维 max-pool</text>
+    <text x="75" y="193" class="tiny">q0 → K0,K2　 q1 → K0,K3</text><text x="75" y="221" class="tiny">q2 → K1,K2　 q3 → K0,K2</text><text x="75" y="250" class="small">每个 Q / GQA group 保留独立选择</text>
+    <path d="M267 277V315" class="arrow"/>
+    <rect x="45" y="315" width="445" height="250" class="box"/><text x="267" y="350" text-anchor="middle" class="label">Q2K 反转为 K2Q CSR</text>
+    <g transform="translate(75,380)"><rect width="390" height="38" rx="8" fill="#ede9fe"/><text x="15" y="25" class="tiny">K0 → q0,q1,q3</text><rect y="49" width="390" height="38" rx="8" fill="#f3e8ff"/><text x="15" y="74" class="tiny">K1 → q2</text><rect y="98" width="390" height="38" rx="8" fill="#ede9fe"/><text x="15" y="123" class="tiny">K2 → q0,q2,q3</text><rect y="147" width="390" height="38" rx="8" fill="#f3e8ff"/><text x="15" y="172" class="tiny">K3 → q1</text></g>
+    <path d="M267 567V605" class="arrow"/>
+    <rect x="45" y="605" width="445" height="195" rx="16" fill="#faf5ff" stroke="#8b5cf6" stroke-width="2"/>
+    <text x="267" y="642" text-anchor="middle" class="label">收益与代价</text><text x="75" y="681" class="small">✓ 不强迫不同 Query 共享路由</text><text x="75" y="715" class="small">✓ 同一 KV block 只读一次，聚合任意 Q</text><text x="75" y="749" class="small">△ 需要反向 CSR、动态 scheduler</text><text x="75" y="783" class="small">△ partial O/LSE + combine 两阶段</text>
+  </g>
+</svg>
