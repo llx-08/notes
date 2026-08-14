@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention 本文回答一个具体问题：vLLM 分支 qsa-q-block-pooling-clean 的做法，是否类似 MiniMax Sparse Attention（MSA）？ 简短答案： 硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。 QSA Q-block 先强制连续"><meta property="og:type" content="blog"><meta property="og:title" content="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention"><meta property="og:url" content="https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention 本文回答一个具体问题：vLLM 分支 qsa-q-block-pooling-clean 的做法，是否类似 MiniMax Sparse Attention（MSA）？ 简短答案： 硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。 QSA Q-block 先强制连续"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-01-overview.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-02-pooling-axes.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-03-qsa-qblock-pipeline.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-04-routing-matrix.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-05-msa-kv-outer-pipeline.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-06-kernel-memory-compare.svg"><meta property="article:published_time" content="2026-08-14T00:00:00.000Z"><meta property="article:modified_time" content="2026-08-14T06:20:14.448Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/qsa-msa-01-overview.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/"},"headline":"QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention","image":[],"datePublished":"2026-08-14T00:00:00.000Z","dateModified":"2026-08-14T06:20:14.448Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention 本文回答一个具体问题：vLLM 分支 qsa-q-block-pooling-clean 的做法，是否类似 MiniMax Sparse Attention（MSA）？ 简短答案： 硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。 QSA Q-block 先强制连续"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-08-14T00:00:00.000Z" title="8/14/2026, 12:00:00 AM">2026-08-14</time>发表</span><span class="level-item"><time dateTime="2026-08-14T06:20:14.448Z" title="8/14/2026, 6:20:14 AM">2026-08-14</time>更新</span><span class="level-item">25 分钟读完 (大约3809个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention</h1><div class="content"><h1 id="QSA-Q-block-与-MiniMax-MSA：从一个-8×16-的例子理解两种稀疏-Attention"><a href="#QSA-Q-block-与-MiniMax-MSA：从一个-8×16-的例子理解两种稀疏-Attention" class="headerlink" title="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention"></a>QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention</h1><blockquote>
+<p>本文回答一个具体问题：vLLM 分支 <code>qsa-q-block-pooling-clean</code> 的做法，是否类似 MiniMax Sparse Attention（MSA）？</p>
+<p>简短答案：<strong>硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。</strong><br>QSA Q-block 先强制连续 Query 共用一套 KV token；MSA 保留每个 Query 的独立选择，再把选择同一 KV block 的 Query 动态聚到一起。</p>
+</blockquote>
+<h2 id="0-先记住一句话"><a href="#0-先记住一句话" class="headerlink" title="0. 先记住一句话"></a>0. 先记住一句话</h2><p>稀疏 Attention 已经把“每个 Query 看全部历史 KV”变成“每个 Query 只看 Top-K KV”。但如果 GPU 仍按 Query 逐个执行，就会反复读取 K/V，Tensor Core 的矩阵也很瘦。</p>
+<ul>
+<li><strong>QSA Q-block：共享路由。</strong> 连续 <code>Bq</code> 个 Query 共用同一组 token-level Top-K，因此天然可以一起算。</li>
+<li><strong>MiniMax MSA：反转路由。</strong> 每个 Query 独立选择 KV blocks，再把 <code>Query → KV block</code> 反转成 <code>KV block → Query 列表</code>，把命中同一 block 的 Query 一起算。</li>
+</ul>
+<p><img src="/notes/imgs/qsa-msa-01-overview.svg" alt="三种执行方式总览"></p>
+<hr>
+<h2 id="1-统一的小例子"><a href="#1-统一的小例子" class="headerlink" title="1. 统一的小例子"></a>1. 统一的小例子</h2><p>后文所有图都使用同一个例子：</p>
+<table>
+<thead>
+<tr>
+<th>符号</th>
+<th>含义</th>
+<th align="right">示例值</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>M</code></td>
+<td>Query token 数</td>
+<td align="right">8，即 <code>q0 … q7</code></td>
+</tr>
+<tr>
+<td><code>N</code></td>
+<td>KV token 数</td>
+<td align="right">16，即 <code>k0 … k15</code></td>
+</tr>
+<tr>
+<td><code>Bq</code></td>
+<td>QSA 的 Query block 大小</td>
+<td align="right">4</td>
+</tr>
+<tr>
+<td><code>Bk</code></td>
+<td>MSA 的 KV block 大小</td>
+<td align="right">4；论文实际采用 128</td>
+</tr>
+<tr>
+<td><code>S</code></td>
+<td>QSA 每个 Q-block 选择的 KV token 数</td>
+<td align="right">3</td>
+</tr>
+<tr>
+<td><code>Kblk</code></td>
+<td>MSA 每个 Query/GQA group 选择的 KV block 数</td>
+<td align="right">2；论文实际采用 16</td>
+</tr>
+</tbody></table>
+<p>将 16 个 KV token 分成 4 个 block：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">K0 = [k0,  k1,  k2,  k3 ]</span><br><span class="line">K1 = [k4,  k5,  k6,  k7 ]</span><br><span class="line">K2 = [k8,  k9,  k10, k11]</span><br><span class="line">K3 = [k12, k13, k14, k15]</span><br></pre></td></tr></table></figure>
+
+<p>为了先理解数据流，图中暂时省略 batch、head、causal mask 和量化 scale；第 6 节再把它们放回来。</p>
+<hr>
+<h2 id="2-Develop-上原始-token-level-QSA-做什么"><a href="#2-Develop-上原始-token-level-QSA-做什么" class="headerlink" title="2. Develop 上原始 token-level QSA 做什么"></a>2. Develop 上原始 token-level QSA 做什么</h2><p>原始 QSA 已经是稀疏 Attention，不是 Dense Attention。它有两个阶段：</p>
+<ol>
+<li><strong>Indexer：</strong>用一个轻量的 Index Query/Key 计算分数矩阵 <code>score[M,N]</code>，然后每个 Query 独立取 Top-S KV token。</li>
+<li><strong>Main Attention：</strong>真实的 GQA Query 只与选中的 S 个 K/V 做标准 softmax attention。</li>
+</ol>
+<p>示例：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">q0 → [k1,  k6,  k11]</span><br><span class="line">q1 → [k2,  k7,  k11]</span><br><span class="line">q2 → [k1,  k8,  k12]</span><br><span class="line">q3 → [k3,  k8,  k13]</span><br></pre></td></tr></table></figure>
+
+<p>虽然不同 Query 可能大量命中相同 KV，传统 Q-outer kernel 仍然按 Query 启动 program：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">处理 q0：读取 k1/k6/k11 和对应 V</span><br><span class="line">处理 q1：读取 k2/k7/k11 和对应 V   # k11 又读一次</span><br><span class="line">处理 q2：读取 k1/k8/k12 和对应 V   # k1 又读一次</span><br><span class="line">处理 q3：读取 k3/k8/k13 和对应 V   # k8 又读一次</span><br></pre></td></tr></table></figure>
+
+<p>瓶颈不一定是数学 FLOPs，而是：</p>
+<ul>
+<li>随机 gather 的 K/V 被重复搬运；</li>
+<li>一个 Query × 一个 GQA group 的 MMA <code>M</code> 维太小；</li>
+<li>program 数量多；</li>
+<li>indexer 要物化 <code>M×N</code> 的 FP32 logits，并对 M 行分别做 Top-K。</li>
+</ul>
+<hr>
+<h2 id="3-QSA-Q-block：先合并-Query-的路由"><a href="#3-QSA-Q-block：先合并-Query-的路由" class="headerlink" title="3. QSA Q-block：先合并 Query 的路由"></a>3. QSA Q-block：先合并 Query 的路由</h2><h3 id="3-1-Indexer：沿-Query-方向-max-pooling"><a href="#3-1-Indexer：沿-Query-方向-max-pooling" class="headerlink" title="3.1 Indexer：沿 Query 方向 max-pooling"></a>3.1 Indexer：沿 Query 方向 max-pooling</h3><p>设置 <code>Bq=4</code> 后，QSA 把连续 4 个 Query 组成一组：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Q0 = [q0, q1, q2, q3]</span><br><span class="line">Q1 = [q4, q5, q6, q7]</span><br></pre></td></tr></table></figure>
+
+<p>Indexer 仍计算每个 Query 对每个 KV token 的分数，但不再把完整 <code>8×16</code> logits 写回。PAI-DeepGEMM kernel 在 epilogue 中直接做：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">pooled[Q0, k] = max(score[q0,k], score[q1,k], score[q2,k], score[q3,k])</span><br><span class="line">pooled[Q1, k] = max(score[q4,k], score[q5,k], score[q6,k], score[q7,k])</span><br></pre></td></tr></table></figure>
+
+<p>因此输出由 <code>[8,16]</code> 变成 <code>[2,16]</code>。再对每个 Q-block 取 Top-3 KV token，例如：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Q0 → [k1, k8,  k11]</span><br><span class="line">Q1 → [k2, k10, k14]</span><br></pre></td></tr></table></figure>
+
+<p>最后复制回 token 粒度：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">q0/q1/q2/q3 → [k1, k8,  k11]</span><br><span class="line">q4/q5/q6/q7 → [k2, k10, k14]</span><br></pre></td></tr></table></figure>
+
+<p><img src="/notes/imgs/qsa-msa-02-pooling-axes.svg" alt="QSA 沿 Query 方向 pooling"></p>
+<h3 id="3-2-Main-Attention：一个-program-同时处理-Bq-个-Query"><a href="#3-2-Main-Attention：一个-program-同时处理-Bq-个-Query" class="headerlink" title="3.2 Main Attention：一个 program 同时处理 Bq 个 Query"></a>3.2 Main Attention：一个 program 同时处理 Bq 个 Query</h3><p>因为一个 Q-block 中的 indices 完全相同，Triton kernel 只读取第一行 indices：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">idx_row_ptr = indices[q_block_start]</span><br></pre></td></tr></table></figure>
+
+<p>然后把 <code>Bq × G</code> 个 Query heads 放入同一个矩阵。其中 <code>G=Hq/Hkv</code> 是每个 KV head 服务的 Query head 数。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">Q tile: [Bq × G, D]</span><br><span class="line">K tile: [D, BN]</span><br><span class="line">score : [Bq × G, BN]</span><br></pre></td></tr></table></figure>
+
+<p>每一轮 Top-K tile 中，K/V 只 gather 一次，供 Bq 个 Query 复用。kernel grid 第一维也从约 <code>M</code> 下降为 <code>ceil(M/Bq)</code>。</p>
+<p><img src="/notes/imgs/qsa-msa-03-qsa-qblock-pipeline.svg" alt="QSA Q-block 完整 pipeline"></p>
+<h3 id="3-3-Causal-mask-怎么办"><a href="#3-3-Causal-mask-怎么办" class="headerlink" title="3.3 Causal mask 怎么办"></a>3.3 Causal mask 怎么办</h3><p>同一 Q-block 内，较晚 Query 能看到更多历史 token。Indexer 用 block 最后一个 Query 的 causal 上界做 Top-K；Attention kernel 再为每个 Query 单独屏蔽未来位置：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">q0 可见上界 = offset + 0</span><br><span class="line">q1 可见上界 = offset + 1</span><br><span class="line">q2 可见上界 = offset + 2</span><br><span class="line">q3 可见上界 = offset + 3</span><br></pre></td></tr></table></figure>
+
+<p>这保证不会看未来，但可能出现一个副作用：某个 KV token 因为对 q3 很重要而进入共享 Top-K，却对 q0 尚不可见。q0 会把它 mask 掉，于是 q0 的实际有效 KV 数少于 S。</p>
+<h3 id="3-4-QSA-Q-block-到底省了什么"><a href="#3-4-QSA-Q-block-到底省了什么" class="headerlink" title="3.4 QSA Q-block 到底省了什么"></a>3.4 QSA Q-block 到底省了什么</h3><p>假设 <code>Bq=4</code>：</p>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th align="right">原始 token QSA</th>
+<th align="right">QSA Q-block</th>
+<th align="right">理想变化</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Index GEMM 数学计算</td>
+<td align="right"><code>M×N</code></td>
+<td align="right">仍约 <code>M×N</code></td>
+<td align="right">基本不变</td>
+</tr>
+<tr>
+<td>Index logits 写回</td>
+<td align="right"><code>M×N</code></td>
+<td align="right"><code>M/Bq×N</code></td>
+<td align="right">约 1/4</td>
+</tr>
+<tr>
+<td>Top-K 行数</td>
+<td align="right"><code>M</code></td>
+<td align="right"><code>M/Bq</code></td>
+<td align="right">约 1/4</td>
+</tr>
+<tr>
+<td>Attention program 数</td>
+<td align="right"><code>M×Hkv</code></td>
+<td align="right"><code>M/Bq×Hkv</code></td>
+<td align="right">约 1/4</td>
+</tr>
+<tr>
+<td>indices 读取</td>
+<td align="right">每 Q 一行</td>
+<td align="right">每 Q-block 一行</td>
+<td align="right">约 1/4</td>
+</tr>
+<tr>
+<td>K/V 加载</td>
+<td align="right">每 Q 重复 gather</td>
+<td align="right">block 内复用</td>
+<td align="right">理想约 1/4</td>
+</tr>
+<tr>
+<td>Main Attention FLOPs</td>
+<td align="right"><code>M×S</code></td>
+<td align="right">仍约 <code>M×S</code></td>
+<td align="right">基本不变</td>
+</tr>
+</tbody></table>
+<p>所以它不是把数学运算减少 4 倍，而是把 <strong>中间 logits、Top-K、kernel launch 和 K/V IO</strong> 大幅压缩。</p>
+<hr>
+<h2 id="4-MiniMax-MSA：不共享路由，而是反转路由"><a href="#4-MiniMax-MSA：不共享路由，而是反转路由" class="headerlink" title="4. MiniMax MSA：不共享路由，而是反转路由"></a>4. MiniMax MSA：不共享路由，而是反转路由</h2><h3 id="4-1-Indexer：沿-KV-block-方向-max-pooling"><a href="#4-1-Indexer：沿-KV-block-方向-max-pooling" class="headerlink" title="4.1 Indexer：沿 KV block 方向 max-pooling"></a>4.1 Indexer：沿 KV block 方向 max-pooling</h3><p>MSA 给每个 GQA group 配一个 Index Query head，所有 group 共用一个 Index Key head。对每个 Query <code>qi</code> 和 GQA group <code>r</code>：</p>
+<ol>
+<li>先计算 token-level index score；</li>
+<li>在每个 KV block 内取最大值；</li>
+<li>对 KV blocks 取 Top-K；</li>
+<li>强制包含当前 local block。</li>
+</ol>
+<p>在小例子中：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">block_score[q, K0] = max(score[q,k0],  ..., score[q,k3])</span><br><span class="line">block_score[q, K1] = max(score[q,k4],  ..., score[q,k7])</span><br><span class="line">block_score[q, K2] = max(score[q,k8],  ..., score[q,k11])</span><br><span class="line">block_score[q, K3] = max(score[q,k12], ..., score[q,k15])</span><br></pre></td></tr></table></figure>
+
+<p>输出仍保留每个 Query 的独立路由，例如：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">q0 → [K0, K2]</span><br><span class="line">q1 → [K0, K3]</span><br><span class="line">q2 → [K1, K2]</span><br><span class="line">q3 → [K0, K2]</span><br></pre></td></tr></table></figure>
+
+<p>注意两种 pooling 的“轴”正好相反：</p>
+<ul>
+<li>QSA：多行 Query 合成一行，K 仍是 token；</li>
+<li>MSA：每行 Query 保留，多列 K token 合成一个 KV block。</li>
+</ul>
+<p>这就是上面 <code>02_pooling_axes.svg</code> 的核心。</p>
+<h3 id="4-2-为什么不能直接像-QSA-那样一起算"><a href="#4-2-为什么不能直接像-QSA-那样一起算" class="headerlink" title="4.2 为什么不能直接像 QSA 那样一起算"></a>4.2 为什么不能直接像 QSA 那样一起算</h3><p>MSA 中 q0、q1、q2、q3 的 KV block 集合不同，不能简单放进一个 Q tile 并共享全部 K/V。它先生成 Q2K 路由：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">q0 → K0, K2</span><br><span class="line">q1 → K0, K3</span><br><span class="line">q2 → K1, K2</span><br><span class="line">q3 → K0, K2</span><br></pre></td></tr></table></figure>
+
+<p>再转置为 K2Q：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">K0 → q0, q1, q3</span><br><span class="line">K1 → q2</span><br><span class="line">K2 → q0, q2, q3</span><br><span class="line">K3 → q1</span><br></pre></td></tr></table></figure>
+
+<p>这样 kernel 处理 K0 时只加载一次 K0/V0，然后连续计算 q0、q1、q3。处理 K2 时同理。</p>
+<p><img src="/notes/imgs/qsa-msa-04-routing-matrix.svg" alt="路由矩阵与转置"></p>
+<h3 id="4-3-KV-outer-kernel-为什么需要两阶段合并"><a href="#4-3-KV-outer-kernel-为什么需要两阶段合并" class="headerlink" title="4.3 KV-outer kernel 为什么需要两阶段合并"></a>4.3 KV-outer kernel 为什么需要两阶段合并</h3><p>一个 Query 选择了多个 KV blocks。例如 q0 选择 K0 和 K2：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">CTA(K0) 只能得到 q0 在 K0 上的 partial output 和 LSE</span><br><span class="line">CTA(K2) 只能得到 q0 在 K2 上的 partial output 和 LSE</span><br></pre></td></tr></table></figure>
+
+<p>它们不能各自完成 q0 对全部选中 token 的 softmax。因此 MSA 分两阶段：</p>
+<ol>
+<li><strong>Sparse Attention kernel：</strong>每个 <code>(KV block, 一组 Query)</code> 产生局部归一化结果 <code>O_partial</code> 和 <code>LSE_partial</code>；</li>
+<li><strong>Combine kernel：</strong>使用 log-sum-exp 权重把一个 Query 的多个 partial 合并成最终输出。</li>
+</ol>
+<p>热门 KV block 可能被大量 Query 选择。MSA scheduler 会把它的 Query 列表切成多个 chunk，分发给多个 CTA，并提前给每个 partial 分配输出 slot，从而避免 atomic write 冲突。</p>
+<p><img src="/notes/imgs/qsa-msa-05-msa-kv-outer-pipeline.svg" alt="MSA KV-outer 完整 pipeline"></p>
+<h3 id="4-4-MSA-如何填满-Tensor-Core"><a href="#4-4-MSA-如何填满-Tensor-Core" class="headerlink" title="4.4 MSA 如何填满 Tensor Core"></a>4.4 MSA 如何填满 Tensor Core</h3><p>若一个 GQA group 有 <code>G=16</code> 个 Query heads，单个 Query 只提供 16 行，MMA 的 M 维太小。MSA 会从同一 KV block 的 Q 列表中取 <code>ceil(128/G)=8</code> 个 Query positions：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">8 个 Query positions × 16 个 Query heads = 128 行</span><br></pre></td></tr></table></figure>
+
+<p>它们共享同一个 KV head 和 KV block，于是形成接近 <code>128×128</code> 的 score MMA。这与 QSA 的 <code>Bq×G</code> 拼接目标相同，只是 MSA 的 Query 可以来自任意位置，而 QSA 必须是连续位置。</p>
+<hr>
+<h2 id="5-一张表看懂本质区别"><a href="#5-一张表看懂本质区别" class="headerlink" title="5. 一张表看懂本质区别"></a>5. 一张表看懂本质区别</h2><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>QSA Q-block</th>
+<th>MiniMax MSA</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>核心目标</td>
+<td>一次 K/V 读取服务更多 Q</td>
+<td>一次 KV block 读取服务更多 Q</td>
+</tr>
+<tr>
+<td>Query 是否独立选路</td>
+<td>否；连续 Bq 个 Q 共用</td>
+<td>是；每个 Q 独立选择</td>
+</tr>
+<tr>
+<td>Head 路由粒度</td>
+<td>当前实现是一套 indices 供各 KV heads 使用</td>
+<td>每个 GQA group 独立选择，组内 heads 共享</td>
+</tr>
+<tr>
+<td>稀疏 KV 单位</td>
+<td>KV token</td>
+<td>128-token KV block</td>
+</tr>
+<tr>
+<td>Pooling 方向</td>
+<td>沿 Q 维 max-pool</td>
+<td>沿 K block 维 max-pool</td>
+</tr>
+<tr>
+<td>Kernel 组织</td>
+<td>静态 Q-block outer</td>
+<td>动态 KV-block outer</td>
+</tr>
+<tr>
+<td>Query 聚合来源</td>
+<td>连续、预先固定</td>
+<td>任意位置、由命中关系决定</td>
+</tr>
+<tr>
+<td>路由元数据</td>
+<td><code>[M,S]</code>，每 Bq 行相同</td>
+<td>Q2K <code>[Hkv,M,Kblk]</code> + K2Q CSR + schedule</td>
+</tr>
+<tr>
+<td>Softmax</td>
+<td>一个 program 内完成</td>
+<td>partial O/LSE + combine</td>
+</tr>
+<tr>
+<td>实现代价</td>
+<td>低</td>
+<td>高</td>
+</tr>
+<tr>
+<td>质量风险</td>
+<td>共享 Top-K 改变每个 Q 的路由</td>
+<td>不强迫 Query 共享路由，但 KV block 粒度更粗</td>
+</tr>
+<tr>
+<td>训练方式</td>
+<td>对既有 QSA 的推理优化</td>
+<td>原生可训练 Index Branch；KL、warmup、local block</td>
+</tr>
+</tbody></table>
+<p><img src="/notes/imgs/qsa-msa-06-kernel-memory-compare.svg" alt="Kernel 与内存路径对比"></p>
+<hr>
+<h2 id="6-把-batch、GQA、FP8-和-causal-放回来"><a href="#6-把-batch、GQA、FP8-和-causal-放回来" class="headerlink" title="6. 把 batch、GQA、FP8 和 causal 放回来"></a>6. 把 batch、GQA、FP8 和 causal 放回来</h2><h3 id="6-1-QSA-分支中的真实张量"><a href="#6-1-QSA-分支中的真实张量" class="headerlink" title="6.1 QSA 分支中的真实张量"></a>6.1 QSA 分支中的真实张量</h3><p>Indexer Q-block 路径：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">q_fp8              [M, Hidx, Didx]</span><br><span class="line">k_fp8              [N, Didx]</span><br><span class="line">weights            [M, Hidx]</span><br><span class="line">pooled_logits      [ceil(M/Bq), N]        FP32</span><br><span class="line">topk_pooled        [ceil(M/Bq), S]        INT32 token ids</span><br><span class="line">topk_indices       [M, S]                 每 Bq 行相同</span><br></pre></td></tr></table></figure>
+
+<p>Main Attention Q-block kernel：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">query              [M, Hq, D]</span><br><span class="line">k/value            [N_aligned, Hkv, D]</span><br><span class="line">indices            [M, S]</span><br><span class="line">GROUP_SIZE G       Hq / Hkv</span><br><span class="line">BLOCK_SIZE_M       next_pow2(Bq × G)，至少 16</span><br><span class="line">grid               [ceil(max_q_len/Bq), batch × Hkv]</span><br></pre></td></tr></table></figure>
+
+<p>若 core KV cache 是 FP8：</p>
+<ul>
+<li>Q/K/V 保持 E4M3；</li>
+<li>QK 与 PV 使用 FP8 Tensor Core、FP32 accumulator；</li>
+<li>Q/K/V scale 合并到 kernel 内；</li>
+<li>K/V 相对 BF16 的 HBM 流量约减半；</li>
+<li>Max-offset 将 softmax probability 放大 <code>2^8</code> 后再 cast FP8，降低下溢，最终归一化会抵消这个常数。</li>
+</ul>
+<h3 id="6-2-QSA-Q-block-的启用条件"><a href="#6-2-QSA-Q-block-的启用条件" class="headerlink" title="6.2 QSA Q-block 的启用条件"></a>6.2 QSA Q-block 的启用条件</h3><p>该优化不是默认开启。分支中：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">VLLM_QSA_Q_BLOCK_SIZE=4             <span class="comment"># 默认 0，即关闭</span></span><br><span class="line">VLLM_QSA_PREFILL_ATTN_BACKEND=triton</span><br><span class="line">VLLM_QSA_INDEXER_BACKEND=dpsk-fp8</span><br></pre></td></tr></table></figure>
+
+<p>同时需要 PAI-DeepGEMM 提供 <code>fp8_mqa_logits_q_block_pooling</code>。以下情况会回退到 token-level 路径：</p>
+<ul>
+<li>一个 prefill batch 含多个 sequence；</li>
+<li>使用 shared-topk；</li>
+<li>Q-block pooling kernel 不可用；</li>
+<li><code>VLLM_QSA_Q_BLOCK_SIZE=0</code>。</li>
+</ul>
+<p>第一 chunk 且 <code>query.shape == key.shape</code> 时，Main Attention 仍走 raw sparse kernel；Q-block attention kernel 主要作用于后续 chunk、prefix/cache 命中等路径。Indexer 的 Q-pooling 仍可能生效。</p>
+<h3 id="6-3-MSA-的真实路由元数据"><a href="#6-3-MSA-的真实路由元数据" class="headerlink" title="6.3 MSA 的真实路由元数据"></a>6.3 MSA 的真实路由元数据</h3><p>MSA 公共 kernel 接口使用：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">q2k_indices        [Hkv, total_q, Kblk]</span><br><span class="line">k2q_row_ptr        [Hkv, total_k_blocks + 1]</span><br><span class="line">k2q_q_indices      [Hkv, total_q × Kblk]</span><br><span class="line">schedule           work_count / qsplit_indices / split_counts / ...</span><br></pre></td></tr></table></figure>
+
+<p>论文采用：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">KV block size Bk = 128</span><br><span class="line">Top-K blocks      = 16</span><br><span class="line">最多关注 token   = 16 × 128 = 2048</span><br></pre></td></tr></table></figure>
+
+<p>这个 2048-token budget 与常见 QSA token Top-2048 数值相似，但物理布局不同：MSA 会把完整的 128-token block 连续读入，而 QSA 是 2048 个可能完全不连续的 token gather。</p>
+<hr>
+<h2 id="7-为什么-QSA-的-40-和-MSA-的-14-2×-不冲突"><a href="#7-为什么-QSA-的-40-和-MSA-的-14-2×-不冲突" class="headerlink" title="7. 为什么 QSA 的 +40% 和 MSA 的 14.2× 不冲突"></a>7. 为什么 QSA 的 +40% 和 MSA 的 14.2× 不冲突</h2><p>两个数字的基线不同：</p>
+<ul>
+<li>QSA 分支的约 40%：相对于<strong>已经是 token-level sparse QSA</strong> 的 develop，进一步优化执行效率；Top-K budget 没有减少。</li>
+<li>MSA 论文的 14.2×：在 H800、1M context 下，相对于<strong>Dense GQA prefill</strong>；主要收益先来自 sparse-vs-dense，再叠加 KV-outer kernel。</li>
+</ul>
+<p>QSA Q-block 的收益来源可以写成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">已有 token sparse QSA</span><br><span class="line">  + fused logits/Q-pooling</span><br><span class="line">  + Top-K 行数减少 Bq 倍</span><br><span class="line">  + Q-block 内 K/V 复用</span><br><span class="line">  + program 数减少</span><br><span class="line">  + 可选 FP8 QK/PV</span><br><span class="line">  ≈ 在特定长上下文场景获得约 1.4×</span><br></pre></td></tr></table></figure>
+
+<p>MSA 的收益路径则是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">Dense GQA</span><br><span class="line">  → 每 Q/GQA group 只选 16 个 128-token blocks</span><br><span class="line">  → Main Attention 从 O(N²) 降为 O(N × 2048)</span><br><span class="line">  → KV-outer 将同一 block 的 Query 聚合</span><br><span class="line">  → 反向 CSR + load balancing + 两阶段 combine</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="8-精度取舍：最需要关注的差别"><a href="#8-精度取舍：最需要关注的差别" class="headerlink" title="8. 精度取舍：最需要关注的差别"></a>8. 精度取舍：最需要关注的差别</h2><h3 id="8-1-QSA-Q-block-改变了路由语义"><a href="#8-1-QSA-Q-block-改变了路由语义" class="headerlink" title="8.1 QSA Q-block 改变了路由语义"></a>8.1 QSA Q-block 改变了路由语义</h3><p>原始 QSA：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">indices[q] = TopK(score[q, :])</span><br></pre></td></tr></table></figure>
+
+<p>QSA Q-block：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">indices[Qblock] = TopK(max over q in Qblock(score[q, :]))</span><br></pre></td></tr></table></figure>
+
+<p>这两者不数学等价。一个 Query 的重要 KV 可能被同 block 其他 Query 的高分 KV 挤出固定的 S 个位置。因此需要对 <code>Bq=2/4/8</code> 分别验证：</p>
+<ul>
+<li>PPL；</li>
+<li>Needle/RULER/长上下文检索；</li>
+<li>Agent、代码库、多轮对话业务集；</li>
+<li>首 chunk 与后续 chunk 一致性；</li>
+<li>不同 chunk size、prefix cache 和 batch 组合。</li>
+</ul>
+<p>历史测试验证的是“Q-block kernel 对给定共享 indices 的计算正确”和“fused pooling 符合其 PyTorch reference”，并不证明它与逐 Query Top-K 的模型输出等价。</p>
+<h3 id="8-2-MSA-用训练吸收-block-sparsity"><a href="#8-2-MSA-用训练吸收-block-sparsity" class="headerlink" title="8.2 MSA 用训练吸收 block sparsity"></a>8.2 MSA 用训练吸收 block sparsity</h3><p>MSA 的 Index Branch 不是纯推理 heuristic：</p>
+<ul>
+<li>用 KL loss 对齐 Main Branch 的 group-average attention distribution；</li>
+<li>warmup 阶段先运行 full attention，避免随机路由控制主分支；</li>
+<li>强制加入 local block；</li>
+<li>Index Branch 的梯度与 backbone/Main Branch 隔离。</li>
+</ul>
+<p>因此 MSA 可以在训练中适应“每次选择完整 KV block”的约束。QSA Q-block 则是在既有 token-level indexer 输出之上做推理期 Q pooling，工程简单，但更需要补充质量回归。</p>
+<hr>
+<h2 id="9-最终理解模型"><a href="#9-最终理解模型" class="headerlink" title="9. 最终理解模型"></a>9. 最终理解模型</h2><p>可以把两者看成对同一个 GPU 问题的两个答案：</p>
+<blockquote>
+<p>问题：每个 Query 只选少量 KV 后，路由很散，怎样让一个大的 Tensor Core tile 复用同一份 K/V？</p>
+</blockquote>
+<p><strong>QSA Q-block 的答案：</strong></p>
+<blockquote>
+<p>我提前规定连续 Bq 个 Query 必须选同一批 KV token。这样不用整理路由，直接一起算。</p>
+</blockquote>
+<p><strong>MiniMax MSA 的答案：</strong></p>
+<blockquote>
+<p>我不限制每个 Query 选什么；选择结束后，把命中同一个 KV block 的所有 Query 找出来，再一起算。</p>
+</blockquote>
+<p>因此：</p>
+<ul>
+<li>QSA 是以更强的路由共享约束，换取更简单、低开销的 kernel；</li>
+<li>MSA 是以更复杂的 metadata、调度和归并，换取 Query 路由独立性；</li>
+<li>两者都不是单纯“少算几个 token”，而是 attention 算法与 GPU 数据流的共同设计。</li>
+</ul>
+<hr>
+<h2 id="10-对应代码与资料"><a href="#10-对应代码与资料" class="headerlink" title="10. 对应代码与资料"></a>10. 对应代码与资料</h2><h3 id="vLLM-qsa-q-block-pooling-clean"><a href="#vLLM-qsa-q-block-pooling-clean" class="headerlink" title="vLLM qsa-q-block-pooling-clean"></a>vLLM <code>qsa-q-block-pooling-clean</code></h3><ul>
+<li><code>vllm/model_executor/layers/qwen_sparse_attn_indexer.py</code><ul>
+<li><code>_prefill_mqa_logits_topk_q_block</code></li>
+<li>fused Q logits + Q max-pooling、block-level Top-K、复制 indices</li>
+</ul>
+</li>
+<li><code>vllm/v1/attention/backends/flash_attn_qsautils.py</code><ul>
+<li><code>sparse_gqa_fwd_kernel_triton_ck_qblock</code></li>
+<li><code>sparse_gqa_fwd_kernel_triton_ck_qblock_fp8</code></li>
+</ul>
+</li>
+<li><code>vllm/v1/attention/backends/flash_attn_qsa.py</code><ul>
+<li>Q-block/token-level、BF16/FP8 prefill dispatch</li>
+</ul>
+</li>
+<li><code>vllm/v1/attention/backends/qsa_config.py</code><ul>
+<li>indexer 与 attention 共享的 Q-block gating</li>
+</ul>
+</li>
+<li><code>vllm/v1/attention/backends/mla/indexer.py</code><ul>
+<li>Q-block-aware logits budget 和 chunk splitting</li>
+</ul>
+</li>
+</ul>
+<p>关键提交：</p>
+<ul>
+<li><code>401781ab15</code>：Q-block indexer + attention kernel</li>
+<li><code>0e6296c807</code>：复用 logits buffer、优化 Q-block 内存预算</li>
+<li><code>03c26dc49a</code>：删除每层 D2H <code>max_q_len</code> 同步</li>
+<li><code>1753d04756</code>：FP8 Q-block attention</li>
+<li><code>42429e4217</code>：FA3 Max-offset</li>
+<li><code>a9ae261b64</code>：回退 K-block pooling 与 decode Q-block，保留干净的 prefill Q-block 路径</li>
+</ul>
+<h3 id="MiniMax-MSA"><a href="#MiniMax-MSA" class="headerlink" title="MiniMax MSA"></a>MiniMax MSA</h3><ul>
+<li>论文：<a target="_blank" rel="noopener" href="https://arxiv.org/abs/2606.13392">MiniMax Sparse Attention</a></li>
+<li>官方实现：<a target="_blank" rel="noopener" href="https://github.com/MiniMax-AI/MSA">MiniMax-AI/MSA</a></li>
+<li>CuTe-DSL kernel 文档：<a target="_blank" rel="noopener" href="https://github.com/MiniMax-AI/MSA/blob/main/python/fmha_sm100/cute/README.md">MSA sparse kernel README</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention</p><p><a href="https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/">https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-08-14</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-08-14</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/08/13/2026-08-13-vllm-dcp-attention/"><span class="level-item">vLLM Decode Context Parallelism (DCP)：attention 计算与集合通信详解</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">84</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">4</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">25</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/"><span class="level-start"><span class="level-item">vllm、Blade-kvt与PD分离</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-14T00:00:00.000Z">2026-08-14</time></p><p class="title"><a href="/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/">QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-13T00:00:00.000Z">2026-08-13</time></p><p class="title"><a href="/notes/2026/08/13/2026-08-13-vllm-dcp-attention/">vLLM Decode Context Parallelism (DCP)：attention 计算与集合通信详解</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-30T00:00:00.000Z">2026-07-30</time></p><p class="title"><a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-00-architecture-and-terms/">00 架构与术语：先把每个对象放回正确的层</a></p><p class="categories"><a href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/">vllm、Blade-kvt与PD分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-30T00:00:00.000Z">2026-07-30</time></p><p class="title"><a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-01-request-lifecycle/">01 请求生命周期：Hybrid Connector 如何接管、等待并交还请求</a></p><p class="categories"><a href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/">vllm、Blade-kvt与PD分离</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-07-30T00:00:00.000Z">2026-07-30</time></p><p class="title"><a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-02-kv-block-lifecycle/">02 KV Block 生命周期：分配、缓存、引用、零化与安全释放</a></p><p class="categories"><a href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/">vllm、Blade-kvt与PD分离</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/08/"><span class="level-start"><span class="level-item">八月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">54</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Attention/"><span class="tag">Attention</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Blade-KVT/"><span class="tag">Blade-KVT</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/DCP/"><span class="tag">DCP</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Hybrid-Connector/"><span class="tag">Hybrid Connector</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/KV-Cache/"><span class="tag">KV Cache</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MLA/"><span class="tag">MLA</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/"><span class="tag">PD 分离</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">51</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
