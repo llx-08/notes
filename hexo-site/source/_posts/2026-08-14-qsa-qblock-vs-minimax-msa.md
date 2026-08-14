@@ -3,6 +3,7 @@ title: "QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀�
 date: 2026-08-14
 tags: []
 ---
+
 # QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention
 
 > 本文回答一个具体问题：vLLM 分支 `qsa-q-block-pooling-clean` 的做法，是否类似 MiniMax Sparse Attention（MSA）？
@@ -79,6 +80,35 @@ q3 → [k3,  k8,  k13]
 - program 数量多；
 - indexer 要物化 `M×N` 的 FP32 logits，并对 M 行分别做 Top-K。
 
+### 2.1 Prefill 仍会生成并缓存全部 K/V
+
+Top-K 控制的是“本层 Attention 读取哪些历史 K/V”，不是“哪些 K/V 被写入 cache”。在某一层开始时，当前 prefill chunk 中所有位置的输入 hidden state 都已经由上一层算好，因此可以一次投影出全部 Q/K/V：
+
+```text
+H[M,Dmodel]
+  ├─ Wq → Q[M,Hq,D]
+  ├─ Wk → K[M,Hkv,D] ─→ 全部写入本层 Key cache
+  └─ Wv → V[M,Hkv,D] ─→ 全部写入本层 Value cache
+```
+
+随后 indexer 为每个 Query 产生 Top-K，Main Attention 只读取这些位置：
+
+```text
+q100 → indices [12,35,...] → read K/V[12,35,...] → O100
+q101 → indices [20,35,...] → read K/V[20,35,...] → O101
+```
+
+即使 token 372 没有被当前任何 Query 选中，它的 K/V 也必须保留，因为未来 decode 的 Query 仍可能选中它。
+
+| 阶段 | Dense GQA | token-level QSA |
+|---|---|---|
+| 生成当前 chunk 的 Q/K/V | 全部 token | 全部 token |
+| 写入主 KV cache | 全部 K/V | 全部 K/V |
+| 选择读取位置 | 全部 causal prefix | 每个 Query 的 Top-K |
+| 产生 Attention 输出 | 每个 Query | 每个 Query |
+
+代码中也是这个顺序：`qwen3_next.py` 先对全部 `hidden_states` 做 `qkv_proj`，再运行 indexer 和 Attention；`flash_attn.py` 在进入 QSA runner 之前调用 `reshape_and_cache_flash` 写入全部 K/V。首个 prefill chunk 虽然直接使用尚在手边的 `key/value`，仍把 `indices` 传给 sparse kernel，所以“首 chunk 不走 paged cache”不等于“不做 Top-K”。
+
 ---
 
 ## 3. QSA Q-block：先合并 Query 的路由
@@ -135,7 +165,59 @@ score : [Bq × G, BN]
 
 ![QSA Q-block 完整 pipeline](/imgs/qsa-msa-03-qsa-qblock-pipeline.svg)
 
-### 3.3 Causal mask 怎么办
+### 3.3 它和普通 Dense GQA/FlashAttention 的 Q tile 有什么关系
+
+**普通 GQA prefill 本来就会沿 Query 位置切 tile。** 设序列 Query 数为 `M`、Query tile 大小为 `BM`，kernel grid 会覆盖约 `ceil(M/BM)` 个 Q tiles；这些 tiles 通常由不同 GPU programs/CTAs 并行处理。每个 program 把一个 Q tile 留在寄存器中，内部循环遍历 K/V tiles，并用 online softmax 累积结果：
+
+```text
+grid 并行维：for each Q tile × batch × head mapping
+
+一个 program 内：
+    load Q tile
+    for each contiguous causal K/V tile:
+        S = Q_tile @ K_tile.T
+        更新 online softmax
+        O_acc += P @ V_tile
+    write O tile
+```
+
+所以“沿 Q 维切分”是对的，但通常不是一个 program 依次循环所有 Q tiles：**Q tiles 构成并行 grid，program 内真正迭代的是 K/V 的 N 维。**
+
+GQA 中一个 KV head 服务 `G=Hq/Hkv` 个 Query heads。逻辑上，同一 KV head 下的工作可以看成 `BM` 个 Query positions 与 `G` 个 Query heads；具体 FlashAttention 实现可能把 position/head 保留为不同轴，也可能 pack GQA，但它们天然访问同一个 KV head 和连续 causal prefix。
+
+token-level sparse QSA 的困难在于：相邻 Query 的 K 地址不再相同。
+
+```text
+Dense GQA：
+q100/q101/q102/q103 都遍历连续 prefix K tiles
+→ 地址规则一致，天然适合宽 Q tile
+
+token QSA：
+q100 → {k12,k35,...}
+q101 → {k20,k91,...}
+→ 每一行需要不同的随机 gather，无法共享同一个稀疏 K tile
+
+QSA Q-block：
+q100/q101/q102/q103 → 同一组 {k12,k35,...}
+→ 显式展平 [Bq,G]，构造 Q[Bq×G,D]
+→ 一次 gather 的 K/V tile 服务 Bq×G 行
+```
+
+因此 QSA Q-block 不是发明了“Q tiling”；它是在 token-level sparse routing 中重新建立 Dense FlashAttention 原本就有的条件：**一个 Q tile 的多行可以消费同一批 K/V 地址。** Dense 路径循环全部连续 K tiles，Q-block 路径循环 Top-K indices 对应的随机 K/V tiles，但二者都执行 `QK → online softmax → PV`。
+
+![Dense GQA、token QSA 与 QSA Q-block 的 Q/K tiling](/imgs/qsa-msa-07-dense-gqa-vs-qblock-tiling.svg)
+
+| 项目 | Dense GQA/FlashAttention | token-level QSA | QSA Q-block |
+|---|---|---|---|
+| Q 分组 | `BM` 个连续位置 | 1 个位置 × `G` heads | `Bq` 个连续位置 × `G` heads |
+| K/V 地址 | 连续 causal prefix | 每个 Query 不同的 Top-K | block 内共享 Top-K |
+| program 内 K/V 循环 | 连续 `BN` tiles | 当前 Query 的 indices tiles | 共享 indices tiles |
+| QK 逻辑形状 | 宽 Q tile × `BN` | `G × BN`，较瘦 | `(Bq×G) × BN` |
+| K/V 复用来源 | dense 连续访问 + GQA | 主要是 GQA heads | GQA heads + Bq positions |
+
+这里的 `BM` 是普通 FlashAttention 的 kernel tile 参数；`Bq` 是 QSA 的路由共享大小；两者都不是 vLLM KV cache 的物理 block size。
+
+### 3.4 Causal mask 怎么办
 
 同一 Q-block 内，较晚 Query 能看到更多历史 token。Indexer 用 block 最后一个 Query 的 causal 上界做 Top-K；Attention kernel 再为每个 Query 单独屏蔽未来位置：
 
@@ -148,7 +230,7 @@ q3 可见上界 = offset + 3
 
 这保证不会看未来，但可能出现一个副作用：某个 KV token 因为对 q3 很重要而进入共享 Top-K，却对 q0 尚不可见。q0 会把它 mask 掉，于是 q0 的实际有效 KV 数少于 S。
 
-### 3.4 QSA Q-block 到底省了什么
+### 3.5 QSA Q-block 到底省了什么
 
 假设 `Bq=4`：
 
@@ -246,13 +328,24 @@ CTA(K2) 只能得到 q0 在 K2 上的 partial output 和 LSE
 
 ### 4.4 MSA 如何填满 Tensor Core
 
-若一个 GQA group 有 `G=16` 个 Query heads，单个 Query 只提供 16 行，MMA 的 M 维太小。MSA 会从同一 KV block 的 Q 列表中取 `ceil(128/G)=8` 个 Query positions：
+若一个 GQA group 有 `G=16` 个 Query heads，单个 Query 只提供 16 行，MMA 的 M 维太小。为了构造约 128 行的 Q MMA tile，MSA 的理想工作单元会从同一 KV block 的 Q 列表中取 `ceil(128/G)=8` 个 Query positions：
 
 ```text
 8 个 Query positions × 16 个 Query heads = 128 行
 ```
 
 它们共享同一个 KV head 和 KV block，于是形成接近 `128×128` 的 score MMA。这与 QSA 的 `Bq×G` 拼接目标相同，只是 MSA 的 Query 可以来自任意位置，而 QSA 必须是连续位置。
+
+这里的 8 是**填满目标 tile 的容量，不是正确性要求**。令某个 `(KV block, KV head)` 的 K2Q 列表长度为 `Cq`：
+
+| K2Q 命中情况 | 执行方式 | 结果 |
+|---|---|---|
+| `Cq = 0` | 不创建该 block 的 Attention work | 没有 Query 需要它，无需计算 |
+| `0 < Cq < ceil(128/G)` | 只 gather 现有 Query，空行 mask/pad | 结果正确，但 Q tile 填不满、Tensor Core 利用率下降 |
+| `Cq ≈ ceil(128/G)` | 一个 work chunk 构成约 128 行 | 最理想的 K/V 复用和 MMA 形状 |
+| `Cq` 很大 | 把 Query 列表切成多个 chunks，由多个 CTA 处理 | 避免热门 block 成为单 CTA 瓶颈 |
+
+因此 MSA 的性能依赖“多个 Query 命中相同 KV block”的统计重叠；没有重叠时不会算错或无法执行，只是退化为很瘦的 Q tile，KV-outer 的主要性能优势消失。长序列 prefill 中每个 Query 会选择多个 block，且论文强制保留 local block，通常会产生足够多的共享命中；官方实现仍通过 `k2q_row_ptr/k2q_q_indices` 的可变长 CSR 和包含 `qsplit_indices/split_counts` 的 schedule 同时覆盖冷门、正常和热门 block。
 
 ---
 
