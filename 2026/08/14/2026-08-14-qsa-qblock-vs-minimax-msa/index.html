@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention 本文回答一个具体问题：vLLM 分支 qsa-q-block-pooling-clean 的做法，是否类似 MiniMax Sparse Attention（MSA）？ 简短答案： 硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。 QSA Q-block 先强制连续"><meta property="og:type" content="blog"><meta property="og:title" content="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention"><meta property="og:url" content="https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention 本文回答一个具体问题：vLLM 分支 qsa-q-block-pooling-clean 的做法，是否类似 MiniMax Sparse Attention（MSA）？ 简短答案： 硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。 QSA Q-block 先强制连续"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-01-overview.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-02-pooling-axes.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-03-qsa-qblock-pipeline.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-04-routing-matrix.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-05-msa-kv-outer-pipeline.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-06-kernel-memory-compare.svg"><meta property="article:published_time" content="2026-08-14T00:00:00.000Z"><meta property="article:modified_time" content="2026-08-14T06:20:14.448Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/qsa-msa-01-overview.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/"},"headline":"QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention","image":[],"datePublished":"2026-08-14T00:00:00.000Z","dateModified":"2026-08-14T06:20:14.448Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention 本文回答一个具体问题：vLLM 分支 qsa-q-block-pooling-clean 的做法，是否类似 MiniMax Sparse Attention（MSA）？ 简短答案： 硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。 QSA Q-block 先强制连续"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention 本文回答一个具体问题：vLLM 分支 qsa-q-block-pooling-clean 的做法，是否类似 MiniMax Sparse Attention（MSA）？ 简短答案： 硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。 QSA Q-block 先强制连续"><meta property="og:type" content="blog"><meta property="og:title" content="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention"><meta property="og:url" content="https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention 本文回答一个具体问题：vLLM 分支 qsa-q-block-pooling-clean 的做法，是否类似 MiniMax Sparse Attention（MSA）？ 简短答案： 硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。 QSA Q-block 先强制连续"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-01-overview.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-02-pooling-axes.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-03-qsa-qblock-pipeline.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-07-dense-gqa-vs-qblock-tiling.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-04-routing-matrix.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-05-msa-kv-outer-pipeline.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/qsa-msa-06-kernel-memory-compare.svg"><meta property="article:published_time" content="2026-08-14T00:00:00.000Z"><meta property="article:modified_time" content="2026-08-14T08:36:56.068Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/qsa-msa-01-overview.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/"},"headline":"QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention","image":[],"datePublished":"2026-08-14T00:00:00.000Z","dateModified":"2026-08-14T08:36:56.068Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention 本文回答一个具体问题：vLLM 分支 qsa-q-block-pooling-clean 的做法，是否类似 MiniMax Sparse Attention（MSA）？ 简短答案： 硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。 QSA Q-block 先强制连续"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/08/14/2026-08-14-qsa-qblock-vs-minimax-msa/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
   (function () {
       function switchTab() {
           if (!location.hash) {
@@ -142,7 +142,7 @@ mjx-container[display="true"] + br {
   display: none;
 }
 </style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
-</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-08-14T00:00:00.000Z" title="8/14/2026, 12:00:00 AM">2026-08-14</time>发表</span><span class="level-item"><time dateTime="2026-08-14T06:20:14.448Z" title="8/14/2026, 6:20:14 AM">2026-08-14</time>更新</span><span class="level-item">25 分钟读完 (大约3809个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention</h1><div class="content"><h1 id="QSA-Q-block-与-MiniMax-MSA：从一个-8×16-的例子理解两种稀疏-Attention"><a href="#QSA-Q-block-与-MiniMax-MSA：从一个-8×16-的例子理解两种稀疏-Attention" class="headerlink" title="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention"></a>QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention</h1><blockquote>
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-08-14T00:00:00.000Z" title="8/14/2026, 12:00:00 AM">2026-08-14</time>发表</span><span class="level-item"><time dateTime="2026-08-14T08:36:56.068Z" title="8/14/2026, 8:36:56 AM">2026-08-14</time>更新</span><span class="level-item">35 分钟读完 (大约5198个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention</h1><div class="content"><h1 id="QSA-Q-block-与-MiniMax-MSA：从一个-8×16-的例子理解两种稀疏-Attention"><a href="#QSA-Q-block-与-MiniMax-MSA：从一个-8×16-的例子理解两种稀疏-Attention" class="headerlink" title="QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention"></a>QSA Q-block 与 MiniMax MSA：从一个 8×16 的例子理解两种稀疏 Attention</h1><blockquote>
 <p>本文回答一个具体问题：vLLM 分支 <code>qsa-q-block-pooling-clean</code> 的做法，是否类似 MiniMax Sparse Attention（MSA）？</p>
 <p>简短答案：<strong>硬件优化目标相同，但“让哪些 Query 共用哪些 KV”的办法不同。</strong><br>QSA Q-block 先强制连续 Query 共用一套 KV token；MSA 保留每个 Query 的独立选择，再把选择同一 KV block 的 Query 动态聚到一起。</p>
 </blockquote>
@@ -216,6 +216,43 @@ mjx-container[display="true"] + br {
 <li>program 数量多；</li>
 <li>indexer 要物化 <code>M×N</code> 的 FP32 logits，并对 M 行分别做 Top-K。</li>
 </ul>
+<h3 id="2-1-Prefill-仍会生成并缓存全部-K-V"><a href="#2-1-Prefill-仍会生成并缓存全部-K-V" class="headerlink" title="2.1 Prefill 仍会生成并缓存全部 K/V"></a>2.1 Prefill 仍会生成并缓存全部 K/V</h3><p>Top-K 控制的是“本层 Attention 读取哪些历史 K/V”，不是“哪些 K/V 被写入 cache”。在某一层开始时，当前 prefill chunk 中所有位置的输入 hidden state 都已经由上一层算好，因此可以一次投影出全部 Q/K/V：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">H[M,Dmodel]</span><br><span class="line">  ├─ Wq → Q[M,Hq,D]</span><br><span class="line">  ├─ Wk → K[M,Hkv,D] ─→ 全部写入本层 Key cache</span><br><span class="line">  └─ Wv → V[M,Hkv,D] ─→ 全部写入本层 Value cache</span><br></pre></td></tr></table></figure>
+
+<p>随后 indexer 为每个 Query 产生 Top-K，Main Attention 只读取这些位置：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">q100 → indices [12,35,...] → read K/V[12,35,...] → O100</span><br><span class="line">q101 → indices [20,35,...] → read K/V[20,35,...] → O101</span><br></pre></td></tr></table></figure>
+
+<p>即使 token 372 没有被当前任何 Query 选中，它的 K/V 也必须保留，因为未来 decode 的 Query 仍可能选中它。</p>
+<table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>Dense GQA</th>
+<th>token-level QSA</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>生成当前 chunk 的 Q/K/V</td>
+<td>全部 token</td>
+<td>全部 token</td>
+</tr>
+<tr>
+<td>写入主 KV cache</td>
+<td>全部 K/V</td>
+<td>全部 K/V</td>
+</tr>
+<tr>
+<td>选择读取位置</td>
+<td>全部 causal prefix</td>
+<td>每个 Query 的 Top-K</td>
+</tr>
+<tr>
+<td>产生 Attention 输出</td>
+<td>每个 Query</td>
+<td>每个 Query</td>
+</tr>
+</tbody></table>
+<p>代码中也是这个顺序：<code>qwen3_next.py</code> 先对全部 <code>hidden_states</code> 做 <code>qkv_proj</code>，再运行 indexer 和 Attention；<code>flash_attn.py</code> 在进入 QSA runner 之前调用 <code>reshape_and_cache_flash</code> 写入全部 K/V。首个 prefill chunk 虽然直接使用尚在手边的 <code>key/value</code>，仍把 <code>indices</code> 传给 sparse kernel，所以“首 chunk 不走 paged cache”不等于“不做 Top-K”。</p>
 <hr>
 <h2 id="3-QSA-Q-block：先合并-Query-的路由"><a href="#3-QSA-Q-block：先合并-Query-的路由" class="headerlink" title="3. QSA Q-block：先合并 Query 的路由"></a>3. QSA Q-block：先合并 Query 的路由</h2><h3 id="3-1-Indexer：沿-Query-方向-max-pooling"><a href="#3-1-Indexer：沿-Query-方向-max-pooling" class="headerlink" title="3.1 Indexer：沿 Query 方向 max-pooling"></a>3.1 Indexer：沿 Query 方向 max-pooling</h3><p>设置 <code>Bq=4</code> 后，QSA 把连续 4 个 Query 组成一组：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Q0 = [q0, q1, q2, q3]</span><br><span class="line">Q1 = [q4, q5, q6, q7]</span><br></pre></td></tr></table></figure>
@@ -238,11 +275,62 @@ mjx-container[display="true"] + br {
 
 <p>每一轮 Top-K tile 中，K/V 只 gather 一次，供 Bq 个 Query 复用。kernel grid 第一维也从约 <code>M</code> 下降为 <code>ceil(M/Bq)</code>。</p>
 <p><img src="/notes/imgs/qsa-msa-03-qsa-qblock-pipeline.svg" alt="QSA Q-block 完整 pipeline"></p>
-<h3 id="3-3-Causal-mask-怎么办"><a href="#3-3-Causal-mask-怎么办" class="headerlink" title="3.3 Causal mask 怎么办"></a>3.3 Causal mask 怎么办</h3><p>同一 Q-block 内，较晚 Query 能看到更多历史 token。Indexer 用 block 最后一个 Query 的 causal 上界做 Top-K；Attention kernel 再为每个 Query 单独屏蔽未来位置：</p>
+<h3 id="3-3-它和普通-Dense-GQA-FlashAttention-的-Q-tile-有什么关系"><a href="#3-3-它和普通-Dense-GQA-FlashAttention-的-Q-tile-有什么关系" class="headerlink" title="3.3 它和普通 Dense GQA/FlashAttention 的 Q tile 有什么关系"></a>3.3 它和普通 Dense GQA/FlashAttention 的 Q tile 有什么关系</h3><p><strong>普通 GQA prefill 本来就会沿 Query 位置切 tile。</strong> 设序列 Query 数为 <code>M</code>、Query tile 大小为 <code>BM</code>，kernel grid 会覆盖约 <code>ceil(M/BM)</code> 个 Q tiles；这些 tiles 通常由不同 GPU programs/CTAs 并行处理。每个 program 把一个 Q tile 留在寄存器中，内部循环遍历 K/V tiles，并用 online softmax 累积结果：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">grid 并行维：for each Q tile × batch × head mapping</span><br><span class="line"></span><br><span class="line">一个 program 内：</span><br><span class="line">    load Q tile</span><br><span class="line">    for each contiguous causal K/V tile:</span><br><span class="line">        S = Q_tile @ K_tile.T</span><br><span class="line">        更新 online softmax</span><br><span class="line">        O_acc += P @ V_tile</span><br><span class="line">    write O tile</span><br></pre></td></tr></table></figure>
+
+<p>所以“沿 Q 维切分”是对的，但通常不是一个 program 依次循环所有 Q tiles：<strong>Q tiles 构成并行 grid，program 内真正迭代的是 K/V 的 N 维。</strong></p>
+<p>GQA 中一个 KV head 服务 <code>G=Hq/Hkv</code> 个 Query heads。逻辑上，同一 KV head 下的工作可以看成 <code>BM</code> 个 Query positions 与 <code>G</code> 个 Query heads；具体 FlashAttention 实现可能把 position/head 保留为不同轴，也可能 pack GQA，但它们天然访问同一个 KV head 和连续 causal prefix。</p>
+<p>token-level sparse QSA 的困难在于：相邻 Query 的 K 地址不再相同。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">Dense GQA：</span><br><span class="line">q100/q101/q102/q103 都遍历连续 prefix K tiles</span><br><span class="line">→ 地址规则一致，天然适合宽 Q tile</span><br><span class="line"></span><br><span class="line">token QSA：</span><br><span class="line">q100 → {k12,k35,...}</span><br><span class="line">q101 → {k20,k91,...}</span><br><span class="line">→ 每一行需要不同的随机 gather，无法共享同一个稀疏 K tile</span><br><span class="line"></span><br><span class="line">QSA Q-block：</span><br><span class="line">q100/q101/q102/q103 → 同一组 {k12,k35,...}</span><br><span class="line">→ 显式展平 [Bq,G]，构造 Q[Bq×G,D]</span><br><span class="line">→ 一次 gather 的 K/V tile 服务 Bq×G 行</span><br></pre></td></tr></table></figure>
+
+<p>因此 QSA Q-block 不是发明了“Q tiling”；它是在 token-level sparse routing 中重新建立 Dense FlashAttention 原本就有的条件：<strong>一个 Q tile 的多行可以消费同一批 K/V 地址。</strong> Dense 路径循环全部连续 K tiles，Q-block 路径循环 Top-K indices 对应的随机 K/V tiles，但二者都执行 <code>QK → online softmax → PV</code>。</p>
+<p><img src="/notes/imgs/qsa-msa-07-dense-gqa-vs-qblock-tiling.svg" alt="Dense GQA、token QSA 与 QSA Q-block 的 Q/K tiling"></p>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>Dense GQA/FlashAttention</th>
+<th>token-level QSA</th>
+<th>QSA Q-block</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Q 分组</td>
+<td><code>BM</code> 个连续位置</td>
+<td>1 个位置 × <code>G</code> heads</td>
+<td><code>Bq</code> 个连续位置 × <code>G</code> heads</td>
+</tr>
+<tr>
+<td>K/V 地址</td>
+<td>连续 causal prefix</td>
+<td>每个 Query 不同的 Top-K</td>
+<td>block 内共享 Top-K</td>
+</tr>
+<tr>
+<td>program 内 K/V 循环</td>
+<td>连续 <code>BN</code> tiles</td>
+<td>当前 Query 的 indices tiles</td>
+<td>共享 indices tiles</td>
+</tr>
+<tr>
+<td>QK 逻辑形状</td>
+<td>宽 Q tile × <code>BN</code></td>
+<td><code>G × BN</code>，较瘦</td>
+<td><code>(Bq×G) × BN</code></td>
+</tr>
+<tr>
+<td>K/V 复用来源</td>
+<td>dense 连续访问 + GQA</td>
+<td>主要是 GQA heads</td>
+<td>GQA heads + Bq positions</td>
+</tr>
+</tbody></table>
+<p>这里的 <code>BM</code> 是普通 FlashAttention 的 kernel tile 参数；<code>Bq</code> 是 QSA 的路由共享大小；两者都不是 vLLM KV cache 的物理 block size。</p>
+<h3 id="3-4-Causal-mask-怎么办"><a href="#3-4-Causal-mask-怎么办" class="headerlink" title="3.4 Causal mask 怎么办"></a>3.4 Causal mask 怎么办</h3><p>同一 Q-block 内，较晚 Query 能看到更多历史 token。Indexer 用 block 最后一个 Query 的 causal 上界做 Top-K；Attention kernel 再为每个 Query 单独屏蔽未来位置：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">q0 可见上界 = offset + 0</span><br><span class="line">q1 可见上界 = offset + 1</span><br><span class="line">q2 可见上界 = offset + 2</span><br><span class="line">q3 可见上界 = offset + 3</span><br></pre></td></tr></table></figure>
 
 <p>这保证不会看未来，但可能出现一个副作用：某个 KV token 因为对 q3 很重要而进入共享 Top-K，却对 q0 尚不可见。q0 会把它 mask 掉，于是 q0 的实际有效 KV 数少于 S。</p>
-<h3 id="3-4-QSA-Q-block-到底省了什么"><a href="#3-4-QSA-Q-block-到底省了什么" class="headerlink" title="3.4 QSA Q-block 到底省了什么"></a>3.4 QSA Q-block 到底省了什么</h3><p>假设 <code>Bq=4</code>：</p>
+<h3 id="3-5-QSA-Q-block-到底省了什么"><a href="#3-5-QSA-Q-block-到底省了什么" class="headerlink" title="3.5 QSA Q-block 到底省了什么"></a>3.5 QSA Q-block 到底省了什么</h3><p>假设 <code>Bq=4</code>：</p>
 <table>
 <thead>
 <tr>
@@ -334,10 +422,41 @@ mjx-container[display="true"] + br {
 </ol>
 <p>热门 KV block 可能被大量 Query 选择。MSA scheduler 会把它的 Query 列表切成多个 chunk，分发给多个 CTA，并提前给每个 partial 分配输出 slot，从而避免 atomic write 冲突。</p>
 <p><img src="/notes/imgs/qsa-msa-05-msa-kv-outer-pipeline.svg" alt="MSA KV-outer 完整 pipeline"></p>
-<h3 id="4-4-MSA-如何填满-Tensor-Core"><a href="#4-4-MSA-如何填满-Tensor-Core" class="headerlink" title="4.4 MSA 如何填满 Tensor Core"></a>4.4 MSA 如何填满 Tensor Core</h3><p>若一个 GQA group 有 <code>G=16</code> 个 Query heads，单个 Query 只提供 16 行，MMA 的 M 维太小。MSA 会从同一 KV block 的 Q 列表中取 <code>ceil(128/G)=8</code> 个 Query positions：</p>
+<h3 id="4-4-MSA-如何填满-Tensor-Core"><a href="#4-4-MSA-如何填满-Tensor-Core" class="headerlink" title="4.4 MSA 如何填满 Tensor Core"></a>4.4 MSA 如何填满 Tensor Core</h3><p>若一个 GQA group 有 <code>G=16</code> 个 Query heads，单个 Query 只提供 16 行，MMA 的 M 维太小。为了构造约 128 行的 Q MMA tile，MSA 的理想工作单元会从同一 KV block 的 Q 列表中取 <code>ceil(128/G)=8</code> 个 Query positions：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">8 个 Query positions × 16 个 Query heads = 128 行</span><br></pre></td></tr></table></figure>
 
 <p>它们共享同一个 KV head 和 KV block，于是形成接近 <code>128×128</code> 的 score MMA。这与 QSA 的 <code>Bq×G</code> 拼接目标相同，只是 MSA 的 Query 可以来自任意位置，而 QSA 必须是连续位置。</p>
+<p>这里的 8 是<strong>填满目标 tile 的容量，不是正确性要求</strong>。令某个 <code>(KV block, KV head)</code> 的 K2Q 列表长度为 <code>Cq</code>：</p>
+<table>
+<thead>
+<tr>
+<th>K2Q 命中情况</th>
+<th>执行方式</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Cq = 0</code></td>
+<td>不创建该 block 的 Attention work</td>
+<td>没有 Query 需要它，无需计算</td>
+</tr>
+<tr>
+<td><code>0 &lt; Cq &lt; ceil(128/G)</code></td>
+<td>只 gather 现有 Query，空行 mask/pad</td>
+<td>结果正确，但 Q tile 填不满、Tensor Core 利用率下降</td>
+</tr>
+<tr>
+<td><code>Cq ≈ ceil(128/G)</code></td>
+<td>一个 work chunk 构成约 128 行</td>
+<td>最理想的 K/V 复用和 MMA 形状</td>
+</tr>
+<tr>
+<td><code>Cq</code> 很大</td>
+<td>把 Query 列表切成多个 chunks，由多个 CTA 处理</td>
+<td>避免热门 block 成为单 CTA 瓶颈</td>
+</tr>
+</tbody></table>
+<p>因此 MSA 的性能依赖“多个 Query 命中相同 KV block”的统计重叠；没有重叠时不会算错或无法执行，只是退化为很瘦的 Q tile，KV-outer 的主要性能优势消失。长序列 prefill 中每个 Query 会选择多个 block，且论文强制保留 local block，通常会产生足够多的共享命中；官方实现仍通过 <code>k2q_row_ptr/k2q_q_indices</code> 的可变长 CSR 和包含 <code>qsplit_indices/split_counts</code> 的 schedule 同时覆盖冷门、正常和热门 block。</p>
 <hr>
 <h2 id="5-一张表看懂本质区别"><a href="#5-一张表看懂本质区别" class="headerlink" title="5. 一张表看懂本质区别"></a>5. 一张表看懂本质区别</h2><table>
 <thead>

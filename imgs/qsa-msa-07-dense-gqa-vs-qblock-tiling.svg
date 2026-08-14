@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="1400" viewBox="0 0 1900 1400" role="img" aria-labelledby="title desc" data-doc="qsa-qblock-vs-minimax-msa">
+  <title id="title">Dense GQA、token-level QSA 与 QSA Q-block 的 Query 和 KV tiling 对比</title>
+  <desc id="desc">展示普通 FlashAttention 沿 Query 维组成并行 tile 并在 program 内遍历连续 KV tiles，token-level QSA 因每个 Query indices 不同只能形成较瘦的 Q tile，以及 QSA Q-block 通过共享 indices 构造 Bq 乘 G 行的宽 Q tile。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="10" refY="3" orient="auto"><path d="M0 0L0 6L10 3Z" fill="#475569"/></marker>
+    <filter id="shadow"><feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity=".13"/></filter>
+    <style>
+      .title{font:700 34px sans-serif;fill:#0f172a}.sub{font:500 17px sans-serif;fill:#475569}
+      .ph{font:700 24px sans-serif;fill:#0f172a}.h{font:700 19px sans-serif;fill:#0f172a}
+      .l{font:600 16px sans-serif;fill:#1e293b}.sm{font:500 14px sans-serif;fill:#475569}
+      .mono{font:600 14px ui-monospace,monospace;fill:#0f172a}.white{font:600 14px ui-monospace,monospace;fill:#fff}
+      .panel{fill:#fff;stroke-width:3;rx:24;filter:url(#shadow)}.box{fill:#fff;stroke:#cbd5e1;stroke-width:2;rx:15;filter:url(#shadow)}
+      .arr{stroke:#475569;stroke-width:3;fill:none;marker-end:url(#arrow)}.grid{stroke:#cbd5e1;stroke-width:1.3}
+    </style>
+  </defs>
+  <rect width="1900" height="1400" fill="#f8fafc"/>
+  <text x="950" y="52" text-anchor="middle" class="title">普通 GQA 也切 Q tile；QSA Q-block 解决的是“稀疏地址无法共享”</text>
+  <text x="950" y="86" text-anchor="middle" class="sub">Q tiles 通常属于并行 grid；每个 program/CTA 内部沿 K/V 的 N 维循环，并维护 online softmax</text>
+
+  <!-- Panel 1: dense -->
+  <rect x="45" y="120" width="575" height="980" class="panel" stroke="#0891b2"/>
+  <rect x="45" y="120" width="575" height="82" rx="22" fill="#0891b2"/>
+  <text x="332" y="157" text-anchor="middle" class="ph" fill="#fff">普通 Dense GQA / FlashAttention</text>
+  <text x="332" y="184" text-anchor="middle" class="sm" fill="#ecfeff">连续 causal prefix：地址天然一致</text>
+
+  <text x="90" y="240" class="h">① Q 维切成 BM-row tiles</text>
+  <text x="90" y="265" class="sm">示意 attention mask；青框是一个 Q tile</text>
+  <g transform="translate(145,292)">
+    <rect x="0" y="0" width="360" height="240" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+    <!-- triangular causal region -->
+    <rect x="0" y="0" width="45" height="30" fill="#67e8f9"/><rect x="0" y="30" width="90" height="30" fill="#67e8f9"/>
+    <rect x="0" y="60" width="135" height="30" fill="#67e8f9"/><rect x="0" y="90" width="180" height="30" fill="#67e8f9"/>
+    <rect x="0" y="120" width="225" height="30" fill="#a5f3fc"/><rect x="0" y="150" width="270" height="30" fill="#a5f3fc"/>
+    <rect x="0" y="180" width="315" height="30" fill="#a5f3fc"/><rect x="0" y="210" width="360" height="30" fill="#a5f3fc"/>
+    <g class="grid"><path d="M45 0V240M90 0V240M135 0V240M180 0V240M225 0V240M270 0V240M315 0V240"/><path d="M0 30H360M0 60H360M0 90H360M0 120H360M0 150H360M0 180H360M0 210H360"/></g>
+    <rect x="-7" y="84" width="194" height="102" rx="8" fill="none" stroke="#0284c7" stroke-width="5"/>
+    <text x="-48" y="112" class="mono">q3</text><text x="-48" y="142" class="mono">q4</text><text x="-48" y="172" class="mono">q5</text>
+    <text x="96" y="106" text-anchor="middle" class="mono" fill="#0369a1">BM rows</text>
+  </g>
+
+  <rect x="85" y="565" width="495" height="112" class="box"/>
+  <text x="110" y="597" class="h">② GQA head 映射</text>
+  <text x="110" y="627" class="mono">G = Hq / Hkv</text>
+  <text x="110" y="653" class="sm">同一 KV head 服务 G 个 Q heads；实现可分轴或 pack</text>
+
+  <path d="M332 680V710" class="arr"/>
+  <rect x="85" y="720" width="495" height="215" class="box"/>
+  <text x="110" y="752" class="h">③ program 内遍历连续 K/V tiles</text>
+  <g transform="translate(110,778)">
+    <rect x="0" y="0" width="82" height="48" rx="8" fill="#bae6fd"/><rect x="92" y="0" width="82" height="48" rx="8" fill="#7dd3fc"/>
+    <rect x="184" y="0" width="82" height="48" rx="8" fill="#38bdf8"/><rect x="276" y="0" width="82" height="48" rx="8" fill="#0ea5e9"/>
+    <rect x="368" y="0" width="82" height="48" rx="8" fill="#e2e8f0"/>
+    <text x="41" y="30" text-anchor="middle" class="mono">KV0</text><text x="133" y="30" text-anchor="middle" class="mono">KV1</text>
+    <text x="225" y="30" text-anchor="middle" class="white">KV2</text><text x="317" y="30" text-anchor="middle" class="white">KV3</text>
+    <text x="409" y="30" text-anchor="middle" class="mono">mask</text>
+  </g>
+  <text x="110" y="860" class="mono">QK: [BM(×G),D] × [D,BN]</text>
+  <text x="110" y="889" class="mono">PV: [BM(×G),BN] × [BN,D]</text>
+  <text x="110" y="918" class="sm">每行 causal 上界不同，用 2D mask 处理</text>
+
+  <rect x="85" y="965" width="495" height="92" rx="14" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+  <text x="332" y="998" text-anchor="middle" class="l">关键条件：Q tile 各行访问同一连续 KV 序列</text>
+  <text x="332" y="1027" text-anchor="middle" class="sm">无需强制共享路由；Dense 天然有共同的地址规则</text>
+
+  <!-- Panel 2: token sparse -->
+  <rect x="662" y="120" width="575" height="980" class="panel" stroke="#f97316"/>
+  <rect x="662" y="120" width="575" height="82" rx="22" fill="#f97316"/>
+  <text x="949" y="157" text-anchor="middle" class="ph" fill="#fff">原始 token-level QSA</text>
+  <text x="949" y="184" text-anchor="middle" class="sm" fill="#fff7ed">每个 Query 的随机 Top-K 地址不同</text>
+
+  <text x="707" y="240" class="h">① 稀疏路由的行互不相同</text>
+  <text x="707" y="265" class="sm">橙色方块表示该 Query 选择对应 KV token</text>
+  <g transform="translate(762,292)">
+    <rect x="0" y="0" width="360" height="240" fill="#fff7ed" stroke="#94a3b8" stroke-width="2"/>
+    <g class="grid"><path d="M45 0V240M90 0V240M135 0V240M180 0V240M225 0V240M270 0V240M315 0V240"/><path d="M0 30H360M0 60H360M0 90H360M0 120H360M0 150H360M0 180H360M0 210H360"/></g>
+    <g fill="#fb923c">
+      <rect x="49" y="4" width="37" height="22" rx="5"/><rect x="184" y="4" width="37" height="22" rx="5"/><rect x="319" y="4" width="37" height="22" rx="5"/>
+      <rect x="94" y="34" width="37" height="22" rx="5"/><rect x="229" y="34" width="37" height="22" rx="5"/><rect x="319" y="34" width="37" height="22" rx="5"/>
+      <rect x="49" y="64" width="37" height="22" rx="5"/><rect x="139" y="64" width="37" height="22" rx="5"/><rect x="274" y="64" width="37" height="22" rx="5"/>
+      <rect x="4" y="94" width="37" height="22" rx="5"/><rect x="184" y="94" width="37" height="22" rx="5"/><rect x="274" y="94" width="37" height="22" rx="5"/>
+      <rect x="94" y="124" width="37" height="22" rx="5"/><rect x="229" y="124" width="37" height="22" rx="5"/><rect x="319" y="124" width="37" height="22" rx="5"/>
+      <rect x="4" y="154" width="37" height="22" rx="5"/><rect x="139" y="154" width="37" height="22" rx="5"/><rect x="274" y="154" width="37" height="22" rx="5"/>
+      <rect x="49" y="184" width="37" height="22" rx="5"/><rect x="184" y="184" width="37" height="22" rx="5"/><rect x="319" y="184" width="37" height="22" rx="5"/>
+      <rect x="4" y="214" width="37" height="22" rx="5"/><rect x="229" y="214" width="37" height="22" rx="5"/><rect x="274" y="214" width="37" height="22" rx="5"/>
+    </g>
+    <text x="-48" y="22" class="mono">q0</text><text x="-48" y="52" class="mono">q1</text><text x="-48" y="82" class="mono">q2</text><text x="-48" y="112" class="mono">q3</text>
+  </g>
+
+  <rect x="702" y="565" width="495" height="112" class="box"/>
+  <text x="727" y="597" class="h">② 一个 program 只安全处理一个位置</text>
+  <text x="727" y="627" class="mono">Q tile = [G,D]</text>
+  <text x="727" y="653" class="sm">G 个 Q heads 共享 KV head，但相邻位置不能共用 indices</text>
+
+  <path d="M949 680V710" class="arr"/>
+  <rect x="702" y="720" width="495" height="215" class="box"/>
+  <text x="727" y="752" class="h">③ 对每个 Query 重做随机 gather</text>
+  <rect x="727" y="778" width="445" height="42" rx="8" fill="#ffedd5"/><text x="949" y="805" text-anchor="middle" class="mono">q0 → {k1,k4,k7} → load K/V</text>
+  <rect x="727" y="828" width="445" height="42" rx="8" fill="#fed7aa"/><text x="949" y="855" text-anchor="middle" class="mono">q1 → {k2,k5,k7} → load K/V again</text>
+  <rect x="727" y="878" width="445" height="42" rx="8" fill="#fdba74"/><text x="949" y="905" text-anchor="middle" class="mono">q2 → {k1,k3,k6} → load K/V again</text>
+
+  <rect x="702" y="965" width="495" height="92" rx="14" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+  <text x="949" y="998" text-anchor="middle" class="l">瓶颈：不是不会切 Q，而是切后没有共同的 K 地址</text>
+  <text x="949" y="1027" text-anchor="middle" class="sm">逻辑 QK 约为 [G,D] × [D,BN]，M 维较瘦</text>
+
+  <!-- Panel 3: qblock -->
+  <rect x="1279" y="120" width="575" height="980" class="panel" stroke="#2563eb"/>
+  <rect x="1279" y="120" width="575" height="82" rx="22" fill="#2563eb"/>
+  <text x="1566" y="157" text-anchor="middle" class="ph" fill="#fff">QSA Q-block</text>
+  <text x="1566" y="184" text-anchor="middle" class="sm" fill="#eff6ff">连续 Bq 个位置共享同一组 token-level Top-K</text>
+
+  <text x="1324" y="240" class="h">① Q-block 内稀疏路由行完全相同</text>
+  <text x="1324" y="265" class="sm">蓝框内 Bq=4；下一组仍可选择另一套路由</text>
+  <g transform="translate(1379,292)">
+    <rect x="0" y="0" width="360" height="240" fill="#eff6ff" stroke="#94a3b8" stroke-width="2"/>
+    <g class="grid"><path d="M45 0V240M90 0V240M135 0V240M180 0V240M225 0V240M270 0V240M315 0V240"/><path d="M0 30H360M0 60H360M0 90H360M0 120H360M0 150H360M0 180H360M0 210H360"/></g>
+    <g fill="#2563eb">
+      <rect x="49" y="4" width="37" height="22" rx="5"/><rect x="184" y="4" width="37" height="22" rx="5"/><rect x="319" y="4" width="37" height="22" rx="5"/>
+      <rect x="49" y="34" width="37" height="22" rx="5"/><rect x="184" y="34" width="37" height="22" rx="5"/><rect x="319" y="34" width="37" height="22" rx="5"/>
+      <rect x="49" y="64" width="37" height="22" rx="5"/><rect x="184" y="64" width="37" height="22" rx="5"/><rect x="319" y="64" width="37" height="22" rx="5"/>
+      <rect x="49" y="94" width="37" height="22" rx="5"/><rect x="184" y="94" width="37" height="22" rx="5"/><rect x="319" y="94" width="37" height="22" rx="5"/>
+    </g>
+    <g fill="#60a5fa">
+      <rect x="4" y="124" width="37" height="22" rx="5"/><rect x="229" y="124" width="37" height="22" rx="5"/><rect x="274" y="124" width="37" height="22" rx="5"/>
+      <rect x="4" y="154" width="37" height="22" rx="5"/><rect x="229" y="154" width="37" height="22" rx="5"/><rect x="274" y="154" width="37" height="22" rx="5"/>
+      <rect x="4" y="184" width="37" height="22" rx="5"/><rect x="229" y="184" width="37" height="22" rx="5"/><rect x="274" y="184" width="37" height="22" rx="5"/>
+      <rect x="4" y="214" width="37" height="22" rx="5"/><rect x="229" y="214" width="37" height="22" rx="5"/><rect x="274" y="214" width="37" height="22" rx="5"/>
+    </g>
+    <rect x="-7" y="-7" width="374" height="134" rx="9" fill="none" stroke="#1d4ed8" stroke-width="5"/>
+    <text x="-48" y="22" class="mono">q0</text><text x="-48" y="52" class="mono">q1</text><text x="-48" y="82" class="mono">q2</text><text x="-48" y="112" class="mono">q3</text>
+  </g>
+
+  <rect x="1319" y="565" width="495" height="112" class="box"/>
+  <text x="1344" y="597" class="h">② 显式展平 position × GQA heads</text>
+  <text x="1344" y="627" class="mono">Q tile = [Bq × G,D]</text>
+  <text x="1344" y="653" class="sm">代码：offs_q=offs_m/G；offs_h=offs_m%G</text>
+
+  <path d="M1566 680V710" class="arr"/>
+  <rect x="1319" y="720" width="495" height="215" class="box"/>
+  <text x="1344" y="752" class="h">③ program 内遍历共享 indices tiles</text>
+  <rect x="1344" y="778" width="445" height="48" rx="8" fill="#dbeafe"/><text x="1566" y="808" text-anchor="middle" class="mono">read indices[q_block_start] once</text>
+  <rect x="1344" y="838" width="445" height="48" rx="8" fill="#93c5fd"/><text x="1566" y="868" text-anchor="middle" class="mono">gather K/V[BN,D] once per tile</text>
+  <rect x="1344" y="898" width="445" height="27" rx="7" fill="#2563eb"/><text x="1566" y="917" text-anchor="middle" class="white">QK [Bq×G,BN] → softmax → PV</text>
+
+  <rect x="1319" y="965" width="495" height="92" rx="14" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="1566" y="998" text-anchor="middle" class="l">恢复 Dense tile 的关键性质：多行消费相同 K/V</text>
+  <text x="1566" y="1027" text-anchor="middle" class="sm">但地址仍是 Top-K token gather，不是连续 dense prefix</text>
+
+  <!-- Bottom comparison -->
+  <rect x="45" y="1135" width="1809" height="215" rx="22" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+  <text x="85" y="1175" class="h">执行维度：不要把“Q tile 切分”和“program 内循环”混在一起</text>
+  <g transform="translate(85,1205)">
+    <rect x="0" y="0" width="525" height="108" rx="14" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+    <text x="22" y="32" class="l">Dense GQA</text><text x="22" y="61" class="mono">grid.x ≈ ceil(M/BM)</text>
+    <text x="22" y="87" class="sm">每个 program 循环连续 causal K/V tiles</text>
+    <rect x="597" y="0" width="525" height="108" rx="14" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+    <text x="619" y="32" class="l">token-level QSA</text><text x="619" y="61" class="mono">grid.x ≈ M</text>
+    <text x="619" y="87" class="sm">每个 program 循环该 Query 的 Top-K tiles</text>
+    <rect x="1194" y="0" width="525" height="108" rx="14" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="1216" y="32" class="l">QSA Q-block</text><text x="1216" y="61" class="mono">grid.x ≈ ceil(M/Bq)</text>
+    <text x="1216" y="87" class="sm">每个 program 循环共享 Top-K tiles；per-Q causal mask</text>
+  </g>
+  <text x="950" y="1380" text-anchor="middle" class="sub">共同数学骨架：分块 QK → online softmax 状态 (m,l,acc) → 分块 PV；区别在 K/V 地址集合与 Q tile 能否复用它</text>
+</svg>
