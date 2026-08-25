@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>00 · 背景与动机 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="00 · 背景与动机 1. 从一个问题变成三个问题 起点是一个很具体的工程问题。我们在内部 vLLM 上把 社区 Mooncake Store 接成了 HybridConnector 的一个 KVS backend ，于是同一套部署里同时有两条 KV 通路： KVT （blade-kvt）：单次请求的 Prefill → Decode 传输 KVS （Mooncake Store）：跨请求、跨实例"><meta property="og:type" content="blog"><meta property="og:title" content="00 · 背景与动机"><meta property="og:url" content="https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-00-background-and-motivation/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="00 · 背景与动机 1. 从一个问题变成三个问题 起点是一个很具体的工程问题。我们在内部 vLLM 上把 社区 Mooncake Store 接成了 HybridConnector 的一个 KVS backend ，于是同一套部署里同时有两条 KV 通路： KVT （blade-kvt）：单次请求的 Prefill → Decode 传输 KVS （Mooncake Store）：跨请求、跨实例"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/mcstore_layering.svg"><meta property="article:published_time" content="2026-08-25T00:00:00.000Z"><meta property="article:modified_time" content="2026-08-25T07:20:36.999Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="vLLM"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="PD 分离"><meta property="article:tag" content="KV Cache"><meta property="article:tag" content="Mooncake"><meta property="article:tag" content="cache-aware 调度"><meta property="article:tag" content="驱逐策略"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/mcstore_layering.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-00-background-and-motivation/"},"headline":"00 · 背景与动机","image":[],"datePublished":"2026-08-25T00:00:00.000Z","dateModified":"2026-08-25T07:20:36.999Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"00 · 背景与动机 1. 从一个问题变成三个问题 起点是一个很具体的工程问题。我们在内部 vLLM 上把 社区 Mooncake Store 接成了 HybridConnector 的一个 KVS backend ，于是同一套部署里同时有两条 KV 通路： KVT （blade-kvt）：单次请求的 Prefill → Decode 传输 KVS （Mooncake Store）：跨请求、跨实例"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-00-background-and-motivation/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-08-25T00:00:00.000Z" title="8/25/2026, 12:00:00 AM">2026-08-25</time>发表</span><span class="level-item"><time dateTime="2026-08-25T07:20:36.999Z" title="8/25/2026, 7:20:36 AM">2026-08-25</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></span><span class="level-item">10 分钟读完 (大约1429个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">00 · 背景与动机</h1><div class="content"><h1 id="00-·-背景与动机"><a href="#00-·-背景与动机" class="headerlink" title="00 · 背景与动机"></a>00 · 背景与动机</h1><h2 id="1-从一个问题变成三个问题"><a href="#1-从一个问题变成三个问题" class="headerlink" title="1. 从一个问题变成三个问题"></a>1. 从一个问题变成三个问题</h2><p>起点是一个很具体的工程问题。我们在内部 vLLM 上把<strong>社区 Mooncake Store 接成了 HybridConnector 的一个<br>KVS backend</strong>，于是同一套部署里同时有两条 KV 通路：</p>
+<ul>
+<li><strong>KVT</strong>（blade-kvt）：单次请求的 Prefill → Decode 传输</li>
+<li><strong>KVS</strong>（Mooncake Store）：跨请求、跨实例的共享 KV 存储</li>
+</ul>
+<p><img src="/notes/imgs/mcstore_layering.svg" alt="Mooncake Store 与 blade-kvt 分层"></p>
+<p>有了共享 store 之后，一个自然的问题是：<strong>PD 分离下要不要做 cache-aware 的 Prefill 节点选择？</strong></p>
+<p>朴素直觉说要。把请求发给「已经持有这段前缀的那个 P 节点」，就能省一次 store 读。<br>agentic 负载尤其应该受益——同一个会话的相邻两轮共享几乎全部前缀，而轮次间隔只有几秒。</p>
+<p>但四轮实验下来，这个问题被逐步改写成了三个更精确的问题：</p>
+<ol>
+<li><strong>cache-aware 调度的收益取决于什么？</strong><br>答案不是「命中率高低」，而是<strong>选错节点的代价</strong>。</li>
+<li><strong>什么条件下这个代价才够大？</strong><br>store 读昂贵时——窄带宽，或者 store 饱和到不再保证命中。</li>
+<li><strong>我们之前测到的收益是真的吗？</strong><br>四次结论里三次是基础设施缺陷伪装的。</li>
+</ol>
+<p>这一系列的大部分篇幅，其实是在回答第 3 个问题。</p>
+<h2 id="2-为什么值得较真"><a href="#2-为什么值得较真" class="headerlink" title="2. 为什么值得较真"></a>2. 为什么值得较真</h2><p>因为这类实验有一个结构性的困难：<strong>基础设施缺陷比策略差异更容易主导结果</strong>。</p>
+<p>调度策略的收益量级通常在个位数百分比。而一条网卡绑错、一个护栏阈值失效、一个 store 贴着驱逐水位，<br>带来的偏差都是几十个百分点。<strong>信号比噪声小一个数量级</strong>，所以任何一次没有对照的测量都不可信。</p>
+<p>我们真实经历过：同一个 <code>prefix_affinity</code> 策略，在三次实验里分别**落后 37%、领先 27%、领先 7%**。<br>如果只跑一次就写结论，三次都会得出不同的、且都是错的判断。</p>
+<h2 id="3-环境与拓扑"><a href="#3-环境与拓扑" class="headerlink" title="3. 环境与拓扑"></a>3. 环境与拓扑</h2><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">test1  10.56.46.228   p0:8000(gpu0,1)  p1:8001(gpu2,3)  + mooncake master:50051</span><br><span class="line">test2  10.56.47.155   p2:8000          p3:8001</span><br><span class="line">test3  10.56.44.17    p4:8000          p5:8001</span><br><span class="line">test4  10.56.46.239   p6:8000          d0:8100</span><br></pre></td></tr></table></figure>
+
+<p>4 台机器 × 4 张 GB200(189GB) = 16 卡，恰好是 8 个 tp2 服务 = <strong>7 Prefill + 1 Decode</strong>。<br>共享盘 <code>/dashscope/caches/workspace/llx/</code>，实验目录 <code>runs/mcstore/</code>。</p>
+<p>配置形态：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Prefill</th>
+<th>Decode</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>kv_role</code></td>
+<td><code>kv_both</code>（mooncake KVS 强制要求）</td>
+<td><code>kv_consumer</code></td>
+</tr>
+<tr>
+<td><code>backend</code></td>
+<td><code>kvs+kvt</code></td>
+<td><code>kvt</code></td>
+</tr>
+<tr>
+<td>prefix caching</td>
+<td>开</td>
+<td>关</td>
+</tr>
+<tr>
+<td>store segment</td>
+<td>100 GB host DRAM</td>
+<td>不挂 store</td>
+</tr>
+</tbody></table>
+<p>请求协议：<strong>客户端只打 D</strong>，D 通过 naming service 自己找 P 拉 prefill；<br>要指定 P 就在给 D 的 <code>kv_transfer_params</code> 里放 <code>remote_host</code> + <code>remote_port</code>（= P 的 web_port + 20000）。</p>
+<h3 id="两个必须记住的环境事实"><a href="#两个必须记住的环境事实" class="headerlink" title="两个必须记住的环境事实"></a>两个必须记住的环境事实</h3><p><strong>跳板机约 1/3 概率失败</strong>（<code>channel 0: open failed: connect failed: Bad file descriptor</code>）。<br>所有编排必须带重试，而且<strong>绝不能用 <code>2&gt;/dev/null</code> 屏蔽 ssh 错误</strong>——我们因此有过一次静默派发失败<br>却显示成功。另外 test1 无法免密 ssh 到 test2/3/4，所以跨机编排只能从笔记本驱动。</p>
+<p><strong>共享盘是单流限速，不是总带宽限速。</strong></p>
+<table>
+<thead>
+<tr>
+<th>并发流</th>
+<th>单机速率</th>
+<th>4 机聚合</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1（<code>cp</code>）</td>
+<td>71 MB/s</td>
+<td>—</td>
+</tr>
+<tr>
+<td>8</td>
+<td>452 MB/s</td>
+<td>—</td>
+</tr>
+<tr>
+<td>12</td>
+<td>~490 MB/s</td>
+<td><strong>~2.3 GB/s</strong></td>
+</tr>
+</tbody></table>
+<p>这个发现的影响超出预热本身：<strong>vLLM 的 safetensors 加载器单流读 280 GB 模型要 90 分钟，<br>其中绝大部分是白等</strong>。我们的绕法是先 12 并行拷到 <code>/dev/shm</code>，再用 <code>MODEL_ROOT=/dev/shm/models</code><br>让 vLLM 从内存读。真正的红利是<strong>让「重启整个集群」从一小时变成 3 分钟</strong>——而交替重复的对照实验<br>本来就需要反复重启，这从「不可行」变成了「默认做法」。</p>
+<h2 id="4-两个阶段的模型"><a href="#4-两个阶段的模型" class="headerlink" title="4. 两个阶段的模型"></a>4. 两个阶段的模型</h2><table>
+<thead>
+<tr>
+<th></th>
+<th>阶段一</th>
+<th>阶段二</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>模型</td>
+<td>Qwen3-32B</td>
+<td>qwen3-150b-a14b-256k-1106</td>
+</tr>
+<tr>
+<td>架构</td>
+<td>dense</td>
+<td>MoE（128 experts top-8），<strong>非 hybrid</strong></td>
+</tr>
+<tr>
+<td>KV/token</td>
+<td>256 KiB（8 KV head, bf16）</td>
+<td><strong>60 KiB</strong>（4 KV head, fp8）</td>
+</tr>
+<tr>
+<td>权重</td>
+<td>bf16 原生</td>
+<td><strong>BF16 checkpoint + 在线 fp8 量化</strong></td>
+</tr>
+<tr>
+<td>上下文</td>
+<td>26k（8 轮）</td>
+<td>46k p50 / 87k max（24 轮）</td>
+</tr>
+</tbody></table>
+<p>阶段二模型的几个关键事实（踩过才知道）：</p>
+<ul>
+<li><strong>不是 fp8 权重，是 BF16 checkpoint</strong>（<code>quantization_config: {}</code>，index 里没有任何 scale 键，<br>280.3 GiB / 150B 参数 = 1.87 字节/参数）。fp8 只能在线量化：<br><code>--quantization fp8</code> + <code>VLLM_QUANTIZATION_LAYER_WISE=1</code>（否则 280 GB 的 BF16 加载峰值）。</li>
+<li>**<code>max_position_embeddings</code> 只有 35840，<code>rope_scaling: null</code>，但 <code>rope_theta = 1e7</code>**。<br>开到 256k 用 <code>--hf-overrides '{"max_position_embeddings":262144}'</code>——这是生产的做法，<br>比 <code>VLLM_ALLOW_LONG_MAX_MODEL_LEN</code> 干净。</li>
+<li><strong>fp8 不需要 BLADNN</strong>（<code>VLLM_FP8_USE_BLADNN=0</code>）；BLADNN 只对 fp4 是硬依赖。</li>
+<li><strong>非 hybrid</strong>（<code>Qwen3MoeForCausalLM</code>，无 linear attention 层），所以 mooncake store 那条路能走通——<br>hybrid 模型需要 M2~M6 那批工作才能支持。</li>
+<li>无害告警：<code>No module named 'triton_kernels.matmul_ogs'</code>（gpt-oss 专用 triton MoE 路径），<br>fp8 MoE 走 cutlass/DeepGEMM 不受影响。</li>
+</ul>
+<h3 id="一个必须修正的直觉"><a href="#一个必须修正的直觉" class="headerlink" title="一个必须修正的直觉"></a>一个必须修正的直觉</h3><p>阶段二换成更长的上下文（26k → 46k~87k）时，我预期「上下文更长 → store 成本更高」。<strong>这不成立</strong>：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Qwen3-32B  : 8 KV head × bf16 → 256 KiB/token → 26k 上下文 = 6.4 GB/请求</span><br><span class="line">qwen3-150b : 4 KV head × fp8  →  60 KiB/token → 85k 上下文 = 5.1 GB/请求</span><br></pre></td></tr></table></figure>
+
+<p><strong>每请求要搬的字节数反而下降了。</strong> KV 密度差 4 倍，把上下文长度的增长完全抵消掉。<br>所以要拉开 store-vs-local 的差距，只能靠压小本地 HBM 或收窄 store 带宽，<strong>不能指望上下文变长</strong>。</p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>00 · 背景与动机</p><p><a href="https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-00-background-and-motivation/">https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-00-background-and-motivation/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-08-25</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-08-25</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/vLLM/">vLLM</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/">PD 分离</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/KV-Cache/">KV Cache</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Mooncake/">Mooncake</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/cache-aware-%E8%B0%83%E5%BA%A6/">cache-aware 调度</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E9%A9%B1%E9%80%90%E7%AD%96%E7%95%A5/">驱逐策略</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-01-store-architecture/"><span class="level-item">01 · Store 架构与源码</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">94</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">5</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">28</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/"><span class="level-start"><span class="level-item">Mooncake Store 与 cache-aware 调度</span></span><span class="level-end"><span class="level-item tag">8</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/"><span class="level-start"><span class="level-item">vllm、Blade-kvt与PD分离</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-00-background-and-motivation/">00 · 背景与动机</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-01-store-architecture/">01 · Store 架构与源码</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-02-scheduler-design/">02 · 调度器设计</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-03-experiments/">03 · 实验编年史</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-04-conclusions-and-methodology/">04 · 结论与方法论</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/08/"><span class="level-start"><span class="level-item">八月 2026</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">54</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Attention/"><span class="tag">Attention</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Blade-KVT/"><span class="tag">Blade-KVT</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/DCP/"><span class="tag">DCP</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Hybrid-Connector/"><span class="tag">Hybrid Connector</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/KV-Cache/"><span class="tag">KV Cache</span><span class="tag">20</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MLA/"><span class="tag">MLA</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Mooncake/"><span class="tag">Mooncake</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/"><span class="tag">PD 分离</span><span class="tag">19</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/cache-aware-%E8%B0%83%E5%BA%A6/"><span class="tag">cache-aware 调度</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">59</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%A9%B1%E9%80%90%E7%AD%96%E7%95%A5/"><span class="tag">驱逐策略</span><span class="tag">8</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

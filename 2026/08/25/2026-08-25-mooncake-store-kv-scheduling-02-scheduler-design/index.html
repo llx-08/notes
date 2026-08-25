@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>02 · 调度器设计 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="02 · 调度器设计 调度器是一个独立进程（ runs&amp;#x2F;mcstore&amp;#x2F;scheduler.py ），对客户端讲 OpenAI 协议， 内部挑一对 (Prefill, Decode) 然后只把请求转发给 D，靠 kv_transfer_params 里的 remote_host + remote_port 把 P 钉死。策略藏在 SchedulingPolicy 抽象后面， --policy 切换"><meta property="og:type" content="blog"><meta property="og:title" content="02 · 调度器设计"><meta property="og:url" content="https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-02-scheduler-design/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="02 · 调度器设计 调度器是一个独立进程（ runs&amp;#x2F;mcstore&amp;#x2F;scheduler.py ），对客户端讲 OpenAI 协议， 内部挑一对 (Prefill, Decode) 然后只把请求转发给 D，靠 kv_transfer_params 里的 remote_host + remote_port 把 P 钉死。策略藏在 SchedulingPolicy 抽象后面， --policy 切换"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/mcstore_prefix_grid.svg"><meta property="article:published_time" content="2026-08-25T00:00:00.000Z"><meta property="article:modified_time" content="2026-08-25T07:20:37.000Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="vLLM"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="PD 分离"><meta property="article:tag" content="KV Cache"><meta property="article:tag" content="Mooncake"><meta property="article:tag" content="cache-aware 调度"><meta property="article:tag" content="驱逐策略"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/mcstore_prefix_grid.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-02-scheduler-design/"},"headline":"02 · 调度器设计","image":[],"datePublished":"2026-08-25T00:00:00.000Z","dateModified":"2026-08-25T07:20:37.000Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"02 · 调度器设计 调度器是一个独立进程（ runs&#x2F;mcstore&#x2F;scheduler.py ），对客户端讲 OpenAI 协议， 内部挑一对 (Prefill, Decode) 然后只把请求转发给 D，靠 kv_transfer_params 里的 remote_host + remote_port 把 P 钉死。策略藏在 SchedulingPolicy 抽象后面， --policy 切换"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-02-scheduler-design/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-08-25T00:00:00.000Z" title="8/25/2026, 12:00:00 AM">2026-08-25</time>发表</span><span class="level-item"><time dateTime="2026-08-25T07:20:37.000Z" title="8/25/2026, 7:20:37 AM">2026-08-25</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></span><span class="level-item">16 分钟读完 (大约2399个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">02 · 调度器设计</h1><div class="content"><h1 id="02-·-调度器设计"><a href="#02-·-调度器设计" class="headerlink" title="02 · 调度器设计"></a>02 · 调度器设计</h1><p>调度器是一个独立进程（<code>runs/mcstore/scheduler.py</code>），对客户端讲 OpenAI 协议，<br>内部挑一对 (Prefill, Decode) 然后只把请求转发给 D，靠 <code>kv_transfer_params</code> 里的<br><code>remote_host</code> + <code>remote_port</code> 把 P 钉死。策略藏在 <code>SchedulingPolicy</code> 抽象后面，<br><code>--policy</code> 切换：<code>round_robin</code> / <code>random</code> / <code>least_inflight</code> / <code>prefix_affinity</code> / <code>cache_aware_score</code>。</p>
+<h2 id="1-亲和索引：调度器怎么知道谁持有哪段前缀"><a href="#1-亲和索引：调度器怎么知道谁持有哪段前缀" class="headerlink" title="1. 亲和索引：调度器怎么知道谁持有哪段前缀"></a>1. 亲和索引：调度器怎么知道谁持有哪段前缀</h2><p>这个信息没有现成来源，所以我们自己造了一个索引：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># on_result()：请求成功后，把它的全部前缀 hash 指向被选中的节点</span></span><br><span class="line"><span class="keyword">for</span> _end, hsh <span class="keyword">in</span> hashes:</span><br><span class="line">    <span class="variable language_">self</span>._owners.setdefault(hsh, <span class="built_in">set</span>()).add(p.name)</span><br></pre></td></tr></table></figure>
+
+<p>也就是<strong>「谁被选中，谁就声称持有」</strong>——乐观假设，不校验。dashscope 网关同构，只是多了 900s TTL。</p>
+<p>这个索引有三个缺陷，按发现顺序：</p>
+<ol>
+<li><strong>驱逐一旦真实发生就有静默假阳性</strong>：索引说 X 持有 P，X 其实早淘汰了。</li>
+<li><strong>错误会自我维持</strong>：写回是无条件的，「被误导而路由到 X」这件事本身又把声称重写一遍、<br>刷新 TTL。<strong>一条过期记录能靠它自己引起的误判无限期存活。</strong></li>
+<li><strong>探测即续命</strong>：<code>batch_is_exist</code> 会授予 10s 租约（见 <a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-01-store-architecture/">01 章</a>），<br>所以每次探测都在给对象延寿、豁免驱逐。</li>
+</ol>
+<p>实测这三个缺陷现在最多值 2 个百分点，而噪声下限就是 2%，所以修它不是当前优先级——<br>但它是理解后面所有实验的必要背景。</p>
+<h2 id="2-几何前缀网格"><a href="#2-几何前缀网格" class="headerlink" title="2. 几何前缀网格"></a>2. 几何前缀网格</h2><h3 id="改动前：线性-512-字符网格"><a href="#改动前：线性-512-字符网格" class="headerlink" title="改动前：线性 512 字符网格"></a>改动前：线性 512 字符网格</h3><p>prompt 切 512 字符定长 chunk 做累积哈希，<code>hash[i]</code> 覆盖 chunk 0..i，匹配的 chunk 个数即亲和分。<br>26k token 需要 152 个 key，<strong>1M token 需要 7,558 个</strong>——索引表和 CPU 都会爆。</p>
+<h3 id="改动后：几何网格"><a href="#改动后：几何网格" class="headerlink" title="改动后：几何网格"></a>改动后：几何网格</h3><p><img src="/notes/imgs/mcstore_prefix_grid.svg" alt="线性网格 vs 几何网格"></p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">_boundaries</span>(<span class="params">self, n</span>):            <span class="comment"># min_chars=512 起翻倍</span></span><br><span class="line">    end = <span class="variable language_">self</span>._min_chars            <span class="comment"># dense_from=4096 之后每八度切 steps_per_octave=4 份</span></span><br><span class="line">    <span class="keyword">while</span> end &lt;= n:</span><br><span class="line">        out.append(end)</span><br><span class="line">        <span class="keyword">if</span> end &gt;= <span class="variable language_">self</span>._dense_from:</span><br><span class="line">            <span class="keyword">for</span> i <span class="keyword">in</span> <span class="built_in">range</span>(<span class="number">1</span>, <span class="variable language_">self</span>._steps_per_octave):</span><br><span class="line">                extra = end + end * i // <span class="variable language_">self</span>._steps_per_octave</span><br><span class="line">                <span class="keyword">if</span> extra &lt;= n:</span><br><span class="line">                    out.append(extra)</span><br><span class="line">        end *= <span class="number">2</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">_prefix_hashes</span>(<span class="params">self, text</span>):      <span class="comment"># 一次线性扫描 + 每边界克隆 digest</span></span><br><span class="line">    h = hashlib.blake2b(digest_size=<span class="number">16</span>)</span><br><span class="line">    pos = <span class="number">0</span></span><br><span class="line">    <span class="keyword">for</span> end <span class="keyword">in</span> <span class="variable language_">self</span>._boundaries(<span class="built_in">len</span>(text)):</span><br><span class="line">        h.update(text[pos:end].encode())</span><br><span class="line">        pos = end</span><br><span class="line">        out.append((end, h.copy().hexdigest()))</span><br></pre></td></tr></table></figure>
+
+<p>三个连带的<strong>必要</strong>改动，少一个就错：</p>
+<ol>
+<li><strong>打分单位从「chunk 个数」变成「匹配字符数」</strong>（<code>_match_chars</code>）。<br>几何网格下 key 数与长度是 log 关系，个数不再正比于长度。</li>
+<li><strong>扫描方向翻转</strong>：从最长边界往下扫，且 miss 用 <code>continue</code> 而不是 <code>break</code>。<br>嵌套前缀下「长的没命中」不代表「短的没命中」，而最长命中天然包含所有更短的<br>（这就是 dashscope 的 max-over-keys 语义）。</li>
+<li><strong>增量哈希</strong>：<code>h.copy()</code> 让总哈希量保持 O(n)，而非每边界从头重算的 O(n log n)。<br>dashscope 用 guava <code>hashBytes(b, 0, len)</code> 付的就是 O(n log n)，<strong>这一点我们比它好</strong>。<br>实测 3 MB prompt：增量 2.3 ms vs 每次重算 7.9 ms。</li>
+</ol>
+<h3 id="为什么默认-steps-per-octave-4-而不是-dashscope-的-2"><a href="#为什么默认-steps-per-octave-4-而不是-dashscope-的-2" class="headerlink" title="为什么默认 steps_per_octave = 4 而不是 dashscope 的 2"></a>为什么默认 <code>steps_per_octave = 4</code> 而不是 dashscope 的 2</h3><p>这是实测逼出来的，不是拍的。<strong>agentic 负载把判别信息全放在共享系统前缀之后——<br>也就是大位置，而几何网格恰在大位置最粗。</strong></p>
+<p>用真实 trace 的形状（35k 字符共享前缀，每轮 +14k）测「落在 35k 之后的可区分边界数」：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>60k prompt</th>
+<th>150k prompt</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>k=1</td>
+<td><strong>0 个（亲和全瞎）</strong></td>
+<td>2 个</td>
+</tr>
+<tr>
+<td>k=2</td>
+<td>1 个</td>
+<td>4 个</td>
+</tr>
+<tr>
+<td>k=4</td>
+<td>3 个</td>
+<td>8 个</td>
+</tr>
+</tbody></table>
+<p>k=1 时 60k 的 prompt 上亲和是完全瞎的。24 trial × 8 轮的离线重放也印证：<br>平均命中比例 k=1 是 0.61，k=4 是 0.77，而路由分散度 k=4 反而更好。</p>
+<h3 id="收益"><a href="#收益" class="headerlink" title="收益"></a>收益</h3><table>
+<thead>
+<tr>
+<th>上下文</th>
+<th>字符</th>
+<th>几何 key</th>
+<th>线性 key</th>
+<th>倍数</th>
+<th>哈希耗时</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>26k</td>
+<td>100,620</td>
+<td>22</td>
+<td>196</td>
+<td>9×</td>
+<td>0.1 ms</td>
+</tr>
+<tr>
+<td>85k</td>
+<td>328,950</td>
+<td>29</td>
+<td>642</td>
+<td>22×</td>
+<td>0.4 ms</td>
+</tr>
+<tr>
+<td>256k</td>
+<td>1,014,497</td>
+<td>35</td>
+<td>1,981</td>
+<td>57×</td>
+<td>0.9 ms</td>
+</tr>
+<tr>
+<td>1M</td>
+<td>3,870,000</td>
+<td>43</td>
+<td>7,558</td>
+<td><strong>176×</strong></td>
+<td>3.7 ms</td>
+</tr>
+</tbody></table>
+<p>附带好处：索引表从每请求 642 个条目降到 29 个。实测 433 个请求写入约 12,500 次前缀，<br>去重后 <code>tracked_prefixes</code> 只有 572 个。</p>
+<h3 id="一个残余偏差"><a href="#一个残余偏差" class="headerlink" title="一个残余偏差"></a>一个残余偏差</h3><p><code>match_chars / len(prompt)</code> 这个比例被网格系统性低估，幅度随 n 在 <code>[1/(1+1/k), 1]</code><br>即 k=4 时 <code>[0.8, 1.0]</code> 之间振荡。<strong>同一请求内所有候选同网格，所以排序不受影响</strong>；<br>但一旦进入跨请求比较（指数打分的 ratio），必须改用 <code>boundaries[-1]</code> 作分母消除它。</p>
+<h2 id="3-从硬阈值到指数打分"><a href="#3-从硬阈值到指数打分" class="headerlink" title="3. 从硬阈值到指数打分"></a>3. 从硬阈值到指数打分</h2><h3 id="硬阈值版本（prefix-affinity）"><a href="#硬阈值版本（prefix-affinity）" class="headerlink" title="硬阈值版本（prefix_affinity）"></a>硬阈值版本（<code>prefix_affinity</code>）</h3><p>最初的护栏是「亲和节点在飞的请求比最闲的多 <code>load_slack</code> 个就让位」。<strong>它从不触发</strong>：<br>轮次间有 5~7 秒 think time，瞬时 inflight 几乎恒为 0 或 1，条件永不成立 →<br>亲和永远赢 → 流量雪球到「首次落地」的节点（7 节点里 43 vs 7）。</p>
+<p>改成相对阈值也不行：<code>inflight[idlest] = 0</code> 时均值 ≈ 0.3，1.5 倍 ≈ 0.5，<br>任何 <code>inflight ≥ 1</code> 都被拒 → <strong>从「永不触发」跳到「永远触发」，中间没有可用区间</strong>。<br>根因是<strong>阈值是一个只取几个小整数的变量上的阶跃函数</strong>。</p>
+<p>最终形式改成约束「衰减的累积分配量」：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">load[n] = 衰减累积分配数 + 当前 inflight      <span class="comment"># 每次决策 *= (1 - 1/decay_window), window=64</span></span><br><span class="line">跳过亲和节点 <span class="keyword">if</span> load[best] &gt; load_ratio * <span class="built_in">max</span>(mean(load), <span class="number">1.0</span>)</span><br></pre></td></tr></table></figure>
+
+<p><code>max(mean, 1.0)</code> 的下限防止冷启动时均值 ≈ 0 导致过度约束。<code>load_ratio ≈ 1.5</code> 最优。</p>
+<h3 id="指数打分版本（cache-aware-score）"><a href="#指数打分版本（cache-aware-score）" class="headerlink" title="指数打分版本（cache_aware_score）"></a>指数打分版本（<code>cache_aware_score</code>）</h3><p>借鉴 dashscope 网关的 <code>CacheAwareBalancedRouteSelector</code>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">weight[n] = <span class="number">2</span> ** (hit_weight * hit_ratio[n] + load_weight * (mean_load - load[n]))</span><br><span class="line"><span class="comment"># 从 topk = max(sqrt(N), 5) 个最重的节点里按 weight 加权采样</span></span><br></pre></td></tr></table></figure>
+
+<p>指数形式的意义是 <code>weight[a] / weight[b] = 2^(score[a] - score[b])</code>——<strong>只依赖分数之差</strong>。<br>给所有节点的 load 加同一个常数会在差里抵消，所以<strong>对负载的整体平移免疫</strong>。<br>这正是硬阈值缺的性质：阈值比较的是绝对值，而绝对值随负载水平变化。</p>
+<p>采样而非 argmax 也有理由：argmax 下所有会话都挑同一个节点，而负载信号更新太慢来不及打破平局；<br>采样让节点概率随负载平滑下降，是个自限反馈环而不是悬崖。</p>
+<h3 id="两个权重不是一个自由度"><a href="#两个权重不是一个自由度" class="headerlink" title="两个权重不是一个自由度"></a>两个权重不是一个自由度</h3><p>这是实测发现的，很关键：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">20/1 和 10/0.5 的 K 都是 20，但 routes 42/3 vs 36/9、argmax 一致率 0.89 vs 0.68</span><br><span class="line">→ 比值 K = hit_weight/load_weight   决定权衡点（一次满命中值几个请求的排队余量）</span><br><span class="line">→ 绝对幅度                          决定采样锐度（相当于温度）</span><br></pre></td></tr></table></figure>
+
+<p><code>_load</code> 的量纲：均值 ≈ <code>decay_window / N</code> ≈ 8.7，节点间极差 ≈ 6。<br>所以 <code>load_weight=1</code> 时负载项幅度是 <code>2^±3</code>，与 <code>hit_weight=10 × ratio≈0.8 = 8</code> 同量级<br>——这解释了 dashscope 为什么标定成 <code>hit=10</code>。</p>
+<p>离线扫描（stub 掉 aiohttp 直接 exec scheduler.py，几秒一个点）：</p>
+<table>
+<thead>
+<tr>
+<th>hit/load</th>
+<th>K</th>
+<th>routes 最多/最少</th>
+<th>hit</th>
+<th>argmax 一致率</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>20 / 1</td>
+<td>20</td>
+<td>42/3</td>
+<td>185</td>
+<td>0.89</td>
+</tr>
+<tr>
+<td>10 / 0.5</td>
+<td>20</td>
+<td>36/9</td>
+<td>183</td>
+<td>0.68</td>
+</tr>
+<tr>
+<td>10 / 1</td>
+<td>10</td>
+<td>32/17</td>
+<td>180</td>
+<td>0.81</td>
+</tr>
+<tr>
+<td>10 / 2</td>
+<td>5</td>
+<td>31/24</td>
+<td>171</td>
+<td>0.83</td>
+</tr>
+<tr>
+<td>10 / 4</td>
+<td>2.5</td>
+<td>30/26</td>
+<td>165</td>
+<td>0.84</td>
+</tr>
+<tr>
+<td>1 / 1</td>
+<td>1</td>
+<td>28/26</td>
+<td>97</td>
+<td>0.34</td>
+</tr>
+</tbody></table>
+<p>整条前沿<strong>单调平滑</strong>——这正是硬阈值缺的东西，它只有「永不触发」和「永远触发」两个点。</p>
+<h2 id="4-参考对象：dashscope-网关的-cache-aware-实现"><a href="#4-参考对象：dashscope-网关的-cache-aware-实现" class="headerlink" title="4. 参考对象：dashscope 网关的 cache-aware 实现"></a>4. 参考对象：dashscope 网关的 cache-aware 实现</h2><p>代码在 <code>dashscope-platform/dashscope-api/dashscope-api-component/src/main/java/com/alibaba/dashscope/api/</code>，<br>三个变体：<code>CacheAwareRouteSelector</code> / <code>CacheAwarePureRouteSelector</code> / <code>CacheAwareBalancedRouteSelector</code>。</p>
+<p><strong>bucket = turbo 实例 id</strong>（不是哈希桶）。turbo 启动时用 <code>compare_and_set.lua</code> 抢一个 instanceId 锁，<br>抢到就是自己的 bucket。所以「选 bucket」= 「选实例」。</p>
+<p><strong>前缀索引</strong>：<code>PrefixUtils.hashTokens</code> 不做真 tokenize，用 <code>bytesPerToken=3</code> 估算，<br>对前缀长度取 2 的幂逐个哈希（<code>minPrefixTokenLength=64</code> 停），<br><code>hashTokensWithDenseSteps</code> 从 512 起插中点。key 存成 <strong>Redis ZSET</strong>，成员是 bucket id<br>（<strong>score 恒为 1，这个字段被浪费了</strong>——它本该放时间戳），TTL 900 秒。<br><code>PrefixCacheManager</code> <strong>完全没有删除接口</strong>，只有 <code>update</code>(ZADD) / <code>query</code>(ZRANGE) + TTL。</p>
+<p><strong>打分</strong>：默认 <code>prefixMatchWeight=10</code>、<code>loadWeight=40</code>，其余 5 项为 0。<br><code>loadRatio = curLoad / maxLoad(40)</code>，所以指数化简成：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">指数 = 10 × hitRatio + (比平均少几个在跑的请求)</span><br></pre></td></tr></table></figure>
+
+<p><strong>两个权重是标定过的：一次 100% 命中正好值 10 个请求的排队余量。</strong><br>临界点是亲和节点比其他节点多跑 9 个请求时优势抵平。<br><code>topK = max(sqrt(实例数), 5)</code>，<code>samplingWithWeight</code> 按归一化权重随机采样。</p>
+<p><strong>投递</strong>：<code>push_request_cache_aware.lua</code> 用 <code>ZADD queue &lt;bucket_id&gt; &lt;request&gt;</code>（score 就是实例 id）；<br><code>fetch_request_cache_aware.lua</code> 出队时 <code>ZRANGEBYSCORE queue min max LIMIT 0 1</code> 只拿自己的，<br>拿不到且 <code>ZCARD &gt; requestSeizeThreshold(2)</code> 才 <code>ZRANGE 0 0</code> 抢别人的并标记 <code>hit=0</code>。<br><strong>饥饿保护做在消费端而非生产端</strong>，这是整套设计里最值得借鉴的一点。</p>
+<p><strong>bucket 区间 = 一致性哈希环</strong>：每个存活实例负责 <code>[前一个存活实例 id + 1, 自己的 id]</code>，<br>环形回绕时拆成 primary + secondary，实例挂掉后 bucket 自动被下一个存活实例吸收。</p>
+<p><strong>硬过滤在打分之前</strong>：<code>filterPrefillBatchSize</code> / <code>filterPrefillTokenNum</code> /<br><code>filterCacheFirstQueueLimit</code>，剔空了就退化成 least-loaded。</p>
+<p>最后这一点纠正了我们的一个设计错误：<strong>指数打分不是它的过载保护</strong>——<br>渐变交给打分，饱和交给前置硬过滤 + 消费端抢占。我们最初想让一个阈值同时干这两件事，<br>那是设计上的混淆。</p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>02 · 调度器设计</p><p><a href="https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-02-scheduler-design/">https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-02-scheduler-design/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-08-25</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-08-25</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/vLLM/">vLLM</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/">PD 分离</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/KV-Cache/">KV Cache</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Mooncake/">Mooncake</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/cache-aware-%E8%B0%83%E5%BA%A6/">cache-aware 调度</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E9%A9%B1%E9%80%90%E7%AD%96%E7%95%A5/">驱逐策略</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-01-store-architecture/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">01 · Store 架构与源码</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-03-experiments/"><span class="level-item">03 · 实验编年史</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">94</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">5</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">28</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/"><span class="level-start"><span class="level-item">Mooncake Store 与 cache-aware 调度</span></span><span class="level-end"><span class="level-item tag">8</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/"><span class="level-start"><span class="level-item">vllm、Blade-kvt与PD分离</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-00-background-and-motivation/">00 · 背景与动机</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-01-store-architecture/">01 · Store 架构与源码</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-02-scheduler-design/">02 · 调度器设计</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-03-experiments/">03 · 实验编年史</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-04-conclusions-and-methodology/">04 · 结论与方法论</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/08/"><span class="level-start"><span class="level-item">八月 2026</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">54</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Attention/"><span class="tag">Attention</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Blade-KVT/"><span class="tag">Blade-KVT</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/DCP/"><span class="tag">DCP</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Hybrid-Connector/"><span class="tag">Hybrid Connector</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/KV-Cache/"><span class="tag">KV Cache</span><span class="tag">20</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MLA/"><span class="tag">MLA</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Mooncake/"><span class="tag">Mooncake</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/"><span class="tag">PD 分离</span><span class="tag">19</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/cache-aware-%E8%B0%83%E5%BA%A6/"><span class="tag">cache-aware 调度</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">59</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%A9%B1%E9%80%90%E7%AD%96%E7%95%A5/"><span class="tag">驱逐策略</span><span class="tag">8</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

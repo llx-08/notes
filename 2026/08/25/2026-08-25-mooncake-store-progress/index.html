@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>Mooncake Store + blade-kvt 接入进展 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="Mooncake Store + blade-kvt 接入进展 最后更新：2026-08-19 分支： llx&amp;#x2F;kvs-mooncake-store （ecs ~&amp;#x2F;codes&amp;#x2F;vllm ，基于 origin&amp;#x2F;develop bc355b97db） 提交： 429c6e6c69 首版接入 · d56f40bcd4 地址按 (group, layer) 计算（M1） 标注约定：**[已验证]** &amp;#x3D;"><meta property="og:type" content="blog"><meta property="og:title" content="Mooncake Store + blade-kvt 接入进展"><meta property="og:url" content="https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-progress/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="Mooncake Store + blade-kvt 接入进展 最后更新：2026-08-19 分支： llx&amp;#x2F;kvs-mooncake-store （ecs ~&amp;#x2F;codes&amp;#x2F;vllm ，基于 origin&amp;#x2F;develop bc355b97db） 提交： 429c6e6c69 首版接入 · d56f40bcd4 地址按 (group, layer) 计算（M1） 标注约定：**[已验证]** &amp;#x3D;"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/img/og_image.png"><meta property="article:published_time" content="2026-08-25T00:00:00.000Z"><meta property="article:modified_time" content="2026-08-25T07:20:36.897Z"><meta property="article:author" content="llx-08"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-progress/"},"headline":"Mooncake Store + blade-kvt 接入进展","image":["https://llx-08.github.io/notes/img/og_image.png"],"datePublished":"2026-08-25T00:00:00.000Z","dateModified":"2026-08-25T07:20:36.897Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"Mooncake Store + blade-kvt 接入进展 最后更新：2026-08-19 分支： llx&#x2F;kvs-mooncake-store （ecs ~&#x2F;codes&#x2F;vllm ，基于 origin&#x2F;develop bc355b97db） 提交： 429c6e6c69 首版接入 · d56f40bcd4 地址按 (group, layer) 计算（M1） 标注约定：**[已验证]** &#x3D;"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-progress/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-08-25T00:00:00.000Z" title="8/25/2026, 12:00:00 AM">2026-08-25</time>发表</span><span class="level-item"><time dateTime="2026-08-25T07:20:36.897Z" title="8/25/2026, 7:20:36 AM">2026-08-25</time>更新</span><span class="level-item">1 小时读完 (大约10078个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">Mooncake Store + blade-kvt 接入进展</h1><div class="content"><h1 id="Mooncake-Store-blade-kvt-接入进展"><a href="#Mooncake-Store-blade-kvt-接入进展" class="headerlink" title="Mooncake Store + blade-kvt 接入进展"></a>Mooncake Store + blade-kvt 接入进展</h1><blockquote>
+<p>最后更新：2026-08-19<br>分支：<code>llx/kvs-mooncake-store</code>（ecs <code>~/codes/vllm</code>，基于 <code>origin/develop</code> bc355b97db）<br>提交：<code>429c6e6c69</code> 首版接入 · <code>d56f40bcd4</code> 地址按 (group, layer) 计算（M1）</p>
+</blockquote>
+<p>标注约定：**[已验证]** = 读过代码或跑过实验；**[未验证]** = 推断或文档说法，需要时要复核。</p>
+<hr>
+<h2 id="1-目标"><a href="#1-目标" class="headerlink" title="1. 目标"></a>1. 目标</h2><p>在内部 vLLM 上<strong>同时</strong>开启两件事：</p>
+<ul>
+<li><strong>blade-kvt 的 P→D 实时传输</strong>：当前请求的 KV 从 prefill 节点直传 decode 节点</li>
+<li><strong>Mooncake 共享 KV Store</strong>：跨请求、跨实例复用 prefix KV</li>
+</ul>
+<p>这两者不是替代关系，是分层关系。</p>
+<hr>
+<h2 id="2-机制理解"><a href="#2-机制理解" class="headerlink" title="2. 机制理解"></a>2. 机制理解</h2><h3 id="2-1-分层：Mooncake-Store-和-blade-kvt-不在同一层-已验证"><a href="#2-1-分层：Mooncake-Store-和-blade-kvt-不在同一层-已验证" class="headerlink" title="2.1 分层：Mooncake Store 和 blade-kvt 不在同一层 [已验证]"></a>2.1 分层：Mooncake Store 和 blade-kvt 不在同一层 [已验证]</h3><p>最容易混淆的点：</p>
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>职责</th>
+<th>内部对应</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Mooncake Store / 社区 <code>MooncakeStoreConnector</code></td>
+<td>KVS，跨请求跨实例的共享 KV 存储（GPU HBM ⇄ Mooncake Client 的 CPU DRAM）</td>
+<td><code>kvs</code></td>
+</tr>
+<tr>
+<td>社区 <code>MooncakeConnector</code>（无 Store 后缀）</td>
+<td>点对点 P→D 传输</td>
+<td>与 blade-kvt 同层</td>
+</tr>
+<tr>
+<td>blade-kvt</td>
+<td>点对点 P→D 传输</td>
+<td><code>kvt</code></td>
+</tr>
+</tbody></table>
+<p>社区要同时要这两样，用 <code>MultiConnector</code> 挂两个 connector。内部的等价物是 <code>backend="kvs+kvt"</code>。</p>
+<p><strong>Mooncake 不接管 vLLM 的 GPU block allocator</strong>：vLLM 分配 GPU block，Mooncake 只把这些 buffer 注册成 RDMA MR，再 batch get/put。它自己管理的是外部 Store 的 CPU DRAM segment。</p>
+<h3 id="2-2-为什么必须做成-HybridConnector-的-KVS-backend-已验证"><a href="#2-2-为什么必须做成-HybridConnector-的-KVS-backend-已验证" class="headerlink" title="2.2 为什么必须做成 HybridConnector 的 KVS backend [已验证]"></a>2.2 为什么必须做成 HybridConnector 的 KVS backend [已验证]</h3><p><strong>MultiConnector 路线是死的</strong>：</p>
+<ul>
+<li>内部 <code>vllm/v1/core/sched/scheduler.py</code>（:980 / :1930 / :4493 / :4527）和 <code>vllm/v1/engine/core.py</code>（:617 / :1324）多处 <code>isinstance(self.connector, HybridConnector)</code></li>
+<li>内部 <code>multi_connector.py</code> 没有 <code>step</code> / <code>on_add_req</code> / <code>on_abort_req</code> / <code>has_requests</code> / <code>pending_requests</code></li>
+</ul>
+<p>包一层 MultiConnector，<code>self.connector</code> 就不再是 <code>HybridConnector</code>，HybridScheduler 的 step 循环没人驱动，blade-kvt 的 PD 链路直接失效。</p>
+<p>另外：内部 vLLM 的 connector factory <strong>没有</strong>注册 <code>MooncakeStoreConnector</code>。<code>~/codes/dashllm/examples/pd_disaggregated/vllm_mooncake_store/</code> 那套 <code>MultiConnector(MooncakeConnector + MooncakeStoreConnector)</code> 脚本在当前内部 vLLM 上跑不起来，它对应的是另一个 engine 构建。</p>
+<h3 id="2-3-接线位置：kvsp-py-是唯一的路由点-已验证"><a href="#2-3-接线位置：kvsp-py-是唯一的路由点-已验证" class="headerlink" title="2.3 接线位置：kvsp.py 是唯一的路由点 [已验证]"></a>2.3 接线位置：<code>kvsp.py</code> 是唯一的路由点 [已验证]</h3><p><code>kvsbackend.py</code> 里装的是 <code>VineyardKVSBackend</code>，它和 <code>MooncakeKVSBackend</code>（<code>mooncake_kvsbackend.py:172</code>）一样直接实现 <code>HybridBackend</code>，两者<strong>平级</strong>，没有”从 kvsbackend 再路由到 mooncake”这一层。</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">HybridConnector  (KVConnectorBase_V1, 被 scheduler isinstance 检查)</span><br><span class="line">  └─ HybridScheduler / HybridWorker</span><br><span class="line">       └─ _get_backend_cls()          __init__.py:590   backend="kvs+kvt" → KVSP</span><br><span class="line">            └─ KVSP (HybridBackend)   kvsp.py:31</span><br><span class="line">                 ├─ _s ← 按 kvs_backend 字符串分派   ← 唯一路由点</span><br><span class="line">                 │    ├─ "vineyard"       → VineyardKVSBackend       kvsbackend.py</span><br><span class="line">                 │    ├─ "mooncake"       → MooncakeKVSBackend       mooncake_kvsbackend.py  (私有融合 API)</span><br><span class="line">                 │    └─ "mooncake_store" → MooncakeStoreKVSBackend  mooncake_store_kvsbackend.py  ← 本次新增</span><br><span class="line">                 └─ _p → PBackend (blade-kvt)  kvtbackend.py</span><br></pre></td></tr></table></figure>
+
+<p><code>backend="kvs+kvt"</code> 无条件返回 <code>KVSP</code>，<code>_p</code> 恒为 <code>PBackend</code>，所以 <strong>kvs+kvt 只用在 P 节点</strong>。D 节点是 <code>backend="kvt"</code> + <code>kv_role="kv_consumer"</code>。</p>
+<h3 id="2-4-为什么要新写一个-backend：私有-API-vs-标准-API-已验证"><a href="#2-4-为什么要新写一个-backend：私有-API-vs-标准-API-已验证" class="headerlink" title="2.4 为什么要新写一个 backend：私有 API vs 标准 API [已验证]"></a>2.4 为什么要新写一个 backend：私有 API vs 标准 API [已验证]</h3><p>现有 <code>kvs_backend="mooncake"</code> 依赖 3 个<strong>内部私有融合调用</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>调用</th>
+<th>位置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>store.register_kv_caches(tensors, tp_rank)</code></td>
+<td><code>mooncake_kvsbackend.py:295</code></td>
+</tr>
+<tr>
+<td><code>store.batch_load_kv_async(block_ids, hashes, loop, futures)</code></td>
+<td><code>:331</code></td>
+</tr>
+<tr>
+<td><code>store.batch_save_kv_async(block_ids, hashes, loop, futures)</code></td>
+<td><code>:430</code></td>
+</tr>
+</tbody></table>
+<p>在 target_d 上实测 PyPI 官方 wheel（<code>mooncake-transfer-engine==0.3.12.post1</code>）的 API 表面：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">setup                          True</span><br><span class="line">register_buffer                True</span><br><span class="line">batch_is_exist                 True</span><br><span class="line">batch_get_into_multi_buffers   True</span><br><span class="line">batch_put_from_multi_buffers   True</span><br><span class="line">put / get / is_exist           True</span><br><span class="line">register_kv_caches             False   ←</span><br><span class="line">batch_load_kv_async            False   ←</span><br><span class="line">batch_save_kv_async            False   ←</span><br></pre></td></tr></table></figure>
+
+<p>这直接证明了改动的必要性：那 3 个融合 API 只存在于 PAI 内部的 mooncake 定制构建里（<code>mooncake_kvsbackend.py</code> 最近提交在 2026-08，说明内部确实有那个 wheel，但我们拿不到）。新 backend 用标准 API 重新实现同一套语义，地址计算移到 Python 侧。</p>
+<h3 id="2-5-请求处理流程-已验证"><a href="#2-5-请求处理流程-已验证" class="headerlink" title="2.5 请求处理流程 [已验证]"></a>2.5 请求处理流程 [已验证]</h3><p>P 节点每个请求和 store 交互两次，一次在调度期，一次在计算后：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">_step_waiting()                                  HybridScheduler</span><br><span class="line"> ├─ sched_allocate_slots(req, load, save, ...)    engine_proxy.py:163</span><br><span class="line"> │    └─ _get_computed_blocks_for_kvt()           engine_proxy.py:105</span><br><span class="line"> │         └─ kv_cache_manager.get_computed_blocks(req)   ← ① 本地 HBM prefix cache 命中</span><br><span class="line"> │    allocate_slots() 为剩余 token 分配 GPU block</span><br><span class="line"> │    req.num_computed_tokens = num_new_local_computed_tokens</span><br><span class="line"> │</span><br><span class="line"> └─ _on_add_req(req, kvblks)                      __init__.py:1346</span><br><span class="line">      ├─ local = req.num_computed_tokens</span><br><span class="line">      ├─ rmt = await backend.async_get_num_new_matched_tokens(req, local)  ← ② store 查询</span><br><span class="line">      │        （只查 HBM 未命中的那段：从 num_computed_tokens // block_size 起）</span><br><span class="line">      ├─ req.num_pending_external_computed_tokens = rmt      ← 预告值</span><br><span class="line">      └─ backend.async_update_state_after_alloc(req, kvblks, rmt)</span><br><span class="line">           → _prepared 队列 → async_load_kv()</span><br><span class="line">             → batch_get_into_multi_buffers → 直写 GPU HBM</span><br><span class="line">             → yield IoRet(reqid, n=实际加载量)               ← 提交值</span><br></pre></td></tr></table></figure>
+
+<p>然后计算后：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">async_save_kv_layer()   最后一层才真正发</span><br><span class="line">  CUDA event 确认 GPU 写完</span><br><span class="line">  → batch_is_exist 去重 → batch_put_from_multi_buffers</span><br><span class="line">  同时 KVSP 并行驱动 blade-kvt PBackend 把 KV 发给 D</span><br></pre></td></tr></table></figure>
+
+<p><strong>关键点：store 不参与 P→D 这一跳。</strong> <code>KVSP.async_save_kv_layer</code> 里 <code>_p</code>（blade-kvt，送当前请求给 D）和 <code>_s</code>（store，给未来请求留副本）是并行的两件事。D 节点完全不接 store。</p>
+<h3 id="2-6-两级查找：HBM-→-store，中间没有-CPU-层-已验证"><a href="#2-6-两级查找：HBM-→-store，中间没有-CPU-层-已验证" class="headerlink" title="2.6 两级查找：HBM → store，中间没有 CPU 层 [已验证]"></a>2.6 两级查找：HBM → store，中间没有 CPU 层 [已验证]</h3><p>顺序是严格串行的两级（见 2.5 的 ①②）。没有独立的 CPU 层——Mooncake store 本身就是 CPU DRAM（可能在别的机器上），所以实际是「本机 HBM → 远端 CPU DRAM」。Mooncake 自己能挂 SSD 层，但要 <code>enable_offload</code>，本次没接。</p>
+<p>两个容易忽略的细节：</p>
+<ul>
+<li><strong>GPU block 是在 store 查询之前就分配好的</strong>。步骤 ① 只按本地命中量算需要多少新 block 然后 <code>allocate_slots()</code>。store 加载是往已分配的 block 里写，这也是 <code>async_update_state_after_alloc</code> 能直接拿 <code>blocks.get_block_ids()</code> 的原因。</li>
+<li><strong>为什么按所有 tp_rank 生成 key</strong>：每个 tp rank 存自己那份 KV 分片，key 里带 <code>tp_rank</code>。但 lookup 在 scheduler 单进程里做、load 是各 worker 各自做，所以必须确认<strong>所有</strong> rank 的分片都在才算命中，任一 rank 缺就 break。这也是 <code>external_computed</code> 总是 block_size 整数倍的原因。</li>
+</ul>
+<h3 id="2-7-VLLM-KVS-ON-MIN-LENGTH-已验证"><a href="#2-7-VLLM-KVS-ON-MIN-LENGTH-已验证" class="headerlink" title="2.7 VLLM_KVS_ON_MIN_LENGTH [已验证]"></a>2.7 <code>VLLM_KVS_ON_MIN_LENGTH</code> [已验证]</h3><p>短 prompt 的开关闸门，只在 <code>should_save</code> / <code>should_load</code> 用：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># mooncake_kvsbackend.py:641,649   kvsbackend.py:540,545   v6d_object_backend.py:536</span></span><br><span class="line"><span class="keyword">if</span> req.num_prompt_tokens &lt;= envs.VLLM_KVS_ON_MIN_LENGTH + <span class="number">1</span>:</span><br><span class="line">    <span class="keyword">return</span> <span class="literal">False</span></span><br></pre></td></tr></table></figure>
+
+<p>短 prompt 走一趟 store 往返（查询 + 传输 + 元数据 RPC）比直接重算贵，所以直接跳过。<strong>不影响 blade-kvt 的 P→D 传输</strong>，只 gate KVS。</p>
+<ul>
+<li>ecs 分支默认 <strong>2048</strong>（<code>envs.py:318</code>）</li>
+<li>target_d 那份旧 dist-packages 默认 <strong>4096</strong></li>
+<li>测试时设成 64，让几百 token 的 prompt 也能走 store</li>
+</ul>
+<h3 id="2-8-embedded-vs-standalone-store-已验证"><a href="#2-8-embedded-vs-standalone-store-已验证" class="headerlink" title="2.8 embedded vs standalone-store [已验证]"></a>2.8 embedded vs standalone-store [已验证]</h3><p>目前用的是 <strong>embedded</strong>。<code>init_mooncake()</code> 里每个 worker rank：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">per_tp_global_segment_size = global_segment_size // tp_size</span><br><span class="line">store.setup(hostname, metadata_server, per_tp_global_segment_size, ...)</span><br></pre></td></tr></table></figure>
+
+<p><code>global_segment_size &gt; 0</code> 意味着<strong>这个 vLLM 进程自己</strong>分配那块 DRAM 并注册进池子，数据物理上住在 vLLM 进程的地址空间里。</p>
+<p><strong>后果：P1 重启，它那段 segment 和上面所有对象一起消失。</strong> 这就是验证 load 路径时我们用「再起一个 P2」而不是「重启 P1」的原因。</p>
+<p><strong>standalone-store</strong> 把容量和推理进程解耦：</p>
+<ul>
+<li>vLLM rank 设 <code>global_segment_size: 0</code> → 纯 client，只保留 <code>local_buffer</code> 做读写暂存</li>
+<li>容量由独立进程持有：<code>dist-packages/mooncake/mooncake_client</code> 或 <code>mooncake_store_service.py</code></li>
+</ul>
+<p>好处：跨 vLLM 重启存活、容量独立扩、store 节点单独挂 SSD、推理进程不占那份 DRAM。</p>
+<p>对当前实现来说这是<strong>纯配置切换，不用改代码</strong>——内部 <code>MooncakeStoreConfig</code> 没有 <code>mode</code> 字段，直接把 <code>global_segment_size</code> 传给 <code>setup()</code>，设 0 再另起 store 进程即可。**[未验证]** 还没实际跑过。</p>
+<h3 id="2-9-写入是-write-through，不存在「HBM-满了驱逐到-mooncake」-已验证"><a href="#2-9-写入是-write-through，不存在「HBM-满了驱逐到-mooncake」-已验证" class="headerlink" title="2.9 写入是 write-through，不存在「HBM 满了驱逐到 mooncake」 [已验证]"></a>2.9 写入是 write-through，不存在「HBM 满了驱逐到 mooncake」 [已验证]</h3><p>写入时机是 **prefill 期间的 <code>async_save_kv_layer</code>**，不是等 HBM 紧张才驱逐。</p>
+<p>HBM 紧张时是 vLLM 自己的 block pool 按 LRU 淘汰（<code>block_pool.py:_maybe_evict_cached_block</code>），<strong>connector 拿不到任何回调</strong>——<code>KVConnectorBase_V1</code> 里没有 on_evict / on_block_freed 之类的钩子。淘汰的效果只是「本地副本没了，store 里那份还在」，下次请求从 store 拉回来。</p>
+<p>connector 参与 block 生命周期的地方全是<strong>反方向</strong>的：</p>
+<ul>
+<li><code>block_pool.py:505</code> 那个方法是 connector 报告 load 失败后，把坏 block 从 prefix cache 哈希表里踢掉（connector → pool）</li>
+<li>HybridConnector 的 <code>_track_extra_kv_blocks</code> / delay free、v6d 的 ref_cnt bump —— 都是<strong>阻止</strong> block 在异步存盘完成前被复用</li>
+</ul>
+<p><code>BlockRemoved</code> 事件（<code>block_pool.py:445</code>）只是对外发布的 KV event，给外部观测/router 用，不触发 spill。</p>
+<p>要「HBM 满了主动往 mooncake 溢出」是另一类设计，社区 <code>OffloadingConnector</code> / <code>simple_cpu_offload_connector</code> 是那个模式。</p>
+<h3 id="2-10-Mooncake-自己的驱逐策略-算法已读源码定论，见-mooncake-store-scheduling-experiments-md-§7-2"><a href="#2-10-Mooncake-自己的驱逐策略-算法已读源码定论，见-mooncake-store-scheduling-experiments-md-§7-2" class="headerlink" title="2.10 Mooncake 自己的驱逐策略 [算法已读源码定论，见 mooncake_store_scheduling_experiments.md §7.2]"></a>2.10 Mooncake 自己的驱逐策略 [算法已读源码定论，见 <code>mooncake_store_scheduling_experiments.md</code> §7.2]</h3><p><strong>结论先说</strong>：仓库里的精确 LRU(<code>eviction_strategy.h</code> 的 <code>LRUEvictionStrategy</code>) 是死代码，从未实例化(HEAD 亦然)。真实路径 <code>EvictionThreadFunc</code>→<code>BatchEvict</code> 是<strong>按 <code>lease_timeout</code> 排序的批量近似 LRU</strong>：16 线程扫 1024 个 shard 收集候选，<code>nth_element</code> 取分位点作切点，soft-pin 为第二层池。近似来自四处，根本一条是<strong>排序键是租约到期时刻而非最后访问时间</strong>。详见实验文档 §7.2。</p>
+<p>这是 <strong>Master 侧策略</strong>，vLLM 完全不参与。从 target_d 上装的 <code>mooncake_master</code>（0.3.12.post1）<code>--help</code> 读到的实际默认值：</p>
+<table>
+<thead>
+<tr>
+<th>flag</th>
+<th>默认值</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>eviction_high_watermark_ratio</code></td>
+<td><strong>0.90</strong></td>
+<td>内存占用超过该比例触发驱逐</td>
+</tr>
+<tr>
+<td><code>eviction_ratio</code></td>
+<td><strong>0.05</strong></td>
+<td>每个驱逐周期干掉 5% 的对象</td>
+</tr>
+<tr>
+<td><code>default_kv_lease_ttl</code></td>
+<td><strong>10000 ms</strong></td>
+<td>对象租约期，租约内不被驱逐</td>
+</tr>
+<tr>
+<td><code>default_kv_soft_pin_ttl</code></td>
+<td><strong>1800000 ms</strong>（30 min）</td>
+<td>soft pin 保护期</td>
+</tr>
+<tr>
+<td><code>allow_evict_soft_pinned_objects</code></td>
+<td><strong>true</strong></td>
+<td>空间紧张时允许打破 soft pin</td>
+</tr>
+<tr>
+<td><code>memory_allocator</code></td>
+<td><code>offset</code>（可选 <code>cachelib</code>）</td>
+<td>分配器</td>
+</tr>
+<tr>
+<td><code>allocation_strategy</code></td>
+<td><code>random</code>（可选 <code>free_ratio_first</code> / <code>local_first</code> / <code>ssd_free_ratio_first</code> / <code>cxl</code>）</td>
+<td>新对象放哪个 segment</td>
+</tr>
+</tbody></table>
+<p>即<strong>两级保护 + 高水位批量驱逐</strong>：<code>lease</code>（硬保护）→ <code>soft pin</code>（软保护，可破）→ 超 90% 按比例清 5%。淘汰顺序是近似 LRU **[未验证]**（Mooncake 设计文档说法，flag 层面只能确认水位和比例）。</p>
+<p>SSD 相关（默认开着）：<code>enable_disk_eviction=true</code>、<code>nof_eviction_high_watermark_ratio=0.90</code>、<code>nof_eviction_ratio=0.05</code>；<code>offload_on_evict</code> 把 LOCAL_DISK 落盘从 <code>PutEnd</code> 推迟到驱逐时刻；<code>offload_force_evict</code> / <code>offload_cap_ratio=0.5</code> 在落盘队列打满时强制丢弃。</p>
+<p>从 <code>store.so</code> 的字符串能确认租约确实拦驱逐：<code>has active lease, skipping</code>、<code>matched by regex, but has lease. Skipping</code>、<code>OBJECT_HAS_LEASE</code>，以及 <code>remove</code> 的 docstring「Requires lease to be expired」。API 名是 <code>GrantReadLease</code> / <code>GrantLeaseForGroup</code>。</p>
+<h3 id="2-11-支持-p2p-的-prefix-cache-传递吗"><a href="#2-11-支持-p2p-的-prefix-cache-传递吗" class="headerlink" title="2.11 支持 p2p 的 prefix cache 传递吗"></a>2.11 支持 p2p 的 prefix cache 传递吗</h3><p>要分开两个「p2p」：</p>
+<p><strong>store 内部的数据传输是 p2p 的</strong> [已验证]。Master 只管元数据（key → segment/offset/replica）和分配，不走数据面。真正的读写是 client 之间直连——本次实验里 P1 的 8GB segment embedded 在 P1 进程内，P2 读的时候是 P2 ⇄ P1 直连，master 只告诉 P2 去哪儿找。protocol 可以是 tcp（本次用的）或 rdma。</p>
+<p><strong>但「P 主动把 prefix cache 推给另一个 P」不支持</strong> [已验证]。没有任何主动推送：</p>
+<ul>
+<li>写入方只管 put，不知道谁会读</li>
+<li>读取方只在自己收到请求、调度期 <code>batch_is_exist</code> 命中时才拉</li>
+<li>没有热点检测、没有按访问频率加副本、没有预取。副本策略只有静态的 <code>ReplicateConfig</code>（当前用默认值，没暴露配置）</li>
+</ul>
+<p>所以是 <strong>pull-based、内容寻址（block hash）的共享池</strong>，不是 push-based 的 p2p 缓存同步。「避免请求都打到持有缓存的机器」靠的是「任何实例都能拉到同一份 KV」这个性质，不是主动分发。代码里的 TP replication factor 是 GQA/MLA 场景下同一 KV tensor 在不同 rank 上的布局重复，与负载均衡无关。</p>
+<hr>
+<h2 id="3-当前进度"><a href="#3-当前进度" class="headerlink" title="3. 当前进度"></a>3. 当前进度</h2><h3 id="3-1-提交内容"><a href="#3-1-提交内容" class="headerlink" title="3.1 提交内容"></a>3.1 提交内容</h3><p>分支 <code>llx/kvs-mooncake-store</code>，提交 <code>429c6e6c69</code>，4 files / 937 insertions。pre-commit hooks（ruff / ruff-format / mypy / typos / signoff）全过。</p>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>行数</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>vllm/v1/hybrid_connector/mooncake_store_data.py</code></td>
+<td>98（新增）</td>
+<td>从社区 <code>mooncake/store/data.py</code> 搬 <code>KeyMetadata</code> / <code>PoolKey</code> / <code>ChunkedTokenDatabase</code></td>
+</tr>
+<tr>
+<td><code>vllm/v1/hybrid_connector/mooncake_store_kvsbackend.py</code></td>
+<td>321（新增）</td>
+<td><code>MooncakeStoreKVSBackend(MooncakeKVSBackend)</code>，覆写 4 个方法</td>
+</tr>
+<tr>
+<td><code>vllm/v1/hybrid_connector/kvsp.py</code></td>
+<td>+5 −2</td>
+<td>加 <code>elif kvs_backend == "mooncake_store"</code> 分派</td>
+</tr>
+<tr>
+<td><code>tests/v1/kv_connector/unit/test_mooncake_store_kvs.py</code></td>
+<td>513（新增）</td>
+<td>21 个单测</td>
+</tr>
+</tbody></table>
+<h3 id="3-2-mooncake-store-data-py-做了什么"><a href="#3-2-mooncake-store-data-py-做了什么" class="headerlink" title="3.2 mooncake_store_data.py 做了什么"></a>3.2 <code>mooncake_store_data.py</code> 做了什么</h3><p>从 <code>~/codes/vllm_comm/vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/data.py</code> 搬三个类，保留 Apache-2.0 头 + adapted-from 注明：</p>
+<ul>
+<li><code>KeyMetadata</code> — <code>model_name / tp_rank / pcp_rank / dcp_rank / pp_rank / group_id / cache_prefix</code></li>
+<li><code>PoolKey</code> — <code>build_prefix()</code> / <code>build_key_string()</code>，key 格式与社区<strong>逐字节兼容</strong>：<br><code>{prefix@}{model}@tp_rank:{r}@pcp{p}@dcp{d}@pp_rank:{pp}@group:{g}@{hash_hex}</code></li>
+<li><code>ChunkedTokenDatabase</code> — 只留 <code>key_for</code> / <code>key_for_hex</code> / <code>set_kv_caches_base_addr</code> / <code>set_block_len</code> / <code>prepare_value_for_block</code></li>
+</ul>
+<p><strong>没搬</strong>：<code>prepare_values</code>、<code>process_tokens</code>、<code>_CompactChunkHashList</code>、<code>chunk_hashes_for_block_size</code>、<code>MooncakeStoreConnectorMetadata</code>（用不上，搬进来是死代码）。因此连 numpy 依赖都不需要，只依赖 <code>BlockHash</code>（<code>vllm/v1/core/kv_cache_utils.py:36</code>，<code>NewType("BlockHash", bytes)</code>）。</p>
+<p><strong>为什么用社区 PoolKey 而不是内部的 <code>hash_hex + "_" + tp_rank</code><strong>：拿到 model_name 命名空间（多模型共用一个 master 不撞 key）、<code>cache_prefix</code>、以及为 hybrid 预留的 <code>group_id</code> 维度。代价是 lookup 侧 key 构造要跟着改。</strong>新旧 key 格式不兼容，两种 kvs_backend 不要共用同一个 mooncake master。</strong></p>
+<h3 id="3-3-MooncakeStoreKVSBackend-覆写了哪-4-个方法"><a href="#3-3-MooncakeStoreKVSBackend-覆写了哪-4-个方法" class="headerlink" title="3.3 MooncakeStoreKVSBackend 覆写了哪 4 个方法"></a>3.3 <code>MooncakeStoreKVSBackend</code> 覆写了哪 4 个方法</h3><p>继承 <code>MooncakeKVSBackend</code>，其余（配置解析、scheduler 侧 meta 构建、EventPool、<code>get_operations</code>、<code>build_backend_meta</code>、<code>SOURCE_LABEL="kvs"</code>、<code>should_save</code>/<code>should_load</code>）全部沿用，所以 hybridsched 的统计 / <code>save_done_source</code> / abort 链路零改动。</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>替换掉的父类逻辑</th>
+<th>新逻辑</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>register_kv_caches</code></td>
+<td><code>store.register_kv_caches(...)</code></td>
+<td>每个唯一 storage 一次 <code>store.register_buffer(base, len)</code>；stride 探测识别 K/V-first（FlashAttn <code>(2,nblk,...)</code>，切 2 段）vs blocks-first（FlashInfer/MLA，1 段），产出 <code>kv_caches_base_addr</code> + <code>block_len</code></td>
+</tr>
+<tr>
+<td><code>async_get_num_new_matched_tokens</code></td>
+<td>key 构造</td>
+<td>用预生成的 <code>self._lookup_prefixes</code>（长度 = tp_size）+ <code>PoolKey.build_key_string</code>；<code>batch_is_exist</code> 调用形式不变</td>
+</tr>
+<tr>
+<td><code>async_load_kv</code></td>
+<td><code>batch_load_kv_async</code> + futures + gather</td>
+<td><code>batch_get_into_multi_buffers(keys, addrs, sizes)</code>，<strong>遇到第一个负码即停</strong></td>
+</tr>
+<tr>
+<td><code>async_save_kv_layer</code></td>
+<td><code>batch_save_kv_async</code></td>
+<td><code>batch_is_exist</code> 去重 → <code>batch_put_from_multi_buffers(k, addrs, sizes, replicate_config)</code></td>
+</tr>
+</tbody></table>
+<p>**所有 store 调用都走 <code>asyncio.to_thread</code>**，绝不在 hybridsched loop 上同步调用（已知的 loop 争用卡点模式）。顺带把父类 lookup 里那个同步 <code>batch_is_exist</code>（直接阻塞 hybridsched loop）也改成 to_thread 了。</p>
+<p><code>async_load_kv</code> / <code>async_save_kv_layer</code> 因为 store 调用在函数中段，是<strong>整体复制父类函数体再替换中间几行</strong>，没有试图 <code>super()</code> 复用。</p>
+<h3 id="3-4-单元测试：21-个，全过"><a href="#3-4-单元测试：21-个，全过" class="headerlink" title="3.4 单元测试：21 个，全过"></a>3.4 单元测试：21 个，全过</h3><p><code>tests/v1/kv_connector/unit/test_mooncake_store_kvs.py</code>。设计要点：</p>
+<ul>
+<li><code>sys.modules</code> 里 stub 掉 <code>mooncake</code> / <code>mooncake.store</code>，测试不需要装 mooncake</li>
+<li><code>object.__new__(MooncakeStoreKVSBackend)</code> 绕过 <code>__init__</code>，不需要 GPU 和 mooncake setup</li>
+<li>用 CPU tensor 测布局探测</li>
+<li>自己写 <code>_run</code> 装饰器包 <code>asyncio.run</code>，**不用 <code>@pytest.mark.asyncio</code>**（target_p/target_d 没装 pytest-asyncio）</li>
+</ul>
+<p>覆盖：key 格式与 cache_prefix 命名空间、三种布局（FlashAttn 2 段 / FlashInfer 1 段 / MLA 1 段）的 segment 数与 region 精确铺满、地址不重叠不越界、<code>register_buffer</code> 失败即抛、lookup 要求全 tp rank 命中、lookup 跳过不足一 block 的请求、load 遇错即停、load 留一个 token 给本地算、save 去重后下标不错位、save 只在最后一层落盘、chunked prefill 不重发、<strong>2D block_ids 归一化（save/load 各一个）+ 多 group 拒绝</strong>。</p>
+<p>跑法（target_d 或 target_p，ecs 没 torch）：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cd</span> /dashscope/caches/workspace/llx/vllm</span><br><span class="line">python3 -m pytest tests/v1/kv_connector/unit/test_mooncake_store_kvs.py --noconftest -q</span><br></pre></td></tr></table></figure>
+
+<h3 id="3-5-target-d-端到端验证：通过"><a href="#3-5-target-d-端到端验证：通过" class="headerlink" title="3.5 target_d 端到端验证：通过"></a>3.5 target_d 端到端验证：通过</h3><p><strong>拓扑</strong>（4× GB200 aarch64，ds-049-013）：</p>
+<table>
+<thead>
+<tr>
+<th>端口</th>
+<th>GPU</th>
+<th>角色</th>
+<th>配置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>8000</td>
+<td>0</td>
+<td>P1</td>
+<td><code>backend=kvs+kvt</code>、<code>kvs_backend=mooncake_store</code>、<code>kv_role=kv_both</code></td>
+</tr>
+<tr>
+<td>8001</td>
+<td>1</td>
+<td>P2</td>
+<td>同上，共享同一 master + 同一 <code>cache_prefix</code>，本地 prefix cache 冷</td>
+</tr>
+<tr>
+<td>8100</td>
+<td>2</td>
+<td>D</td>
+<td><code>backend=kvt</code>、<code>kv_role=kv_consumer</code></td>
+</tr>
+<tr>
+<td>—</td>
+<td>—</td>
+<td>mooncake_master</td>
+<td><code>127.0.0.1:50051</code></td>
+</tr>
+</tbody></table>
+<p><strong>结果</strong>：</p>
+<ul>
+<li>Qwen3-0.6B：<code>external_computed=400</code>（405-token prompt）、<code>=768</code>（771-token）</li>
+<li>Qwen3-8B：<code>external_computed=736 / 896 / 912</code></li>
+<li>KV 注册（Qwen3-8B）：<code>num_layers=36, num_segments=36, num_blocks=67480, block_lens=[65536]</code><br>校验：16 tokens × 2(K/V) × 8 kv_heads × 128 head_dim × 2 bytes = 65536 ✓</li>
+<li>日志里零 store 错误（无 <code>mooncake batch_put failed</code> / <code>register_buffer failed</code>）</li>
+</ul>
+<p><strong>正确性判据（重要）</strong>：见 §5.4。基准必须是<strong>同实例的本地 prefix cache 命中</strong>，不是全量重算。</p>
+<hr>
+<h2 id="4-环境配方"><a href="#4-环境配方" class="headerlink" title="4. 环境配方"></a>4. 环境配方</h2><h3 id="4-1-机器与代码位置"><a href="#4-1-机器与代码位置" class="headerlink" title="4.1 机器与代码位置"></a>4.1 机器与代码位置</h3><table>
+<thead>
+<tr>
+<th>位置</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>ecs <code>~/codes/vllm</code></td>
+<td>内部 vLLM，分支 <code>llx/kvs-mooncake-store</code>。<strong>没有 torch，只能读代码 / py_compile</strong></td>
+</tr>
+<tr>
+<td>ecs <code>~/codes/vllm_comm</code></td>
+<td>社区 vLLM，<code>b908a21f9a</code>，参考实现来源</td>
+</tr>
+<tr>
+<td>target_d (<code>ds-049-013</code>)</td>
+<td>4× GB200 aarch64。<strong>服务用的是 dist-packages 里的 vllm（0.11.1），不是 checkout</strong></td>
+</tr>
+<tr>
+<td>target_p / target_d 共享</td>
+<td><code>/dashscope/caches/workspace/llx/</code>（同一 NAS，两台机看到同一份文件）</td>
+</tr>
+<tr>
+<td><code>/dashscope/caches/workspace/llx/vllm</code></td>
+<td>共享 checkout，<code>develop</code> 2188a0308（比 ecs 分支旧）</td>
+</tr>
+</tbody></table>
+<p><strong>target_d 进不了 gitlab</strong>（<code>gitlab.alibaba-inc.com:80</code> 连不上），同步代码要 git bundle 中转。但 <strong>pypi.org 和 huggingface.co 都可达</strong>。</p>
+<h3 id="4-2-mooncake-安装（aarch64-cu13-的两个坑）"><a href="#4-2-mooncake-安装（aarch64-cu13-的两个坑）" class="headerlink" title="4.2 mooncake 安装（aarch64 + cu13 的两个坑）"></a>4.2 mooncake 安装（aarch64 + cu13 的两个坑）</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 坑 1：aliyun 镜像源没有这个包，必须指定官方源</span></span><br><span class="line">python3 -m pip download mooncake-transfer-engine --no-deps -d /tmp/mcwheel -i https://pypi.org/simple</span><br><span class="line">python3 -m pip install --no-deps /tmp/mcwheel/mooncake_transfer_engine-0.3.12.post1-cp312-cp312-manylinux_2_28_aarch64.whl</span><br><span class="line"></span><br><span class="line"><span class="comment"># 坑 2：wheel 链 libcudart.so.12，但机器是 cu13</span></span><br><span class="line"><span class="comment">#   ImportError: libcudart.so.12: cannot open shared object file</span></span><br><span class="line"><span class="comment"># 从 nvidia-cuda-runtime-cu12 里抽出那个 .so，靠 LD_LIBRARY_PATH 挂上</span></span><br><span class="line"><span class="comment"># soname 不同（.12 vs .13），与 torch 的 cu13 不冲突</span></span><br><span class="line">python3 -m pip download nvidia-cuda-runtime-cu12 --no-deps -d /tmp/cu12 -i https://pypi.org/simple</span><br><span class="line"><span class="comment"># 解出 nvidia/cuda_runtime/lib/libcudart.so.12 → /dashscope/caches/workspace/llx/mcstore_deps/</span></span><br><span class="line"><span class="built_in">export</span> LD_LIBRARY_PATH=<span class="variable">$LD_LIBRARY_PATH</span>:/dashscope/caches/workspace/llx/mcstore_deps</span><br></pre></td></tr></table></figure>
+
+<p>master 二进制在 <code>/usr/local/lib/python3.12/dist-packages/mooncake/mooncake_master</code>，起法 <code>mooncake_master --port 50051</code>。</p>
+<h3 id="4-3-部署方式（target-d）"><a href="#4-3-部署方式（target-d）" class="headerlink" title="4.3 部署方式（target_d）"></a>4.3 部署方式（target_d）</h3><p>服务走 <code>vllm serve</code> 命令 → <strong>dist-packages 里的 vllm</strong>。所以：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 2 个新文件 copy 进去</span></span><br><span class="line"><span class="built_in">cp</span> mooncake_store_data.py mooncake_store_kvsbackend.py \</span><br><span class="line">   /usr/local/lib/python3.12/dist-packages/vllm/v1/hybrid_connector/</span><br><span class="line"><span class="comment"># kvsp.py 打 3 行补丁（原文件备份在 target_d /tmp/kvsp.py.bak）</span></span><br></pre></td></tr></table></figure>
+
+<p>dist-packages 的 vllm 比 ecs 分支旧（没有 <code>SOURCE_LABEL</code> / <code>OperationPlan</code> / <code>sched_discard_zero_block_ids</code>，<code>IoRet</code> 签名也不同），但覆写的 4 个方法不依赖这些，兼容。</p>
+<h3 id="4-4-脚本与日志"><a href="#4-4-脚本与日志" class="headerlink" title="4.4 脚本与日志"></a>4.4 脚本与日志</h3><p>全在 <code>/dashscope/caches/workspace/llx/runs/mcstore/</code>：</p>
+<table>
+<thead>
+<tr>
+<th>脚本</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>run_pd_mcstore.sh [tag]</code></td>
+<td>起 mooncake_master + D(8100) + P1(8000)</td>
+</tr>
+<tr>
+<td><code>run_p2.sh [tag]</code></td>
+<td>起 P2(8001)，共享同一 master + cache_prefix</td>
+</tr>
+<tr>
+<td><code>try_store.sh [n_words] [max_tokens]</code></td>
+<td>一键演示跨实例命中（每次生成新随机 prompt）</td>
+</tr>
+<tr>
+<td><code>ab_test.sh [n_words] [max_tokens]</code></td>
+<td>A/B/C 三路正确性对照（见 §5.4）</td>
+</tr>
+</tbody></table>
+<p>日志：<code>p_t5.log</code>（P1）、<code>p2_t5.log</code>（P2）、<code>d_t5.log</code>（D）、<code>master.log</code>。<code>t1</code>~`t4` 是历史（t1/t2 失败、t3 是 0.6B 且漏了 PYTHONHASHSEED、t4 是修好的 0.6B），<strong>t5 是 Qwen3-8B 的当前配置</strong>。</p>
+<p>脚本支持 <code>MODEL=Qwen3-0.6B</code> 和 <code>TAG=xxx</code> 环境变量。</p>
+<p>有用的 grep：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">L=/dashscope/caches/workspace/llx/runs/mcstore</span><br><span class="line">grep -E <span class="string">"Request added"</span> <span class="variable">$L</span>/p2_t5.<span class="built_in">log</span> | <span class="built_in">tail</span> -5        <span class="comment"># computed= 本地命中, external_computed= store 加载</span></span><br><span class="line">grep <span class="string">"Registered KV caches"</span> <span class="variable">$L</span>/p_t5.<span class="built_in">log</span>               <span class="comment"># 布局探测结果</span></span><br><span class="line">grep -E <span class="string">"Mooncake store|VLLM_KVS"</span> <span class="variable">$L</span>/p_t5.<span class="built_in">log</span>         <span class="comment"># store 连接 + KVS env</span></span><br><span class="line">grep <span class="string">"HybridScheduler status"</span> <span class="variable">$L</span>/p_t5.<span class="built_in">log</span> | <span class="built_in">tail</span> -5   <span class="comment"># 队列深度, 每 10s 一条</span></span><br></pre></td></tr></table></figure>
+
+<p>日志里 4 条 <code>ERROR ... Failed to import Triton kernels</code>（<code>triton_kernels.matmul_ogs</code> 缺失）是这台机器预存在的噪音，与 store 无关，每次启动都有。</p>
+<h3 id="4-5-模型"><a href="#4-5-模型" class="headerlink" title="4.5 模型"></a>4.5 模型</h3><p>target_d 上原有模型除 <code>qwen3-235b-a22b-256k-0717</code>（438G，<code>is_hybrid=False</code>）<strong>全是 hybrid</strong>（qwen3_next / qwen3_5 / qwen3_5_moe），会被 v1 的 assert 挡住。从 HF 下了两个非 hybrid 的小模型：</p>
+<ul>
+<li><code>models/Qwen3-0.6B</code>（<code>is_hybrid=False</code>）</li>
+<li><code>models/Qwen3-8B</code>（<code>is_hybrid=False</code>，16G）</li>
+</ul>
+<p>判断是否 hybrid 不能看 config.json 的字段，要问 vLLM：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">from</span> vllm.config <span class="keyword">import</span> ModelConfig</span><br><span class="line">ModelConfig(model=path).is_hybrid</span><br></pre></td></tr></table></figure>
+
+<p><strong>注意</strong>：hybrid 模型下 attention block_size 会被强制改掉。qwen3.8-27b 实测：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Setting attention block size to 784 tokens to ensure that attention page size is &gt;= mamba page size</span><br><span class="line">Padding mamba page size by 0.13% to ensure that mamba page size and attention page size are exactly equal</span><br></pre></td></tr></table></figure>
+
+<h3 id="4-6-配置样例"><a href="#4-6-配置样例" class="headerlink" title="4.6 配置样例"></a>4.6 配置样例</h3><p>P 节点（<code>kv_role</code> 必须 <code>kv_both</code>，父类 <code>:185</code> 有 assert；<code>is_kv_producer</code> 仍为 True，blade-kvt P 侧逻辑不受影响）：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">{</span></span><br><span class="line">  <span class="attr">"kv_connector"</span><span class="punctuation">:</span> <span class="string">"HybridConnector"</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">"kv_role"</span><span class="punctuation">:</span> <span class="string">"kv_both"</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">"kv_connector_extra_config"</span><span class="punctuation">:</span> <span class="punctuation">{</span></span><br><span class="line">    <span class="attr">"backend"</span><span class="punctuation">:</span> <span class="string">"kvs+kvt"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"kvs_backend"</span><span class="punctuation">:</span> <span class="string">"mooncake_store"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"cache_prefix"</span><span class="punctuation">:</span> <span class="string">"mcstore-t5"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"naming_url"</span><span class="punctuation">:</span> <span class="string">"file:/dashscope/caches/workspace/llx/vllm.naming.mcstore"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"kvt_inst_id"</span><span class="punctuation">:</span> <span class="string">"prefill"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"master_server_address"</span><span class="punctuation">:</span> <span class="string">"127.0.0.1:50051"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"metadata_server"</span><span class="punctuation">:</span> <span class="string">"P2PHANDSHAKE"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"global_segment_size"</span><span class="punctuation">:</span> <span class="string">"8GB"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"local_buffer_size"</span><span class="punctuation">:</span> <span class="number">1073741824</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"protocol"</span><span class="punctuation">:</span> <span class="string">"tcp"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"device_name"</span><span class="punctuation">:</span> <span class="string">""</span></span><br><span class="line">  <span class="punctuation">}</span></span><br><span class="line"><span class="punctuation">}</span></span><br></pre></td></tr></table></figure>
+
+<p>D 节点不挂 KVS：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">{</span></span><br><span class="line">  <span class="attr">"kv_connector"</span><span class="punctuation">:</span> <span class="string">"HybridConnector"</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">"kv_role"</span><span class="punctuation">:</span> <span class="string">"kv_consumer"</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">"kv_connector_extra_config"</span><span class="punctuation">:</span> <span class="punctuation">{</span></span><br><span class="line">    <span class="attr">"backend"</span><span class="punctuation">:</span> <span class="string">"kvt"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"naming_url"</span><span class="punctuation">:</span> <span class="string">"file:/dashscope/caches/workspace/llx/vllm.naming.mcstore"</span><span class="punctuation">,</span></span><br><span class="line">    <span class="attr">"kvt_inst_id"</span><span class="punctuation">:</span> <span class="string">"decode"</span></span><br><span class="line">  <span class="punctuation">}</span></span><br><span class="line"><span class="punctuation">}</span></span><br></pre></td></tr></table></figure>
+
+<p>必需的环境变量：<code>PYTHONHASHSEED=0</code>（见 §5.1）、<code>VLLM_KVS_ON_MIN_LENGTH=64</code>（测试用）、<code>LD_LIBRARY_PATH</code> 含 <code>mcstore_deps</code>。</p>
+<p>调试开关（父类已有）：<code>VLLM_MCKVS_DISABLE_SAVE=1</code> / <code>VLLM_MCKVS_DISABLE_LOAD=1</code> / <code>VLLM_KVS_IO_TIMEOUT_SECONDS</code>。</p>
+<hr>
+<h2 id="5-已定位的坑"><a href="#5-已定位的坑" class="headerlink" title="5. 已定位的坑"></a>5. 已定位的坑</h2><h3 id="5-1-PYTHONHASHSEED-必须固定且各实例一致-——-最阴的一个"><a href="#5-1-PYTHONHASHSEED-必须固定且各实例一致-——-最阴的一个" class="headerlink" title="5.1 PYTHONHASHSEED 必须固定且各实例一致 —— 最阴的一个"></a>5.1 <code>PYTHONHASHSEED</code> 必须固定且各实例一致 —— 最阴的一个</h3><p><code>kv_cache_utils.init_none_hash()</code> 在 <code>PYTHONHASHSEED</code> 未设时用 <code>NONE_HASH = BlockHash(os.urandom(32))</code> 作为 block-hash 链的<strong>根</strong>。跨进程根不同 → 所有 block hash 不同 → key 永远对不上。</p>
+<p><strong>表现是 <code>external_computed=0</code> 但一条错误都没有。</strong> 排查成本极高。</p>
+<p><code>prefix_caching_hash_algo</code> 默认是 <code>sha256</code>（确定性的），所以问题不在算法，只在种子。dashllm 的 mooncake 示例里那句 <code>PYTHONHASHSEED=0</code> 就是干这个的。</p>
+<h3 id="5-2-ReqMeta-block-ids-两条路径维度不一致"><a href="#5-2-ReqMeta-block-ids-两条路径维度不一致" class="headerlink" title="5.2 ReqMeta.block_ids 两条路径维度不一致"></a>5.2 <code>ReqMeta.block_ids</code> 两条路径维度不一致</h3><p>类型标注写的是 <code>list[int]</code>（<code>mooncake_kvsbackend.py:55</code>），但：</p>
+<table>
+<thead>
+<tr>
+<th>路径</th>
+<th>来源</th>
+<th>实际维度</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>save</td>
+<td><code>sched_get_kvblk_ids()</code>（<code>engine_proxy.py:170</code>，返回 <code>list[list[int]]</code>）</td>
+<td><strong>二维</strong>，per kv_cache_group</td>
+</tr>
+<tr>
+<td>load</td>
+<td><code>blocks.get_block_ids()[0]</code>（<code>:489</code>）</td>
+<td><strong>一维</strong>，已取 group 0</td>
+</tr>
+</tbody></table>
+<p>运行时报 <code>TypeError: unsupported operand type(s) for +: 'int' and 'list'</code>。加了 <code>_group0_block_ids()</code> 归一化 + 3 个回归测试。</p>
+<p>顺带发现一个<strong>既存 bug</strong>：父类 <code>mooncake_kvsbackend.py:580</code> 的 <code>sched_get_kvblk_ids(request_id)[:num_populated_blocks]</code> 切的是 <strong>group 维</strong>。单 group 模型下无害（长度 1 的 list 切了还是它自己），hybrid 下会取前 N 个 GDN group。而且两个旧 KVS backend（vineyard / mooncake）<strong>都没有任何 <code>is_hybrid</code> 保护</strong>——新 backend 的 assert 目前是唯一护栏。</p>
+<h3 id="5-3-cache-config-num-gpu-blocks-在-worker-的-config-副本里是-None"><a href="#5-3-cache-config-num-gpu-blocks-在-worker-的-config-副本里是-None" class="headerlink" title="5.3 cache_config.num_gpu_blocks 在 worker 的 config 副本里是 None"></a>5.3 <code>cache_config.num_gpu_blocks</code> 在 worker 的 config 副本里是 None</h3><p>要用 <code>kv_cache_config.num_blocks</code>（KV tensor 本来就是按它分配的，更权威）。社区连接器 assert 前者非 None 能过，是因为社区的调用时机不同。</p>
+<h3 id="5-4-正确性判据：基准必须是本地-prefix-cache，不是全量重算"><a href="#5-4-正确性判据：基准必须是本地-prefix-cache，不是全量重算" class="headerlink" title="5.4 正确性判据：基准必须是本地 prefix cache，不是全量重算"></a>5.4 正确性判据：基准必须是本地 prefix cache，不是全量重算</h3><p>Qwen3-8B 上偶发（5 轮里 1 轮）出现 store 命中的输出与全量重算不一致。用 <code>ab_test.sh</code> 三路对照定位：</p>
+<ul>
+<li><strong>A</strong> = P1 首次（全量计算）</li>
+<li><strong>B</strong> = P1 二次（本地 prefix cache 命中）</li>
+<li><strong>C</strong> = P2（store 命中）</li>
+</ul>
+<p>分歧那轮的结果是 <strong>A ≠ B 且 A ≠ C 但 B == C</strong>。即本地 prefix cache 自己也偏离全量重算，而 store 加载的 KV 与本地缓存的 KV <strong>逐字节等价</strong>。</p>
+<p>根因是复用 KV 时 prefill chunk 边界变化导致浮点累加顺序不同，在接近平票的 token 上翻转，与 store 无关。</p>
+<p><strong>结论：验证 KV 通道正确性时，基准是同实例的本地 prefix cache 命中结果。拿全量重算做基准会误判。</strong></p>
+<h3 id="5-5-pkill-f-会杀掉自己的-ssh-shell"><a href="#5-5-pkill-f-会杀掉自己的-ssh-shell" class="headerlink" title="5.5 pkill -f 会杀掉自己的 ssh shell"></a>5.5 <code>pkill -f</code> 会杀掉自己的 ssh shell</h3><p><code>pkill -9 -f "vllm serve"</code> / <code>pkill -9 -f mooncake_master</code> 的模式串出现在 ssh 自己的命令行里，<code>-f</code> 匹配全命令行 → 杀掉自己（exit 255）。用 <code>"vllm [s]erve"</code> / <code>"mooncake_[m]aster"</code>。</p>
+<h3 id="5-6-scp-多个源文件到单个目标文件名会建目录"><a href="#5-6-scp-多个源文件到单个目标文件名会建目录" class="headerlink" title="5.6 scp 多个源文件到单个目标文件名会建目录"></a>5.6 <code>scp</code> 多个源文件到单个目标文件名会建目录</h3><p><code>scp a.py b.py host:/path/x.py</code> 会创建 <code>x.py/</code> 目录并把两个文件放进去。</p>
+<hr>
+<h2 id="6-未完成的工作"><a href="#6-未完成的工作" class="headerlink" title="6. 未完成的工作"></a>6. 未完成的工作</h2><h3 id="6-1-hybrid-模型支持（多-kv-cache-group）——-最大的一块"><a href="#6-1-hybrid-模型支持（多-kv-cache-group）——-最大的一块" class="headerlink" title="6.1 hybrid 模型支持（多 kv_cache_group）—— 最大的一块"></a>6.1 hybrid 模型支持（多 kv_cache_group）—— 最大的一块</h3><p>v1 用 <code>assert not self.is_hybrid</code> 挡住。这块的估算被修正过<strong>三次</strong>，记录下来避免重蹈：</p>
+<table>
+<thead>
+<tr>
+<th>版本</th>
+<th>说法</th>
+<th>为什么错</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>初版</td>
+<td>「把 <code>ReqMeta.block_ids</code> 改二维就行」</td>
+<td>维度不是问题，语义才是。GDN group 存的是 1 份 recurrent state 快照、attn group 存的是 N 个 block，两者有效性判定完全不同</td>
+</tr>
+<tr>
+<td>二版</td>
+<td>「key 里编码确切 token 数 <code>@tok:T</code>」</td>
+<td>多余。v6d 用「只在 lcm 对齐边界存快照」这个约束替代了显式位置编码，block hash 本身就唯一确定位置</td>
+</tr>
+<tr>
+<td>三版（当前）</td>
+<td>「按 v6d 范式移植」+ 地址计算按 view</td>
+<td>地址计算又被修正一次，见 §6.2</td>
+</tr>
+</tbody></table>
+<h4 id="hybrid-的真实结构-已验证"><a href="#hybrid-的真实结构-已验证" class="headerlink" title="hybrid 的真实结构 [已验证]"></a>hybrid 的真实结构 [已验证]</h4><p><code>HybridBackend._parse_kv_cache_config()</code>（<code>__init__.py:196</code>）+ <code>handle_hybrid_blocks()</code>（<code>kvtbackend.py:190</code>）：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">group 布局: [GDN group × num_gdn_layers] [indexer?] [attn group × 1] [PLE?]</span><br></pre></td></tr></table></figure>
+
+<p><strong>每个 GDN 层是一个独立 group，且每个 group 只有 1 个 block</strong>：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># kvtbackend.py handle_hybrid_blocks</span></span><br><span class="line"><span class="keyword">if</span> group_idx &lt; num_gdn_layers <span class="keyword">or</span> group_idx == ple_group_index:</span><br><span class="line">    handled_blks.append(blocks[runtime_idx:runtime_idx + <span class="number">1</span>])   <span class="comment"># GDN/PLE: 只取 1 块</span></span><br><span class="line"><span class="keyword">else</span>:</span><br><span class="line">    handled_blks.append(grouped_blks[group_idx])                <span class="comment"># attn: 全部 block</span></span><br></pre></td></tr></table></figure>
+
+<p>那 1 块不是「第 N 个 token 的 KV」，是<strong>整段 prefix 跑完后的那一份 recurrent state 快照</strong>。light 模式下常驻 <code>2 + num_speculative_blocks</code> 块，只保留最近一个快照。<code>runtime_idx = 1 if has_null_prefix_block else 0</code>（light/light_flex 模式下 <code>blocks[0]</code> 是 null block）。</p>
+<p>Qwen3-Next 例：27 个 GDN group（各 1 层）+ 1 个 attn group（12 层）。</p>
+<h4 id="要移植的-6-个机制（都在-vllm-distributed-kv-transfer-kv-connector-v1-v6d-object-connector-py）"><a href="#要移植的-6-个机制（都在-vllm-distributed-kv-transfer-kv-connector-v1-v6d-object-connector-py）" class="headerlink" title="要移植的 6 个机制（都在 vllm/distributed/kv_transfer/kv_connector/v1/v6d_object_connector.py）"></a>要移植的 6 个机制（都在 <code>vllm/distributed/kv_transfer/kv_connector/v1/v6d_object_connector.py</code>）</h4><p><strong>M1 · group 分类 + 地址计算</strong>（:1279-1305）</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">full_attention_group_ids / mamba_group_ids   ← 按 isinstance(spec, MambaSpec) 分</span><br><span class="line">group_block_sizes[i]                          ← 每 group 自己的 block_size</span><br><span class="line">hash_block_size = gcd(所有 block_size)         ← vLLM 的 block_hashes 是这个粒度</span><br><span class="line">lcm_block_size  = lcm(所有 block_size)         ← 唯一合法的「交集边界」粒度</span><br></pre></td></tr></table></figure>
+
+<p>换算用 <code>BlockHashListWithBlockSize(block_hashes, hash_block_size, group_block_size)</code>。</p>
+<p>地址计算部分见 §6.2（已修正）。</p>
+<p><strong>M2 · hybrid 下故意少算一个 token</strong>（:1587-1592）</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">num_hash_blocks = (request.num_tokens - <span class="number">1</span>) // <span class="variable language_">self</span>.hash_block_size</span><br></pre></td></tr></table></figure>
+<p>因为最后一个 token 的 GDN state 必须本地算出来。</p>
+<p><strong>M3 · 两阶段交集 lookup</strong>（:1566-1770）</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">阶段A  attn group: 从 num_computed // group_block_size 起连续命中</span><br><span class="line">                   hit_length = min(各 attn group)</span><br><span class="line"></span><br><span class="line">阶段B  mamba group: max = fa_hit_length // lcm * lcm</span><br><span class="line">                    候选边界 = range(max, 0, -lcm)              # 从右往左</span><br><span class="line">                    每 group 对所有候选边界算 key:</span><br><span class="line">                        idx = (num_computed + L) // group_block_size - 1</span><br><span class="line">                        key = hash_of_block[idx]                # 就是边界那块的 hash</span><br><span class="line">                    一次 batch 探测全部候选</span><br><span class="line"></span><br><span class="line">取第一个(=最大的)所有 mamba group 都命中的边界</span><br><span class="line">若有 mamba group 但无一命中 → hit_length = 0</span><br><span class="line">收尾 assert hit_length % lcm_block_size == 0                     # :1764</span><br></pre></td></tr></table></figure>
+
+<p><strong>注意阶段 B 的 key 就是边界那一块的 block hash，不带位置字段</strong>——对齐约束替代了显式编码。</p>
+<p><strong>M4 · mamba 存哪一块</strong>（<code>_get_mamba_store_block_id</code>, :1536）</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">num_fixed_blocks = 2 + num_speculative_blocks        # light 常驻布局</span><br><span class="line">若 len(step_block_ids) == num_fixed_blocks  → None    # 本步无新快照, 不存</span><br><span class="line">否则 → step_block_ids[-1]</span><br></pre></td></tr></table></figure>
+<p>所以<strong>不是每 step 都存</strong>，是「这一步产生了新的对齐快照才存」。</p>
+<p><strong>M5 · mamba 载到哪一块</strong>（<code>_get_mamba_load_target_block_ids</code>, :1483）</p>
+<p>必须写进 <strong>runtime block</strong> = <code>block_ids[0]</code>（且非 0，0 是 null block）。<code>_is_hybrid_backend</code> 为真时只写 runtime block，不额外写 cache block。</p>
+<p><strong>M6 · ref_cnt 保护</strong>（:1167-1215）</p>
+<p>异步存盘期间对 mamba 的 <code>gpu_block_ids</code> 做 <code>block.ref_cnt += 1</code>，登记到 <code>_swap_protected_blocks</code>；完成后 <code>free_blocks()</code> 减回，跨线程走 <code>_defer_release_protected_blocks</code>。目的是防 light 模式的 <code>remove_skipped_blocks</code> 在 DMA 还在飞时把快照块回收掉。<strong>这是正确性必需，不是优化。</strong></p>
+<h4 id="明确不搬的部分"><a href="#明确不搬的部分" class="headerlink" title="明确不搬的部分"></a>明确不搬的部分</h4><p>v6d 的 object/DMA 模型：<code>create</code> / <code>get</code> / <code>async_get</code> / <code>describe_kv_cache</code>、<code>_cached_objs</code> + <code>unfetched_objs</code> 两级暂存、<code>V6dSwapHandler</code>、tier 统计。mooncake 是 key→buffer 的 batch get/put，这些都不需要。</p>
+<p><strong>也不建议把 mooncake 接成 v6d 的 manager</strong>：<code>V6dObjectManager</code> 的 client 接口是对象/DMA 形状的（<code>create</code>/<code>get</code>/<code>async_get</code>/<code>exists</code>/<code>delete</code>/<code>describe_kv_cache</code> + <code>v6d.client.peers.vineyard.mmap_manager</code>），在 mooncake 上模拟这套语义大概比移植调度逻辑更麻烦、更脆。**[未验证]** 只做了浅层判断。</p>
+<h4 id="还要额外解决的-4-件事"><a href="#还要额外解决的-4-件事" class="headerlink" title="还要额外解决的 4 件事"></a>还要额外解决的 4 件事</h4><ol>
+<li><strong><code>_block_pool</code> 引用</strong>：v6d 通过 <code>set_block_pool()</code>（:1163）拿到。新 backend 要走 <code>engine_proxy._sched().kv_cache_manager.block_pool</code>。</li>
+<li><strong>ReqMeta 要重构成 per-group</strong>（每 group 一组 keys + block_ids），不是把 <code>block_ids</code> 二维化就完事——mamba group 存 1 块快照、attn group 存 N 块，语义不同。</li>
+<li><strong>key 的 group 维度要真正用起来</strong>：现在 <code>KeyMetadata.group_id</code> 恒为 0，要变成真实 group id，且 mamba group 与 attn group 的 key 命名空间要分开。</li>
+<li><strong>收益要重新算</strong>：hybrid 下 <code>block_size</code> 是 <strong>784</strong>（不是 16），<code>VLLM_KVS_ON_MIN_LENGTH=2048</code> 只够 2~3 个 block，<code>lcm_block_size</code> 对齐后候选边界会很稀疏。<strong>动手前建议先估一遍命中率，可能收益不如预期。</strong></li>
+</ol>
+<h3 id="6-2-地址计算（M1）——-已落地，提交-d56f40bcd4"><a href="#6-2-地址计算（M1）——-已落地，提交-d56f40bcd4" class="headerlink" title="6.2 地址计算（M1）—— 已落地，提交 d56f40bcd4"></a>6.2 地址计算（M1）—— 已落地，提交 <code>d56f40bcd4</code></h3><p>这是 §6.1 M1 的一部分，也<strong>同时是对当前已跑通实现的简化</strong>。</p>
+<h4 id="要算的是什么"><a href="#要算的是什么" class="headerlink" title="要算的是什么"></a>要算的是什么</h4><p>mooncake 的 API 契约：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">batch_put_from_multi_buffers(keys, addrs, sizes)</span><br><span class="line">    addrs[i] = [addr0, addr1, ...]    # 第 i 个 key 对应的 GPU 地址列表</span><br><span class="line">    sizes[i] = [len0, len1, ...]      # 对应字节长度</span><br></pre></td></tr></table></figure>
+
+<p>mooncake 就是把这些 (地址, 长度) 字节区间从 GPU 显存拷进 store，get 时拷回同样的区间。它对 KV cache 的语义一无所知。</p>
+<p>所以要算的是：<strong>给定一个逻辑单元（某 kv_cache_group 的第 b 个 block），它在显存里对应哪几段 (地址, 字节数)。</strong></p>
+<h4 id="三条已验证的布局事实"><a href="#三条已验证的布局事实" class="headerlink" title="三条已验证的布局事实"></a>三条已验证的布局事实</h4><ol>
+<li><strong>page size 严格统一</strong>：<code>get_uniform_page_size()</code>（<code>kv_cache_utils.py:904</code>）里 <code>assert len(page_sizes) == 1</code>。</li>
+<li><strong><code>shared_by</code> 装的是「各 group 的第 i 层」</strong>（<code>kv_cache_utils.py:1237-1244</code>）：<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> i <span class="keyword">in</span> <span class="built_in">range</span>(group_size):                    <span class="comment"># group_size = max(各 group 层数)</span></span><br><span class="line">    shared_by = []</span><br><span class="line">    <span class="keyword">for</span> j <span class="keyword">in</span> <span class="built_in">range</span>(<span class="built_in">len</span>(kv_cache_groups)):</span><br><span class="line">        <span class="keyword">if</span> i &lt; <span class="built_in">len</span>(kv_cache_groups[j].layer_names):</span><br><span class="line">            shared_by.append(kv_cache_groups[j].layer_names[i])</span><br><span class="line">    kv_cache_tensors.append(KVCacheTensor(size=page_size * num_blocks, shared_by=shared_by))</span><br></pre></td></tr></table></figure>
+这些层共享同一块物理 tensor 且<strong>故意重叠</strong>——所有 group 共用<strong>同一个全局 block-id 空间</strong>，block manager 保证同一时刻一个 block id 只归一个 group 用。Qwen3-Next：27 GDN group（各 1 层）+ 1 attn group（12 层）→ <code>group_size = 12</code> → 12 块 tensor，tensor 0 被 28 层共享。</li>
+<li><strong>mamba 的 block 步长就是一整个 page</strong>（<code>gpu_model_runner.py</code> <code>_reshape_kv_cache_tensors</code> 的 MambaSpec 分支）：<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">storage_offset_bytes = <span class="number">0</span></span><br><span class="line"><span class="keyword">for</span> shape, dtype <span class="keyword">in</span> <span class="built_in">zip</span>(kv_cache_spec.shapes, kv_cache_spec.dtypes):</span><br><span class="line">    num_element_per_page = kv_cache_spec.page_size_bytes // dtype_size</span><br><span class="line">    stride = torch.empty((num_blocks, *shape)).stride()</span><br><span class="line">    target_stride = (num_element_per_page, *stride[<span class="number">1</span>:])     <span class="comment"># ← block 步长 = 整个 page</span></span><br><span class="line">    tensor = torch.as_strided(raw_tensor.view(dtype),</span><br><span class="line">                             size=(num_blocks, *shape),</span><br><span class="line">                             stride=target_stride,</span><br><span class="line">                             storage_offset=storage_offset_bytes // dtype_size)</span><br><span class="line">    storage_offset_bytes += stride[<span class="number">0</span>] * dtype_size           <span class="comment"># ← ssm 的 offset 来自 conv 的大小</span></span><br><span class="line">kv_caches[layer_name] = state_tensors                        <span class="comment"># ← list, 不是 Tensor</span></span><br></pre></td></tr></table></figure>
+即 conv 和 ssm 是同一块 raw tensor 上的两个 strided view，ssm 带 storage_offset，一个 page 内布局是 <code>[conv | ssm | padding]</code>（padding 约 0.13%）。</li>
+</ol>
+<h4 id="结论"><a href="#结论" class="headerlink" title="结论"></a>结论</h4><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">第 b 个 block 在第 i 号 tensor slot 里的位置</span><br><span class="line">    = tensors[i].base + b * page_size_bytes,  长度 page_size_bytes</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><strong>mamba group</strong>（1 层）→ 只占 slot 0 → <strong>1 段</strong>，一段 <code>page_size_bytes</code> 就把 conv+ssm+padding 全覆盖</li>
+<li><strong>attn group</strong>（12 层）→ slot 0..11 → <strong>每层 1~2 段</strong>，取决于该后端是 blocks-first（1 段）还是 K/V-first（2 段）</li>
+</ul>
+<p><strong>是按 tensor slot 算，不是按每一层算。</strong> 一个 slot 上叠着 28 层（27 个 GDN group 各 1 层 + attn group 的第 0 层），但它们用不同的 block id，所以从寻址角度 slot 只是「一块 <code>num_blocks × page_size</code> 的数组」。</p>
+<p>这也解释了 kvtbackend 为什么把整块 storage 拍平成 1-D view 注册（<code>kvtbackend.py:900-906</code>）：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">flat_view = torch.empty(<span class="number">0</span>, dtype=..., device=...)</span><br><span class="line">flat_view.set_(storage, <span class="number">0</span>, (total_elems,), (<span class="number">1</span>,))</span><br><span class="line">physical_tensors[last_attn] = flat_view</span><br></pre></td></tr></table></figure>
+<p>它<strong>故意放弃 per-layer 形状</strong>，把 layout 元信息（<code>conv_state_shape</code> / <code>ssm_state_shape</code> / <code>gdn_conv_elem_size</code> / <code>gdn_ssm_elem_size</code> / <code>num_gdn_layers</code> / <code>num_ple_layers</code> / <code>attn_pack_size</code>）作为 <code>_hybrid_kwargs</code> 单独传给 C++，让 blade-kvt 自己算——因为寻址纯粹是 <code>base + block_id * page_size</code>，跟层的 shape 无关。</p>
+<h4 id="已落地的改动（d56f40bcd4）"><a href="#已落地的改动（d56f40bcd4）" class="headerlink" title="已落地的改动（d56f40bcd4）"></a>已落地的改动（<code>d56f40bcd4</code>）</h4><p>旧实现是「遍历 <code>kv_caches</code> dict、按 <code>untyped_storage().data_ptr()</code> 去重、<code>region_len // num_blocks</code> 算 page size、stride 探测外层维」。它的问题：</p>
+<ul>
+<li><strong>非 hybrid 下是对的</strong>（每层独占一块 tensor，恰好等价）</li>
+<li><strong>hybrid 下坏两处</strong>：① 去重会把共享同一 slot 的 27 个 GDN 层全部跳过，只留第一个；② mamba 层是 <code>list</code>，<code>cache.element_size()</code> / <code>cache.ndim</code> 直接 AttributeError</li>
+</ul>
+<p>改成：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> group_id, group <span class="keyword">in</span> <span class="built_in">enumerate</span>(kv_cache_config.kv_cache_groups):</span><br><span class="line">    page_size_bytes = group.kv_cache_spec.page_size_bytes      <span class="comment"># 来自 spec, 权威</span></span><br><span class="line">    <span class="keyword">for</span> layer_name <span class="keyword">in</span> group.layer_names:                        <span class="comment"># 按 group 的层走</span></span><br><span class="line">        cache = kv_caches[layer_name]</span><br><span class="line">        repr_tensor = cache[<span class="number">0</span>] <span class="keyword">if</span> <span class="built_in">isinstance</span>(cache, (<span class="built_in">list</span>, <span class="built_in">tuple</span>)) <span class="keyword">else</span> cache</span><br><span class="line">        <span class="comment"># register_buffer 仍按 storage 去重</span></span><br><span class="line">        <span class="keyword">for</span> seg_addr, seg_len <span class="keyword">in</span> _layer_segments(cache, page_size_bytes, num_blocks):</span><br><span class="line">            ...</span><br><span class="line">    <span class="variable language_">self</span>._dbs[group_id].set_kv_caches_base_addr(addrs)</span><br></pre></td></tr></table></figure>
+
+<p><code>_layer_segments()</code> 统一三种情况：</p>
+<table>
+<thead>
+<tr>
+<th>输入</th>
+<th>段数</th>
+<th>依据</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>mamba <code>[conv, ssm]</code></td>
+<td>1 段，<code>page_size_bytes</code></td>
+<td><code>stride(0)</code> 跨整个 page，一段覆盖 conv+ssm+padding</td>
+</tr>
+<tr>
+<td>attn blocks-outermost（FlashInfer/MLA）</td>
+<td>1 段，<code>page_size_bytes</code></td>
+<td>无维度的 byte-stride 超过一个 page</td>
+</tr>
+<tr>
+<td>attn K/V-first（FlashAttn <code>(2, nblk, ...)</code>）</td>
+<td>2 段</td>
+<td>K/V 维 stride 跨整个 K 区，切成两段</td>
+</tr>
+</tbody></table>
+<p>同时 <code>KeyMetadata.group_id</code> 从恒 0 变成真实 group id，同一 block hash 在不同 group 不再撞 key。</p>
+<p><strong>验证</strong>：22 个单测（新增 1 个用合成 hybrid config：2 个 GDN group + 1 个 2 层 attn group、slot 0 被 3 层共享、mamba 用真实的 <code>as_strided</code> 视图），非 hybrid 端到端回归通过——Qwen3-8B 仍是 <code>group=0 num_segments=36 page_size=65536 block_lens=[65536]</code>，<code>external_computed=896/912/928</code>，A/B/C 三轮里 <code>B == C</code> 恒成立。</p>
+<p><strong>[未验证]</strong> attn 分支是否存在「K 和 V 不在同一 page 内」的布局。<code>_layer_segments</code> 的 stride 探测保留了这个分支，单测覆盖了 FlashAttn 的 2 段情况，但没在真实 FlashAttn 后端上跑过（GB200 上跑出来是 1 段的 blocks-outermost 布局）。</p>
+<h3 id="6-3-standalone-store-模式"><a href="#6-3-standalone-store-模式" class="headerlink" title="6.3 standalone-store 模式"></a>6.3 <code>standalone-store</code> 模式</h3><p>纯配置切换（<code>global_segment_size: 0</code> + 独立起 <code>mooncake_client</code> 或 <code>mooncake_store_service.py</code>），不用改代码。<strong>没跑过。</strong> 做这个才能验证跨 vLLM 重启的持久性。</p>
+<h3 id="6-4-batch-is-exist-是否授予-lease-——-已查清：会，TTL-10s"><a href="#6-4-batch-is-exist-是否授予-lease-——-已查清：会，TTL-10s" class="headerlink" title="6.4 batch_is_exist 是否授予 lease —— 已查清：会，TTL 10s"></a>6.4 <code>batch_is_exist</code> 是否授予 lease —— <strong>已查清：会，TTL 10s</strong></h3><p><code>master_service.cpp:2772</code>(<code>ExistKey</code>) 和 <code>:2797</code>(<code>BatchExistKey</code>) 都调 <code>GrantLeaseForGroup</code>/<code>GrantReadLease(default_kv_lease_ttl_)</code>，默认 <strong>10000ms</strong>(<code>master.cpp:33</code> 有 <code>static_assert(DEFAULT_DEFAULT_KV_LEASE_TTL == 10000)</code>)。</p>
+<ul>
+<li><strong>好消息</strong>：lookup→load 窗口有 10s 保护，不需要额外防护，本节原先担心的竞态不存在。</li>
+<li><strong>坏消息</strong>：<strong>探测即续命</strong>。每次前缀探测都给对象延寿、豁免驱逐，高并发下把可驱逐池压小，反过来让驱逐去砍「刚写进去还没被探过」的键。</li>
+</ul>
+<p>（下面是当初的待查记录，保留作背景）</p>
+<p><strong>问题</strong>：lookup（scheduler 线程，<code>batch_is_exist</code>）到 load（worker 线程，<code>batch_get_into_multi_buffers</code>）之间有真实时间差（实测约 1.1 秒：<code>add req</code> 12:57:05.832 → <code>Request added</code> 12:57:06.928）。这期间 Master 可以自主驱逐对象（超 0.90 水位触发、清 5%；或 soft pin 30 分钟到期），vLLM 拿不到通知。</p>
+<p><strong>已确认</strong>：租约确实拦驱逐（<code>store.so</code> 里有 <code>has active lease, skipping</code>、<code>OBJECT_HAS_LEASE</code>；<code>remove</code> 的 docstring 写「Requires lease to be expired」）。API 名是 <code>GrantReadLease</code> / <code>GrantLeaseForGroup</code>。</p>
+<p><strong>未确认</strong>：<code>batch_is_exist</code> 会不会授予/刷新租约。pybind docstring 只写返回值语义；抓了 <code>master_service.cpp</code> 但源码在 <code>ExistKey</code> handler 处被截断，只看到 <code>GrantReadLease</code> 在 <code>ReMountSegment</code> 和 <code>GrantLeaseForGroup</code> 里被调。要定论得完整拉一遍那个文件，grep <code>ExistKey</code> / <code>BatchExistKey</code> 有没有调 <code>GrantLeaseForGroup</code>。</p>
+<p><strong>为什么优先级不高</strong>：这个竞态<strong>不影响正确性</strong>，架构本身已容忍——</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">_on_add_req():</span><br><span class="line">    rmt = await async_get_num_new_matched_tokens(...)     ← 只是「预告」</span><br><span class="line">    req.num_pending_external_computed_tokens = rmt</span><br><span class="line">    → _prepared → async_load_kv()</span><br><span class="line">    → yield IoRet(reqid, n=num_loaded_token)              ← 这个 n 才是「实际」</span><br><span class="line">    → mark_loaded(req, ioret)</span><br></pre></td></tr></table></figure>
+
+<p>lookup 返回待定值，真正提交给 scheduler 的是 load 之后 <code>IoRet.n</code> 里的实际加载量。load 遇错即停并据此算 <code>num_loaded_token</code>，所以中途被驱逐的结果是「声明 25 块、实际报 7 块」，scheduler 按 7 块推进、剩下正常重算，再加 <code>kv_load_failure_policy='recompute'</code> 兜底。</p>
+<p>所以 lease TTL 影响的是<strong>命中率和白做的功</strong>，不是正确性。等真跑出命中率不达预期时再回来查。</p>
+<h3 id="6-5-其他没做的"><a href="#6-5-其他没做的" class="headerlink" title="6.5 其他没做的"></a>6.5 其他没做的</h3><ul>
+<li><code>kvsp.py</code> 的 dispatch 分支<strong>没有运行时验证过</strong>（target_d 的 dist-packages 里那份是手工打的补丁，逻辑上走到了；ecs 分支上的那份只做了 py_compile）。</li>
+<li>社区的 disk/SSD offload、partial-tail offload、replica tier 日志、独立 metrics/prom 指标。</li>
+<li>多副本 placement、cache-aware routing。</li>
+<li>真实模型上量 store 命中带来的 TTFT 收益。</li>
+<li>GSM8K 精度对齐（当前只做了逐字节输出对比）。</li>
+<li><code>kvs_backend="vineyard"</code> 与纯 <code>backend="kvt"</code> 两条老路径的回归（改动是新增分支 + 新文件，理论上零影响，但没实测）。</li>
+</ul>
+<hr>
+<h2 id="7-风险"><a href="#7-风险" class="headerlink" title="7. 风险"></a>7. 风险</h2><table>
+<thead>
+<tr>
+<th>风险</th>
+<th>说明</th>
+<th>状态</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>hybridsched loop 争用</strong></td>
+<td>store 的 C++ batch 调用是阻塞的，必须 <code>asyncio.to_thread</code>。已知的 loop 争用会导致请求卡住</td>
+<td>已按 to_thread 实现；上线前要看 <code>kvt_dur</code> / lifecycle 统计有没有队列等待放大</td>
+</tr>
+<tr>
+<td><strong>同一块 GPU KV 内存被两库注册</strong></td>
+<td><code>KVSP.register_kv_caches</code> 先 <code>_s</code> 后 <code>_p</code>，mooncake 的 <code>register_buffer</code> 与 blade-kvt/barex 的 MR 注册并存</td>
+<td>NVIDIA + tcp 实测无问题</td>
+</tr>
+<tr>
+<td><strong>PPU 上的失效地址</strong></td>
+<td><code>kvtbackend.py:374</code> 的 <code>alloc_kv_cache_ppu()</code> 会 <code>cache.set_(mem_storage, ...)</code> <strong>换掉底层 storage</strong>。若它在 <code>_s</code> 注册之后执行，mooncake 会持有失效地址</td>
+<td>NVIDIA + tcp 路径该函数提前 return；<strong>PPU 未验证，v1 不支持</strong></td>
+</tr>
+<tr>
+<td><strong>key 格式与老 <code>kvs_backend="mooncake"</code> 不兼容</strong></td>
+<td>PoolKey 格式 vs <code>hash_hex + "_" + tp_rank</code></td>
+<td>别共用同一个 mooncake master</td>
+</tr>
+<tr>
+<td><strong>失败即停的 prefix 语义</strong></td>
+<td><code>batch_get_into_multi_buffers</code> 返回逐 key 码，任一 block 失败后面的必须全丢，否则 KV 出现空洞导致输出跑题</td>
+<td>已实现；有单测覆盖</td>
+</tr>
+<tr>
+<td><strong>embedded 模式数据不持久</strong></td>
+<td>store 内存住在 vLLM 进程里，重启即丢</td>
+<td>已知；要持久得上 standalone-store</td>
+</tr>
+<tr>
+<td><strong>hybrid 静默出错</strong></td>
+<td>两个旧 KVS backend（vineyard / mooncake）都没有 <code>is_hybrid</code> 保护，且父类 <code>:580</code> 切 group 维。hybrid 下会算错但不报错</td>
+<td>新 backend 有 assert 挡住；<strong>旧 backend 的隐患仍在，值得单独修</strong></td>
+</tr>
+<tr>
+<td><strong>target_d 运行时版本太旧</strong></td>
+<td>dist-packages vllm（0.11.1）没有 <code>_ple_group_index</code>，ecs 分支的 hybrid 代码在那儿跑不起来（探针实测 <code>AttributeError</code>）</td>
+<td><strong>阻塞 hybrid 的端到端验证</strong>，需先升级 target_d 或换机器</td>
+</tr>
+<tr>
+<td><strong>hybrid 命中率可能不达预期</strong></td>
+<td>hybrid 下 block_size=784，<code>lcm_block_size</code> 对齐后候选边界稀疏</td>
+<td>动手前先估算</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="8-下一步"><a href="#8-下一步" class="headerlink" title="8. 下一步"></a>8. 下一步</h2><p>M1（地址层）已完成。剩下的：</p>
+<ol>
+<li><strong>hybrid 的 M2~M6</strong>（§6.1）+ 4 件额外事项（<code>_block_pool</code> 引用、ReqMeta 改 per-group、mamba key 命名空间、命中率估算）。<strong>前置</strong>：target_d 运行时缺 <code>_ple_group_index</code>，端到端验证需先升级或换机器。建议<strong>动手前先估命中率</strong>——hybrid 下 block_size=784，<code>lcm_block_size</code> 对齐后候选边界很稀疏，收益可能不如预期。</li>
+<li><strong>standalone-store</strong>（§6.3）—— 纯配置，能验证跨重启持久性，顺带解锁「重启 P」这个更自然的验证方式。</li>
+</ol>
+<p>另外两件小事：修掉 §5.2 里旧 KVS backend 的 group 维切片 + 加 <code>is_hybrid</code> 保护（hybrid 下会静默出错）；补 §6.5 的老路径回归。</p>
+<p><strong>一条判断修正</strong>：本文档早先把「地址计算修正」列为可独立先做的第一步，这个判断偏了——非 hybrid 下 <code>kv_cache_tensors</code> 是每层一个（<code>kv_cache_utils.py:1215</code> 的 <code>shared_by=[layer_name]</code>），没有共享 slot，去重永远不会丢层，所以单独做是行为上的 no-op。它只有作为 hybrid 的前置才有意义，因此最终是连着合成 hybrid config 的单测一起落的。</p>
+</div><div class="article-licensing box"><div class="licensing-title"><p>Mooncake Store + blade-kvt 接入进展</p><p><a href="https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-progress/">https://llx-08.github.io/notes/2026/08/25/2026-08-25-mooncake-store-progress/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-08-25</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-08-25</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">Mooncake Store + PD 分离：cache-aware 调度与 KV 驱逐</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/08/25/2026-08-25-mooncake-store-scheduling-experiments/"><span class="level-item">Mooncake Store：cache-aware 调度与驱逐实验记录</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">94</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">5</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">28</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/"><span class="level-start"><span class="level-item">Mooncake Store 与 cache-aware 调度</span></span><span class="level-end"><span class="level-item tag">8</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">16</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/"><span class="level-start"><span class="level-item">vllm、Blade-kvt与PD分离</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-00-background-and-motivation/">00 · 背景与动机</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-01-store-architecture/">01 · Store 架构与源码</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-02-scheduler-design/">02 · 调度器设计</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-03-experiments/">03 · 实验编年史</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-25T00:00:00.000Z">2026-08-25</time></p><p class="title"><a href="/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-04-conclusions-and-methodology/">04 · 结论与方法论</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/08/"><span class="level-start"><span class="level-item">八月 2026</span></span><span class="level-end"><span class="level-item tag">12</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">54</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Attention/"><span class="tag">Attention</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">27</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Blade-KVT/"><span class="tag">Blade-KVT</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/DCP/"><span class="tag">DCP</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Hybrid-Connector/"><span class="tag">Hybrid Connector</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/KV-Cache/"><span class="tag">KV Cache</span><span class="tag">20</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MLA/"><span class="tag">MLA</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Mooncake/"><span class="tag">Mooncake</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/"><span class="tag">PD 分离</span><span class="tag">19</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">12</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">16</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/cache-aware-%E8%B0%83%E5%BA%A6/"><span class="tag">cache-aware 调度</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">59</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%A9%B1%E9%80%90%E7%AD%96%E7%95%A5/"><span class="tag">驱逐策略</span><span class="tag">8</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
