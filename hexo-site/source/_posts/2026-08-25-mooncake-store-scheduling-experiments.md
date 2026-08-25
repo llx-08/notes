@@ -3,6 +3,7 @@ title: "Mooncake Store：cache-aware 调度与驱逐实验记录"
 date: 2026-08-25
 tags: []
 ---
+
 # Mooncake Store：cache-aware 调度与驱逐实验记录
 
 配套文档：`mooncake_store_progress.md`（backend 实现、接线、环境配方、hybrid M1~M6）。
