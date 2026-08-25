@@ -71,6 +71,20 @@ SERIES = (
         ],
     },
     {
+        "directory": "mooncake_store_kv_scheduling",
+        "slug_prefix": "mooncake-store-kv-scheduling",
+        "category": "Mooncake Store 与 cache-aware 调度",
+        "tags": [
+            "Mooncake",
+            "KV Cache",
+            "PD 分离",
+            "cache-aware 调度",
+            "vLLM",
+            "驱逐策略",
+            "学习笔记",
+        ],
+    },
+    {
         "directory": "vllm_blade_kvt_pd_learning",
         "slug_prefix": "vllm-blade-kvt-pd-learning",
         "category": "vllm、Blade-kvt与PD分离",

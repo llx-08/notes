@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="430" viewBox="0 0 900 430" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <rect width="900" height="430" fill="#ffffff"/>
+  <text x="450" y="28" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1a1a">Mooncake Store (KVS) 与 blade-kvt (KVT) 不在同一层</text>
+  <text x="450" y="48" text-anchor="middle" font-size="12" fill="#666">前者是跨请求的共享存储，后者是单次 P→D 的传输通道；两者叠加而非替代</text>
+
+  <!-- Prefill node -->
+  <rect x="40" y="80" width="250" height="180" rx="8" fill="#eef4fb" stroke="#5b8fc7" stroke-width="1.5"/>
+  <text x="165" y="103" text-anchor="middle" font-size="13" font-weight="600" fill="#24486e">Prefill 节点 (kv_role=kv_both)</text>
+  <rect x="62" y="118" width="206" height="42" rx="5" fill="#ffffff" stroke="#8fb4d9"/>
+  <text x="165" y="139" text-anchor="middle" font-size="12" fill="#24486e">GPU HBM prefix cache</text>
+  <text x="165" y="153" text-anchor="middle" font-size="10.5" fill="#7a8fa6">vLLM block_pool，本地命中 ~90%</text>
+  <rect x="62" y="172" width="206" height="36" rx="5" fill="#ffffff" stroke="#8fb4d9"/>
+  <text x="165" y="194" text-anchor="middle" font-size="12" fill="#24486e">host DRAM segment 100 GB</text>
+  <rect x="62" y="216" width="206" height="30" rx="5" fill="#fdf3e3" stroke="#d8a75a"/>
+  <text x="165" y="236" text-anchor="middle" font-size="11.5" fill="#7a5716">HybridConnector: backend=kvs+kvt</text>
+
+  <!-- Decode node -->
+  <rect x="610" y="80" width="250" height="180" rx="8" fill="#f3eefb" stroke="#8b6fc7" stroke-width="1.5"/>
+  <text x="735" y="103" text-anchor="middle" font-size="13" font-weight="600" fill="#4a2e78">Decode 节点 (kv_role=kv_consumer)</text>
+  <rect x="632" y="118" width="206" height="42" rx="5" fill="#ffffff" stroke="#b49ad9"/>
+  <text x="735" y="139" text-anchor="middle" font-size="12" fill="#4a2e78">GPU HBM</text>
+  <text x="735" y="153" text-anchor="middle" font-size="10.5" fill="#7a8fa6">--no-enable-prefix-caching</text>
+  <rect x="632" y="216" width="206" height="30" rx="5" fill="#fdf3e3" stroke="#d8a75a"/>
+  <text x="735" y="236" text-anchor="middle" font-size="11.5" fill="#7a5716">HybridConnector: backend=kvt</text>
+
+  <!-- KVT arrow -->
+  <line x1="290" y1="139" x2="608" y2="139" stroke="#c0392b" stroke-width="2.5" marker-end="url(#ar)"/>
+  <rect x="360" y="108" width="180" height="26" rx="4" fill="#fdecea" stroke="#c0392b"/>
+  <text x="450" y="126" text-anchor="middle" font-size="12" font-weight="600" fill="#a03024">KVT: blade-kvt RDMA_DIRECT</text>
+  <text x="450" y="160" text-anchor="middle" font-size="10.5" fill="#a03024">单次请求的 P→D 传输 · 显式 src/dst block id · 传完即结束</text>
+
+  <!-- Store pool -->
+  <rect x="230" y="300" width="440" height="96" rx="8" fill="#eaf6ee" stroke="#48945f" stroke-width="1.5"/>
+  <text x="450" y="323" text-anchor="middle" font-size="13" font-weight="600" fill="#1f5c33">Mooncake Store = 全局池（7 个 segment 的总和 700 GB）</text>
+  <text x="450" y="342" text-anchor="middle" font-size="11" fill="#2d6b42">内容寻址 (block hash) · 跨请求/跨实例复用 · 近似 LRU 驱逐</text>
+  <text x="450" y="360" text-anchor="middle" font-size="11" fill="#2d6b42">默认 allocation_strategy=random → 一次 put 只有 1/7 落在本机</text>
+  <text x="450" y="380" text-anchor="middle" font-size="11" fill="#8a5a00">master 只管元数据，不在数据面；client↔client 直连 RDMA</text>
+
+  <line x1="165" y1="248" x2="300" y2="298" stroke="#48945f" stroke-width="2" marker-end="url(#ar2)"/>
+  <text x="120" y="286" font-size="11" fill="#1f5c33">KVS: save / load</text>
+
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#c0392b"/>
+    </marker>
+    <marker id="ar2" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#48945f"/>
+    </marker>
+  </defs>
+</svg>

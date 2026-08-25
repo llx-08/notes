@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <rect width="900" height="500" fill="#ffffff"/>
+  <text x="450" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1a1a">同一个策略，五次测量，四个结论 —— 其中三个是基础设施缺陷伪装的</text>
+
+  <line x1="70" y1="120" x2="840" y2="120" stroke="#ccc" stroke-width="2"/>
+
+  <!-- r1 -->
+  <circle cx="140" cy="120" r="7" fill="#c0392b"/>
+  <rect x="72" y="140" width="136" height="120" rx="6" fill="#fdecea" stroke="#c0392b"/>
+  <text x="140" y="160" text-anchor="middle" font-size="12" font-weight="600" fill="#a03024">领先 27%</text>
+  <text x="140" y="178" text-anchor="middle" font-size="10.5" fill="#7d2a20">跨机单网卡</text>
+  <text x="80" y="200" font-size="10" fill="#7d2a20">7 个 P 挤一张</text>
+  <text x="80" y="214" font-size="10" fill="#7d2a20">mlx5_bond_0，</text>
+  <text x="80" y="228" font-size="10" fill="#7d2a20">store 读被单口</text>
+  <text x="80" y="242" font-size="10" fill="#7d2a20">带宽卡住</text>
+  <text x="140" y="258" text-anchor="middle" font-size="10" font-weight="600" fill="#a03024">虚高</text>
+
+  <!-- r2 -->
+  <circle cx="290" cy="120" r="7" fill="#c0392b"/>
+  <rect x="222" y="140" width="136" height="120" rx="6" fill="#fdecea" stroke="#c0392b"/>
+  <text x="290" y="160" text-anchor="middle" font-size="12" font-weight="600" fill="#a03024">落后 37%</text>
+  <text x="290" y="178" text-anchor="middle" font-size="10.5" fill="#7d2a20">绝对护栏失效</text>
+  <text x="230" y="200" font-size="10" fill="#7d2a20">think time 让瞬时</text>
+  <text x="230" y="214" font-size="10" fill="#7d2a20">inflight 恒为 0/1，</text>
+  <text x="230" y="228" font-size="10" fill="#7d2a20">阈值从不触发 →</text>
+  <text x="230" y="242" font-size="10" fill="#7d2a20">流量雪球 43 vs 7</text>
+  <text x="290" y="258" text-anchor="middle" font-size="10" font-weight="600" fill="#a03024">实现缺陷</text>
+
+  <!-- r3 -->
+  <circle cx="440" cy="120" r="7" fill="#d8a75a"/>
+  <rect x="372" y="140" width="136" height="120" rx="6" fill="#fdf7ee" stroke="#d9b473"/>
+  <text x="440" y="160" text-anchor="middle" font-size="12" font-weight="600" fill="#7a5716">领先 7%</text>
+  <text x="440" y="178" text-anchor="middle" font-size="10.5" fill="#5c4310">护栏修好</text>
+  <text x="380" y="200" font-size="10" fill="#5c4310">改成「衰减累积</text>
+  <text x="380" y="214" font-size="10" fill="#5c4310">分配量的相对阈</text>
+  <text x="380" y="228" font-size="10" fill="#5c4310">值」ratio=1.5</text>
+  <text x="440" y="252" text-anchor="middle" font-size="10" font-weight="600" fill="#7a5716">仍在噪声内</text>
+
+  <!-- r4 -->
+  <circle cx="590" cy="120" r="7" fill="#c0392b"/>
+  <rect x="522" y="140" width="136" height="120" rx="6" fill="#fdecea" stroke="#c0392b"/>
+  <text x="590" y="160" text-anchor="middle" font-size="12" font-weight="600" fill="#a03024">领先 3.5%</text>
+  <text x="590" y="178" text-anchor="middle" font-size="10.5" fill="#7d2a20">重算 3% (!)</text>
+  <text x="530" y="200" font-size="10" fill="#7d2a20">store 常驻 0.90</text>
+  <text x="530" y="214" font-size="10" fill="#7d2a20">水位持续驱逐，</text>
+  <text x="530" y="228" font-size="10" fill="#7d2a20">命中率在 1~24%</text>
+  <text x="530" y="242" font-size="10" fill="#7d2a20">之间随机漂移</text>
+  <text x="590" y="258" text-anchor="middle" font-size="10" font-weight="600" fill="#a03024">不可复现</text>
+
+  <!-- r5 -->
+  <circle cx="760" cy="120" r="8" fill="#48945f"/>
+  <rect x="682" y="140" width="156" height="120" rx="6" fill="#eaf6ee" stroke="#48945f" stroke-width="1.5"/>
+  <text x="760" y="160" text-anchor="middle" font-size="12" font-weight="600" fill="#1f5c33">差 0.02%</text>
+  <text x="760" y="178" text-anchor="middle" font-size="10.5" fill="#2d6b42">干净重测（定论）</text>
+  <text x="690" y="200" font-size="10" fill="#2d6b42">store 清空 + 交替</text>
+  <text x="690" y="214" font-size="10" fill="#2d6b42">重复 + 每轮查驱逐</text>
+  <text x="690" y="228" font-size="10" fill="#2d6b42">433 请求 × 4 臂</text>
+  <text x="760" y="252" text-anchor="middle" font-size="10" font-weight="600" fill="#1f5c33">无法分辨</text>
+
+  <!-- verdict box -->
+  <rect x="70" y="286" width="770" height="94" rx="8" fill="#f7f9fc" stroke="#b9c6d6"/>
+  <text x="86" y="308" font-size="13" font-weight="600" fill="#24486e">三个不会漂移的绝对基准，就是靠它们否定掉前四个结论的</text>
+  <text x="86" y="330" font-size="11.5" fill="#444">① <tspan font-weight="600">重算下界 = 2/(N+1)</tspan>　8 轮 22%、24 轮 8% ——「重算 3%」在 8 轮下物理不可能</text>
+  <text x="86" y="350" font-size="11.5" fill="#444">② <tspan font-weight="600">噪声下限</tspan>　同配置重复间差实测 1.2~2.0% ——「领先 3.5%」本来就在噪声内</text>
+  <text x="86" y="370" font-size="11.5" fill="#444">③ <tspan font-weight="600">恒等式</tspan>　重算 token 数 = store 净增长 = Σ(各 trial 最终上下文)　1,547,716 × 60 KiB = 88.6 GiB ≈ 实测 88.5 GB</text>
+
+  <rect x="70" y="394" width="770" height="88" rx="8" fill="#eaf6ee" stroke="#48945f"/>
+  <text x="86" y="416" font-size="13" font-weight="600" fill="#1f5c33">最终判断：收益取决于「选错节点的代价」，不取决于命中率高低</text>
+  <text x="86" y="438" font-size="11.5" fill="#2d6b42">store 带宽充裕时，一次 store 读只值 3~5 ms / 2,556 ms = 0.2% → 任何策略差异都被噪声吞掉。</text>
+  <text x="86" y="458" font-size="11.5" fill="#2d6b42">最早那个 +27% 的真正来源是单网卡把 store 读卡住了，不是「亲和识别得更准」。</text>
+  <text x="86" y="476" font-size="11.5" fill="#2d6b42">avg_match=162 chunks 说明亲和识别一直很准 —— <tspan font-weight="600">识别准 ≠ 跑得快</tspan>。</text>
+</svg>
