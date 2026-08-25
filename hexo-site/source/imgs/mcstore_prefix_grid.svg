@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <rect width="900" height="470" fill="#ffffff"/>
+  <text x="450" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1a1a">前缀指纹：线性网格 vs 几何网格</text>
+  <text x="450" y="46" text-anchor="middle" font-size="12" fill="#666">两者都是「嵌套前缀 + 累积哈希」，区别只在前缀长度的采样密度</text>
+
+  <!-- linear -->
+  <text x="40" y="76" font-size="13" font-weight="600" fill="#a03024">线性 512 字符网格（改动前）</text>
+  <line x1="40" y1="96" x2="820" y2="96" stroke="#ccc" stroke-width="1"/>
+  <g fill="#c0392b">
+    <circle cx="60" cy="96" r="3.2"/><circle cx="86" cy="96" r="3.2"/><circle cx="112" cy="96" r="3.2"/><circle cx="138" cy="96" r="3.2"/>
+    <circle cx="164" cy="96" r="3.2"/><circle cx="190" cy="96" r="3.2"/><circle cx="216" cy="96" r="3.2"/><circle cx="242" cy="96" r="3.2"/>
+    <circle cx="268" cy="96" r="3.2"/><circle cx="294" cy="96" r="3.2"/><circle cx="320" cy="96" r="3.2"/><circle cx="346" cy="96" r="3.2"/>
+    <circle cx="372" cy="96" r="3.2"/><circle cx="398" cy="96" r="3.2"/><circle cx="424" cy="96" r="3.2"/><circle cx="450" cy="96" r="3.2"/>
+    <circle cx="476" cy="96" r="3.2"/><circle cx="502" cy="96" r="3.2"/><circle cx="528" cy="96" r="3.2"/><circle cx="554" cy="96" r="3.2"/>
+    <circle cx="580" cy="96" r="3.2"/><circle cx="606" cy="96" r="3.2"/><circle cx="632" cy="96" r="3.2"/><circle cx="658" cy="96" r="3.2"/>
+    <circle cx="684" cy="96" r="3.2"/><circle cx="710" cy="96" r="3.2"/><circle cx="736" cy="96" r="3.2"/><circle cx="762" cy="96" r="3.2"/>
+    <circle cx="788" cy="96" r="3.2"/><circle cx="814" cy="96" r="3.2"/>
+  </g>
+  <text x="40" y="118" font-size="11" fill="#7d2a20">每 512 字符一个 key，密度恒定 → 1M token(3.87MB) 需要 7,558 个 key，索引表爆炸</text>
+
+  <!-- geometric -->
+  <text x="40" y="158" font-size="13" font-weight="600" fill="#1f5c33">几何网格 k=4（改动后：512 起翻倍，4096 之后每八度切 4 份）</text>
+  <line x1="40" y1="178" x2="820" y2="178" stroke="#ccc" stroke-width="1"/>
+  <g fill="#2d6b42">
+    <circle cx="60" cy="178" r="4"/><circle cx="90" cy="178" r="4"/><circle cx="150" cy="178" r="4"/>
+    <circle cx="270" cy="178" r="4"/><circle cx="300" cy="178" r="4"/><circle cx="330" cy="178" r="4"/><circle cx="360" cy="178" r="4"/>
+    <circle cx="510" cy="178" r="4"/><circle cx="570" cy="178" r="4"/><circle cx="630" cy="178" r="4"/><circle cx="690" cy="178" r="4"/>
+    <circle cx="814" cy="178" r="4"/>
+  </g>
+  <g font-size="9.5" fill="#2d6b42" text-anchor="middle">
+    <text x="60" y="196">512</text><text x="90" y="196">1k</text><text x="150" y="196">2k</text>
+    <text x="270" y="196">4k</text><text x="300" y="196">5k</text><text x="330" y="196">6k</text><text x="360" y="196">7k</text>
+    <text x="510" y="196">8k</text><text x="570" y="196">10k</text><text x="630" y="196">12k</text><text x="690" y="196">14k</text>
+    <text x="814" y="196">…</text>
+  </g>
+  <text x="40" y="216" font-size="11" fill="#1f5c33">相对精度恒定（误差 1/(1+1/k) = 20%），绝对精度随位置放宽 → 1M token 只需 43 个 key</text>
+
+  <!-- why k=4 -->
+  <rect x="40" y="234" width="820" height="104" rx="8" fill="#fdf7ee" stroke="#d9b473"/>
+  <text x="56" y="256" font-size="12.5" font-weight="600" fill="#7a5716">为什么默认 k=4 而不是 dashscope 的 k=2</text>
+  <text x="56" y="276" font-size="11" fill="#5c4310">agentic 负载把「判别信息」全放在共享系统前缀之后 —— 也就是大位置，而几何网格恰在大位置最粗。</text>
+  <rect x="70" y="286" width="200" height="42" rx="4" fill="#eef4fb" stroke="#8fb4d9"/>
+  <text x="170" y="302" text-anchor="middle" font-size="10.5" fill="#24486e">共享系统前缀 35k 字符</text>
+  <text x="170" y="318" text-anchor="middle" font-size="10.5" fill="#7a8fa6">所有节点都持有 → 不计分</text>
+  <rect x="272" y="286" width="300" height="42" rx="4" fill="#eaf6ee" stroke="#48945f"/>
+  <text x="422" y="302" text-anchor="middle" font-size="10.5" fill="#1f5c33">每轮 +14k 的会话尾部 = 唯一的判别区</text>
+  <text x="422" y="318" text-anchor="middle" font-size="10.5" fill="#2d6b42">k=1 在 60k prompt 上这里有 0 个边界 → 亲和全瞎</text>
+  <rect x="580" y="286" width="264" height="42" rx="4" fill="#ffffff" stroke="#bbb"/>
+  <text x="712" y="301" text-anchor="middle" font-size="10.5" fill="#444">可区分边界数（60k prompt）</text>
+  <text x="712" y="318" text-anchor="middle" font-size="11" font-weight="600" fill="#a03024">k=1: 0　k=2: 1　k=4: 3</text>
+
+  <!-- savings -->
+  <rect x="40" y="352" width="820" height="102" rx="8" fill="#f7f9fc" stroke="#b9c6d6"/>
+  <text x="56" y="374" font-size="12.5" font-weight="600" fill="#24486e">收益与一个必须分清的区别</text>
+  <g font-size="11" fill="#444">
+    <text x="56" y="394">上下文　　26k　　85k　　256k　　1M</text>
+    <text x="56" y="411">几何 key　22　　 29　　 35　　　43　　　（哈希耗时 1M 时 3.7 ms，一次线性扫描 + 每边界克隆 digest → O(n)）</text>
+    <text x="56" y="428">线性 key　196　　642　　1,981　　7,558　　→ 省 9× / 22× / 57× / <tspan font-weight="600" fill="#a03024">176×</tspan></text>
+  </g>
+  <text x="56" y="447" font-size="11" fill="#a03024">但它只降调度器自己的 CPU 与内存：mooncake 的 metadata key（85k 上下文 2,656 个）由 block_size 和 tp_size 决定，不受影响。</text>
+</svg>

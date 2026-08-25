@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1a1a">「驱逐 = 迁移而非删除」：原语已存在，但前提要看清</text>
+
+  <!-- current: global pool -->
+  <text x="40" y="60" font-size="13" font-weight="600" fill="#24486e">当前架构（allocation_strategy = random，默认）</text>
+  <rect x="40" y="72" width="380" height="150" rx="8" fill="#eaf6ee" stroke="#48945f" stroke-width="1.5"/>
+  <text x="230" y="94" text-anchor="middle" font-size="12" font-weight="600" fill="#1f5c33">store 是一个全局池</text>
+  <g font-size="10" text-anchor="middle">
+    <rect x="58"  y="106" width="46" height="60" fill="#ffffff" stroke="#6a9c72"/><text x="81"  y="140" fill="#1f5c33">P0</text>
+    <rect x="110" y="106" width="46" height="60" fill="#ffffff" stroke="#6a9c72"/><text x="133" y="140" fill="#1f5c33">P1</text>
+    <rect x="162" y="106" width="46" height="60" fill="#ffffff" stroke="#6a9c72"/><text x="185" y="140" fill="#1f5c33">P2</text>
+    <rect x="214" y="106" width="46" height="60" fill="#ffffff" stroke="#6a9c72"/><text x="237" y="140" fill="#1f5c33">P3</text>
+    <rect x="266" y="106" width="46" height="60" fill="#ffffff" stroke="#6a9c72"/><text x="289" y="140" fill="#1f5c33">P4</text>
+    <rect x="318" y="106" width="46" height="60" fill="#ffffff" stroke="#6a9c72"/><text x="341" y="140" fill="#1f5c33">P5</text>
+    <rect x="370" y="106" width="42" height="60" fill="#ffffff" stroke="#6a9c72"/><text x="391" y="140" fill="#1f5c33">P6</text>
+  </g>
+  <text x="230" y="182" text-anchor="middle" font-size="10.5" fill="#2d6b42">各 100 GB host DRAM segment，master 从全部里分配</text>
+  <text x="230" y="199" text-anchor="middle" font-size="10.5" font-weight="600" fill="#a03024">一次 put 只有 1/7 落在本机 → 6/7 的读是跨机</text>
+  <text x="230" y="215" text-anchor="middle" font-size="10.5" fill="#2d6b42">驱逐也是全局的：扫全部 1024 shard 按 lease_timeout 挑</text>
+
+  <rect x="40" y="232" width="380" height="46" rx="6" fill="#fdecea" stroke="#c0392b"/>
+  <text x="230" y="252" text-anchor="middle" font-size="11.5" font-weight="600" fill="#a03024">所以「某实例 store 满、另一个空闲」不会独立发生</text>
+  <text x="230" y="269" text-anchor="middle" font-size="10.5" fill="#7d2a20">容量已池化；free_ratio_first 还能按空闲比例主动平衡</text>
+
+  <!-- local_first -->
+  <text x="470" y="60" font-size="13" font-weight="600" fill="#7a5716">若改成 local_first（为了 locality）</text>
+  <rect x="470" y="72" width="390" height="150" rx="8" fill="#fdf7ee" stroke="#d9b473" stroke-width="1.5"/>
+  <text x="665" y="94" text-anchor="middle" font-size="12" font-weight="600" fill="#7a5716">各节点 segment 才会不均</text>
+  <g font-size="10" text-anchor="middle">
+    <rect x="488" y="150" width="46" height="16" fill="#f2cf9b" stroke="#b98a3a"/>
+    <rect x="488" y="106" width="46" height="44" fill="#e8a34a" stroke="#b98a3a"/><text x="511" y="132" fill="#5c4310">热</text>
+    <rect x="540" y="128" width="46" height="38" fill="#f2cf9b" stroke="#b98a3a"/>
+    <rect x="540" y="106" width="46" height="22" fill="#e8a34a" stroke="#b98a3a"/>
+    <rect x="592" y="106" width="46" height="60" fill="#faf0dd" stroke="#b98a3a"/><text x="615" y="140" fill="#8a6a2a">闲</text>
+    <rect x="644" y="106" width="46" height="60" fill="#faf0dd" stroke="#b98a3a"/><text x="667" y="140" fill="#8a6a2a">闲</text>
+    <rect x="696" y="140" width="46" height="26" fill="#f2cf9b" stroke="#b98a3a"/>
+    <rect x="696" y="106" width="46" height="34" fill="#e8a34a" stroke="#b98a3a"/>
+    <rect x="748" y="106" width="46" height="60" fill="#faf0dd" stroke="#b98a3a"/><text x="771" y="140" fill="#8a6a2a">闲</text>
+    <rect x="800" y="120" width="44" height="46" fill="#f2cf9b" stroke="#b98a3a"/>
+    <rect x="800" y="106" width="44" height="14" fill="#e8a34a" stroke="#b98a3a"/>
+  </g>
+  <text x="665" y="182" text-anchor="middle" font-size="10.5" fill="#5c4310">cache-aware 调度让热节点写得多 → 它自己的 segment 先满</text>
+  <text x="665" y="199" text-anchor="middle" font-size="10.5" font-weight="600" fill="#7a5716">这时「迁到空闲实例」才有意义 —— 迁移是 local_first 的配套</text>
+  <text x="665" y="215" text-anchor="middle" font-size="10.5" fill="#5c4310">而 local_first 是否值得，取决于本机读比跨机读快多少</text>
+
+  <rect x="470" y="232" width="390" height="46" rx="6" fill="#fdecea" stroke="#c0392b"/>
+  <text x="665" y="252" text-anchor="middle" font-size="11.5" font-weight="600" fill="#a03024">已知不利事实：RDMA 模式下本机命中也走 loopback</text>
+  <text x="665" y="269" text-anchor="middle" font-size="10.5" fill="#7d2a20">memcpy 要求 isTcpOnly() 且同进程 → 本机/跨机差距可能很小</text>
+
+  <!-- existing primitives -->
+  <rect x="40" y="296" width="820" height="150" rx="8" fill="#f7f9fc" stroke="#b9c6d6"/>
+  <text x="56" y="318" font-size="13" font-weight="600" fill="#24486e">好消息：迁移的完整机制 mooncake 已经有了（我们这版就有）</text>
+  <g font-size="11">
+    <rect x="70" y="332" width="180" height="44" rx="5" fill="#ffffff" stroke="#8fb4d9"/>
+    <text x="160" y="350" text-anchor="middle" fill="#24486e">master 侧决策</text>
+    <text x="160" y="367" text-anchor="middle" font-size="10" font-family="monospace" fill="#a03024">CreateMoveTask(key, src, dst)</text>
+
+    <rect x="290" y="332" width="180" height="44" rx="5" fill="#ffffff" stroke="#8fb4d9"/>
+    <text x="380" y="350" text-anchor="middle" fill="#24486e">client 轮询领任务</text>
+    <text x="380" y="367" text-anchor="middle" font-size="10" font-family="monospace" fill="#a03024">FetchTasks（实测 1 次/秒/client）</text>
+
+    <rect x="510" y="332" width="160" height="44" rx="5" fill="#ffffff" stroke="#8fb4d9"/>
+    <text x="590" y="350" text-anchor="middle" fill="#24486e">client 执行传输</text>
+    <text x="590" y="367" text-anchor="middle" font-size="10" font-family="monospace" fill="#a03024">MoveStart → MoveEnd</text>
+
+    <rect x="710" y="332" width="130" height="44" rx="5" fill="#ffffff" stroke="#8fb4d9"/>
+    <text x="775" y="350" text-anchor="middle" fill="#24486e">汇报完成</text>
+    <text x="775" y="367" text-anchor="middle" font-size="10" font-family="monospace" fill="#a03024">MarkTaskToComplete</text>
+  </g>
+  <line x1="252" y1="354" x2="288" y2="354" stroke="#5b8fc7" stroke-width="2" marker-end="url(#m1)"/>
+  <line x1="472" y1="354" x2="508" y2="354" stroke="#5b8fc7" stroke-width="2" marker-end="url(#m1)"/>
+  <line x1="672" y1="354" x2="708" y2="354" stroke="#5b8fc7" stroke-width="2" marker-end="url(#m1)"/>
+  <text x="56" y="398" font-size="11" fill="#444">`CreateCopyTask` 已经被 HEAD 的 dynamic replica（hotness admission）使用；`offload_on_evict` 已是同一模式的实例</text>
+  <text x="56" y="416" font-size="11" fill="#444">——它在驱逐时先把副本推进 offload 队列（去 SSD）再删内存副本。</text>
+  <text x="56" y="436" font-size="11.5" font-weight="600" fill="#1f5c33">所以要做的只是把 BatchEvict 的决策出口从「删副本」改成「发 MoveTask」，目标从 SSD 换成另一实例的 DRAM segment。</text>
+
+  <!-- tiering -->
+  <rect x="40" y="462" width="820" height="82" rx="8" fill="#eaf6ee" stroke="#48945f"/>
+  <text x="56" y="484" font-size="12.5" font-weight="600" fill="#1f5c33">价值：把分层从两级扩成三级，多了一级比 SSD 快两个数量级的容量</text>
+  <text x="56" y="506" font-size="11.5" font-family="monospace" fill="#2d6b42">现在：  GPU HBM  →  DRAM(全局池)  →  SSD</text>
+  <text x="56" y="526" font-size="11.5" font-family="monospace" fill="#2d6b42">迁移后：GPU HBM  →  本机 DRAM  →  远端 DRAM  →  SSD</text>
+  <text x="500" y="526" font-size="11" fill="#a03024">前提：本机/跨机 DRAM 读的差距要先量出来，否则中间那级没有意义</text>
+
+  <defs>
+    <marker id="m1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b8fc7"/></marker>
+  </defs>
+</svg>

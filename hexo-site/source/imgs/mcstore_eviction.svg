@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="#1a1a1a">Mooncake 内存驱逐：为什么是「近似 LRU」</text>
+  <text x="450" y="46" text-anchor="middle" font-size="12" fill="#666">仓库里那个精确 O(1) LRU (eviction_strategy.h) 从未被实例化，是死代码；HEAD 亦然</text>
+
+  <!-- trigger -->
+  <rect x="250" y="62" width="400" height="52" rx="7" fill="#fdf3e3" stroke="#d8a75a" stroke-width="1.5"/>
+  <text x="450" y="82" text-anchor="middle" font-size="12.5" font-weight="600" fill="#7a5716">EvictionThreadFunc（后台常驻）</text>
+  <text x="450" y="102" text-anchor="middle" font-size="11" font-family="monospace" fill="#5c4310">used_ratio &gt; eviction_high_watermark_ratio (0.90) ?</text>
+  <line x1="450" y1="114" x2="450" y2="136" stroke="#888" stroke-width="1.5" marker-end="url(#e1)"/>
+
+  <!-- phase 1 -->
+  <rect x="40" y="140" width="820" height="140" rx="8" fill="#f7f9fc" stroke="#b9c6d6"/>
+  <text x="56" y="162" font-size="13" font-weight="600" fill="#24486e">Phase 1 · 普查：16 线程并行扫全部 1024 个 metadata shard（起点 RandomIndex(1024)）</text>
+  <g font-size="11">
+    <rect x="70" y="176" width="330" height="24" rx="4" fill="#f0f0f2" stroke="#bbb"/><text x="82" y="192" fill="#555">IsHardPinned()  →  跳过（永不驱逐）</text>
+    <rect x="70" y="204" width="330" height="24" rx="4" fill="#fdecea" stroke="#c0392b"/><text x="82" y="220" fill="#a03024">!IsLeaseExpired(now)  →  跳过（租约内，10s 保护）</text>
+    <rect x="70" y="232" width="330" height="24" rx="4" fill="#f0f0f2" stroke="#bbb"/><text x="82" y="248" fill="#555">!can_evict_replicas()  →  跳过（无可驱逐内存副本）</text>
+    <rect x="430" y="176" width="400" height="24" rx="4" fill="#fdf7ee" stroke="#d9b473"/><text x="442" y="192" fill="#7a5716">IsSoftPinActive()  →  进「软钉池」（次优先）</text>
+    <rect x="430" y="204" width="400" height="52" rx="4" fill="#eaf6ee" stroke="#48945f"/>
+    <text x="442" y="220" fill="#1f5c33">其余  →  进「候选池」</text>
+    <text x="442" y="240" font-weight="600" fill="#a03024">收集的排序键是 lease_timeout，不是 last_access ★</text>
+  </g>
+  <text x="56" y="272" font-size="11" fill="#666">每 shard 独立加锁 → 普查是非原子快照，扫描期间对象可被创建/访问</text>
+  <line x1="450" y1="280" x2="450" y2="302" stroke="#888" stroke-width="1.5" marker-end="url(#e1)"/>
+
+  <!-- phase 2 -->
+  <rect x="40" y="306" width="820" height="66" rx="8" fill="#f7f9fc" stroke="#b9c6d6"/>
+  <text x="56" y="328" font-size="13" font-weight="600" fill="#24486e">Phase 2 · 定切点</text>
+  <text x="56" y="348" font-size="11" font-family="monospace" fill="#444">evict_num = ceil(可驱逐总数 × evict_ratio_target)</text>
+  <text x="56" y="364" font-size="11" font-family="monospace" fill="#444">std::nth_element(candidates, begin + evict_num)   // 按 lease_timeout 找第 k 早</text>
+  <line x1="450" y1="372" x2="450" y2="394" stroke="#888" stroke-width="1.5" marker-end="url(#e1)"/>
+
+  <!-- phase 3 -->
+  <rect x="40" y="398" width="820" height="76" rx="8" fill="#f7f9fc" stroke="#b9c6d6"/>
+  <text x="56" y="420" font-size="13" font-weight="600" fill="#24486e">Phase 3 · 执行</text>
+  <text x="56" y="440" font-size="11" fill="#444">候选池不够 → 才动软钉池 ｜ grouped 对象：组内所有成员租约都过期才动，且整组一起走</text>
+  <text x="56" y="458" font-size="11" fill="#444">有 LOCAL_DISK 副本 → 直接删内存副本 ｜ 否则若开 offload_on_evict → 先推 offload 队列再删</text>
+
+  <!-- four approximations -->
+  <rect x="40" y="490" width="820" height="58" rx="8" fill="#fdecea" stroke="#c0392b"/>
+  <text x="56" y="510" font-size="12.5" font-weight="600" fill="#a03024">「近似」的四个来源，第一条是根本</text>
+  <text x="56" y="528" font-size="11" fill="#7d2a20">① 排序键是「租约最早过期」而非「最近最少使用」，且被 TTL 量化（差 9 秒可能拿到相同值）</text>
+  <text x="56" y="543" font-size="11" fill="#7d2a20">② 批量按分位点砍，周期间不维护顺序　③ 普查非原子　④ 软钉形成两级优先而非单一序</text>
+
+  <defs>
+    <marker id="e1" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#888"/></marker>
+  </defs>
+</svg>
