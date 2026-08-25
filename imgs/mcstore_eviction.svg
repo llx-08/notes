@@ -19,7 +19,7 @@
     <rect x="430" y="176" width="400" height="24" rx="4" fill="#fdf7ee" stroke="#d9b473"/><text x="442" y="192" fill="#7a5716">IsSoftPinActive()  →  进「软钉池」（次优先）</text>
     <rect x="430" y="204" width="400" height="52" rx="4" fill="#eaf6ee" stroke="#48945f"/>
     <text x="442" y="220" fill="#1f5c33">其余  →  进「候选池」</text>
-    <text x="442" y="240" font-weight="600" fill="#a03024">收集的排序键是 lease_timeout，不是 last_access ★</text>
+    <text x="442" y="240" font-weight="600" fill="#a03024">排序键是 lease_timeout（PutEnd 盖 now，读盖 now+10s）★</text>
   </g>
   <text x="56" y="272" font-size="11" fill="#666">每 shard 独立加锁 → 普查是非原子快照，扫描期间对象可被创建/访问</text>
   <line x1="450" y1="280" x2="450" y2="302" stroke="#888" stroke-width="1.5" marker-end="url(#e1)"/>
@@ -40,7 +40,7 @@
   <!-- four approximations -->
   <rect x="40" y="490" width="820" height="58" rx="8" fill="#fdecea" stroke="#c0392b"/>
   <text x="56" y="510" font-size="12.5" font-weight="600" fill="#a03024">「近似」的四个来源，第一条是根本</text>
-  <text x="56" y="528" font-size="11" fill="#7d2a20">① 排序键是「租约最早过期」而非「最近最少使用」，且被 TTL 量化（差 9 秒可能拿到相同值）</text>
+  <text x="56" y="528" font-size="11" fill="#7d2a20">① 排序键 lease_timeout 被 TTL 量化：10s 内重复读不再推进时间戳，读 100 次与读 1 次同序</text>
   <text x="56" y="543" font-size="11" fill="#7d2a20">② 批量按分位点砍，周期间不维护顺序　③ 普查非原子　④ 软钉形成两级优先而非单一序</text>
 
   <defs>
