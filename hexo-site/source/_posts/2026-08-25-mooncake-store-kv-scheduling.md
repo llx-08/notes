@@ -16,8 +16,12 @@ tags: [Mooncake, KV Cache, PD 分离, cache-aware 调度, vLLM, 驱逐策略, �
 ## 一句话结论
 
 > **cache-aware 调度的收益取决于「选错节点的代价」，而不是「亲和识别得多准」。**
-> 在带宽充裕的共享 store 下，一次 store 读只值端到端延迟的 0.2%，所以任何调度策略差异都被噪声吞掉。
-> 我们前后测出过 +27% / −37% / +7% / +3.5% 四个结论，**其中三个是基础设施缺陷伪装的**。
+> 而这个代价有个上界：**store 命中和本地 HBM 命中省掉的是同一段 prefill**，两者只差一次远端读。
+> 我们把它推到了这套负载的极限——store 份额从 2% 推到 44%、store 读收窄到单张网卡、
+> 节点数砍到 3 个——**两个策略仍然无法分辨**（+0.39%，而噪声下限只有 0.2%）。
+>
+> 前后测出过 +27% / −37% / +7% / +3.5% 四个「收益」，**其中三个是基础设施缺陷伪装的**；
+> 另有九个「假成功」是自己制造的，其中三个是**诊断** bug——它们让跑对了的实验被读错。
 
 ## 目录
 
@@ -30,6 +34,7 @@ tags: [Mooncake, KV Cache, PD 分离, cache-aware 调度, vLLM, 驱逐策略, �
 | [04 · 结论与方法论](/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-04-conclusions-and-methodology/) | 站得住的 8 条结论、三个绝对基准、四个「假成功」陷阱 |
 | [05 · 驱逐与迁移设计](/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-05-eviction-and-migration/) | 饱和实验、迁移原语、前提辨析 |
 | [06 · TODO](/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-06-todo/) | 按优先级分档，每条带依据与代价 |
+| [07 · 多 master 分区实测](/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-07-partitioning-measured/) | M1 聚合吞吐、M2 fan-out 代价、M3 均衡度、M4 热点读与副本 |
 
 ## 关键数字速查
 
