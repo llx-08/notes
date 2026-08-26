@@ -134,9 +134,11 @@ def should_load(req):
 
 真实路径是 `EvictionThreadFunc` → `BatchEvict`，「近似」精确来自四处，**第一处是根本**：
 
-1. **排序键是 `lease_timeout = 授予时刻 + TTL`，不是 last_access。**
-   TTL 窗口内被访问过的对象整体豁免（连候选都进不去）；其余对象的时间戳被 TTL 量化，
-   实际访问差 9 秒的两个对象可能拿到几乎相同的值。它不是「最近最少使用」，而是「租约最早过期」。
+1. **排序键是 `lease_timeout`，而不是一个独立的 last_access 字段。**
+   TTL 窗口内被访问过的对象整体豁免（连候选都进不去）；其余对象的时间戳被 TTL 量化——
+   10 秒内的重复读不会把时间戳推得更远，所以读 100 次和读 1 次排序相同。
+   **注意**：`lease_timeout` 实际上仍是 last-touch 时间的单调函数（写入触摸 `+0`，
+   读取触摸 `+10s`），并不是我一度以为的「与访问时间脱钩」。详见 §5 末尾那条订正。
 2. 批量按分位点砍，周期之间不维护任何顺序。
 3. 每 shard 独立加锁 + `RandomIndex` 随机起点 → 普查是**非原子快照**。
 4. 软钉是第二层池，形成两级优先而非单一序。
@@ -216,7 +218,129 @@ mooncake 侧 metadata key（block hash） 85k 上下文 → 2,656 个   每个�
 差 92 倍，而压力大的是后者。几何网格解决的是**调度器自己**的 CPU 和内存，
 **完全不影响 master 压力**——那由 `block_size` 和 `tp_size` 决定。
 
-## 5. 版本差异：ours 0.3.12.post1 vs HEAD 0.3.13
+## 5. tp>1 的分片粒度与 group 绑定
+
+### 每个 rank 各存一份，不按 head 维合并
+
+key 格式（`mooncake_store_data.py:47`）把 rank 编在里面：
+
+```
+{cache_prefix}@{model}@tp_rank:{r}@pcp0@dcp0@pp_rank:0@group:{kv_group}@{block_hash}
+                       ↑ 每个 rank 是一个完全独立的 object
+```
+
+每个 TP rank 是独立进程、有自己的 store client，各自 save 自己那半个 head 维分片。
+（注意 key 里那个 `@group:{kv_group}@` 是 **vLLM 的 kv_cache_group**，区分 attn / mamba，
+只是字符串的一部分，**与 mooncake 的 grouping 机制无关**。）
+
+而 lookup 要求**全 rank 命中**：
+
+```python
+if not all(x == 1 for x in all_tp_ret):   # 任一 rank 缺失
+    break                                  # 整块作废，后续全部放弃
+```
+
+### 两个窗口的性质完全不同
+
+| | put 窗口 | 驱逐切开 |
+|---|---|---|
+| 成因 | rank0 已 PutEnd、rank1 未完成 | `nth_element` 的切点落在同一 block 的各 rank 之间 |
+| 持续 | 毫秒级 | **永久** |
+| 自愈 | 会（rank1 到达即完整） | **不会** |
+| 后果 | lookup 按 miss 处理 → 重算 → **正确**，只是错过一次命中 | 孤儿占空间且永不可用 |
+| 会自然老化掉吗 | — | **不会**：`BatchExistKey` 给「找到的那些 key」授租约，所以后续每次 lookup 都在给孤儿续 10s 命 |
+
+**所以 put 不需要任何同步**（曾考虑「初始化定好 tp_size，put 时等所有 rank 完成」——
+不必要，因为 `RegisterGroupMember` 是逐 key 增量的，组会随 rank 到达自然长大；
+而且 barrier 要在 save 的关键路径上加跨进程 collective，有 hybridsched loop 争用风险，
+更重要的是它治不了驱逐切开这个真问题）。
+
+**需要修的是驱逐切开，而 mooncake 有现成机制**：
+
+```cpp
+// replica.h:95  ReplicateConfig
+// Optional per-key routing group IDs. Empty string keeps that key
+// ungrouped. Grouped keys share metadata routing, coalesced lease refresh,
+// and memory eviction behavior.
+std::optional<std::vector<std::string>> group_ids{};
+```
+
+`BatchEvict` 对 grouped 对象的行为：**组内有一个成员租约未过期就整组不动，要走一起走。**
+
+### 已落地的改动
+
+```
+mooncake_store_kvsbackend.py   +30 −6
+  _blocks_to_kv()  多返回 group_ids = block_hashes（不含 rank）
+  _put_config()    新增，按 batch 构造带 group_ids 的 ReplicateConfig
+  put 调用         传 self._put_config([group_ids[i] for i in todo])
+  删除             不再使用的 self._replicate_config
+
+test_mooncake_store_kvs.py     +42 −1
+  FakeStore 记录 put_configs
+  test_blocks_to_kv_returns_rank_free_group_ids
+  test_put_config_group_ids_line_up_with_keys
+```
+
+**单测：24 passed**（原有 22 + 新增 2，无回归），在 test1 上跑
+（`pytest 8.1.1` + `torch 2.11.0a0`，需 `--noconftest`；ecs 无 torch 跑不了）。
+
+三个收益，都是免费的：
+
+| 收益 | 说明 |
+|---|---|
+| **驱逐原子性** | 不再产生自我续命的孤儿分片 |
+| **租约合并刷新** | `GrantLeaseForGroup` 一次刷整组而非 tp_size 次，**直接降低 master 的租约写锁压力**——那正是我们实测的主要负载来源 |
+| **元数据路由共享** | 同组落同一个 shard，局部性更好 |
+
+它和 §4 提的「跨 tp rank 去重」是同一问题的两种解法，但 grouping **不改 key 格式、不改 lookup 逻辑**，
+只加一个 config 字段，几乎零风险，应该先做。去重能砍 key 数量（tp 倍），grouping 只合并租约刷新。
+
+### ⚠️ 部署顺序的坑
+
+master 侧有这个检查（`master_service.cpp:3183`）：
+
+```cpp
+// Group membership is immutable while an object exists.
+if (config.group_ids.has_value() && metadata.group_id != group_id) {
+    LOG(ERROR) << "error=group_membership_is_immutable";
+    return INVALID_PARAMS;
+}
+```
+
+**如果 store 里已存在同名的 ungrouped 对象，带 `group_ids` 的 put 会被拒。**
+我们的代码在 put 前会 `batch_is_exist` 跳过已存在的 key，所以正常路径不会撞上；
+但只要发生一次 re-put 就会看到 `INVALID_PARAMS`。
+
+**所以这个改动必须配合清空 store 部署。** `bringup_150b.sh` 每次都重启 master（= 清空），
+天然满足；但**只重启 P 节点而不重启 master 的话，会出现零星 put 失败**。
+
+### ⚠️ 一处订正：新写入的对象不是最先被驱逐的
+
+我一度根据 `ObjectMetadata` 的 `lease_timeout()` 默认构造成 epoch，判断「刚写入的对象
+排在驱逐序最前、最先被砍」。**这是错的**——漏了 `PutEnd` 会盖时间戳：
+
+```cpp
+// master_service.cpp:2905  PutEnd
+metadata.GrantLease(0, default_kv_soft_pin_ttl_);
+// GrantLease(ttl=0): lease_timeout = max(lease_timeout, now + 0) = now
+```
+
+所以：
+
+```
+刚写入的 key      lease_timeout = now       ← 排序上是「最新」，最后才被砍
+60 秒前被探测的   lease_timeout = now − 50s  ← 更早，先被砍
+```
+
+订正之后，`lease_timeout` **其实是 last-touch 时间的单调函数**，只差一个偏移：
+写入触摸给 `+0`，读取触摸给 `+10s`（读比写多 10 秒保护）。
+这比 §3 原先的描述合理得多，**真正的近似只剩**：10 秒内的重复读不再推进时间戳（TTL 量化）、
+批量分位点切割、非原子普查、软钉两级。
+
+这也解释了饱和实验为什么零损伤——旧臂的键 last-touch 更早，排在前面先死。
+
+## 6. 版本差异：ours 0.3.12.post1 vs HEAD 0.3.13
 
 **驱逐机制一点没变**：`LRUEvictionStrategy` 仍是死代码，`BatchEvict` 仍按
 `lease_timeout` + `nth_element` + soft-pin 两级。**所以我们想做的驱逐改动上游没做，仍是真缺口。**
@@ -258,7 +382,7 @@ HEAD 新增、我们没有的：
 （已确认我们版本的 `ObjectMetadata` 没有 per-key 命中计数，`promotion_admission_threshold_`
 只是个 MasterService 阈值成员）。且 0.3.13 还没有 PyPI wheel，得从源码编。
 
-## 6. `kv_events`：现成能用，零 C++ 改动
+## 7. `kv_events`：现成能用，零 C++ 改动
 
 我们的 binary 已经有：
 
