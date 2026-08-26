@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="820" viewBox="0 0 1440 820">
+  <defs>
+    <style>
+      .bg{fill:#f8fafc}.title{font:700 30px system-ui;fill:#0f172a}.sub{font:15px system-ui;fill:#475569}
+      .head{font:700 20px system-ui;fill:#fff}.text{font:15px system-ui;fill:#0f172a}.small{font:13px system-ui;fill:#475569}
+      .box{fill:#fff;stroke:#94a3b8;stroke-width:2}.ok{fill:#059669}.warn{fill:#dc2626}.fix{fill:#2563eb}
+      .arrow{stroke:#334155;stroke-width:3;fill:none;marker-end:url(#a)}.weak{stroke-dasharray:8 7}
+    </style>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1440" height="820"/>
+  <text class="title" x="55" y="56">为什么 fire-and-forget Task 必须保存强引用</text>
+  <text class="sub" x="55" y="85">awaitable 的内部引用链只能解释“为何暂时没出错”，不能构成生命周期保证</text>
+
+  <rect class="ok" x="55" y="125" rx="14" width="400" height="56"/>
+  <text class="head" x="80" y="161">偶然被保活：await sleep()</text>
+  <rect class="box" x="55" y="205" rx="12" width="400" height="390"/>
+  <rect x="95" y="245" rx="9" width="320" height="50" fill="#d1fae5"/><text class="text" x="130" y="277">event loop._scheduled</text>
+  <rect x="95" y="335" rx="9" width="320" height="50" fill="#d1fae5"/><text class="text" x="185" y="367">TimerHandle</text>
+  <rect x="95" y="425" rx="9" width="320" height="50" fill="#d1fae5"/><text class="text" x="222" y="457">Future</text>
+  <rect x="95" y="515" rx="9" width="320" height="50" fill="#d1fae5"/><text class="text" x="184" y="547">Task.__wakeup → Task</text>
+  <path class="arrow" d="M255 295 L255 325"/><path class="arrow" d="M255 385 L255 415"/><path class="arrow" d="M255 475 L255 505"/>
+
+  <rect class="warn" x="520" y="125" rx="14" width="400" height="56"/>
+  <text class="head" x="545" y="161">危险：只依赖 loop 的弱引用</text>
+  <rect class="box" x="520" y="205" rx="12" width="400" height="390"/>
+  <rect x="560" y="255" rx="9" width="320" height="58" fill="#fee2e2"/><text class="text" x="651" y="290">event loop</text>
+  <rect x="560" y="440" rx="9" width="320" height="58" fill="#fee2e2"/><text class="text" x="676" y="475">Task</text>
+  <path class="arrow weak" d="M720 313 L720 430"/>
+  <text class="small" x="748" y="375">weak reference</text>
+  <text class="text" x="570" y="545">若其他强引用消失，GC 可回收 pending Task</text>
+  <text class="small" x="570" y="574">现象：Task was destroyed but it is pending!</text>
+
+  <rect class="fix" x="985" y="125" rx="14" width="400" height="56"/>
+  <text class="head" x="1010" y="161">正确：统一 Task registry</text>
+  <rect class="box" x="985" y="205" rx="12" width="400" height="390"/>
+  <rect x="1025" y="255" rx="9" width="320" height="58" fill="#dbeafe"/><text class="text" x="1117" y="290">running_tasks</text>
+  <rect x="1025" y="395" rx="9" width="320" height="58" fill="#dbeafe"/><text class="text" x="1136" y="430">Task</text>
+  <path class="arrow" d="M1185 313 L1185 385"/>
+  <text class="small" x="1210" y="355">strong ref</text>
+  <text class="text" x="1025" y="510">done callback：</text>
+  <text class="small" x="1025" y="540">1. 从集合 discard</text>
+  <text class="small" x="1025" y="565">2. 观察 exception / cancellation</text>
+
+  <rect x="55" y="655" width="1330" height="110" rx="12" fill="#e2e8f0"/>
+  <text class="text" x="82" y="690">PD 控制面的含义</text>
+  <text class="small" x="82" y="719">RPC reader、SEND_DONE 聚合、abort/cleanup 等后台 Task 一旦消失，进程可能仍存活，但请求会永久等待。</text>
+  <text class="small" x="82" y="746">强引用集合解决生命周期；deadline、异常策略、底层 RDMA cleanup 仍需单独设计。</text>
+</svg>

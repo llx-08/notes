@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="840" viewBox="0 0 1440 840">
+  <defs>
+    <style>
+      .bg{fill:#f8fafc}.title{font:700 30px system-ui;fill:#0f172a}.sub{font:15px system-ui;fill:#475569}
+      .head{font:700 20px system-ui;fill:#fff}.text{font:15px system-ui;fill:#0f172a}.small{font:13px system-ui;fill:#475569}
+      .box{fill:#fff;stroke:#94a3b8;stroke-width:2}.blue{fill:#2563eb}.purple{fill:#7c3aed}.green{fill:#059669}
+      .arrow{stroke:#334155;stroke-width:3;fill:none;marker-end:url(#a)}.dash{stroke-dasharray:8 7}
+    </style>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1440" height="840"/>
+  <text class="title" x="55" y="54">KVT 1.0 → Hybrid Connector → KVT 2.0</text>
+  <text class="sub" x="55" y="82">从“把 KV 发过去”演进为可扩展、可容错、对 Scheduler 低侵入的异步缓存基础设施</text>
+
+  <rect class="blue" x="55" y="125" rx="14" width="400" height="58"/>
+  <text class="head" x="82" y="162">KVT 1.0：传输抽象</text>
+  <rect class="box" x="55" y="205" rx="12" width="400" height="430"/>
+  <text class="text" x="82" y="242">接入层</text><text class="small" x="82" y="268">注册 layer/layout；step 生成 KVTMeta</text>
+  <line x1="82" y1="290" x2="428" y2="290" stroke="#cbd5e1"/>
+  <text class="text" x="82" y="327">ParseBlock</text><text class="small" x="82" y="353">token/block → src_off/dst_off/len</text>
+  <line x1="82" y1="375" x2="428" y2="375" stroke="#cbd5e1"/>
+  <text class="text" x="82" y="412">控制层</text><text class="small" x="82" y="438">等 layer Event；连接、提交、错误处理</text>
+  <line x1="82" y1="460" x2="428" y2="460" stroke="#cbd5e1"/>
+  <text class="text" x="82" y="497">传输层</text><text class="small" x="82" y="523">TCP/RDMA 搬运 Vec&lt;IpcBlock&gt;</text>
+  <rect x="82" y="555" rx="10" width="346" height="52" fill="#dbeafe"/>
+  <text class="small" x="102" y="577">目标：layer-by-layer、CUDA Graph 兼容、</text>
+  <text class="small" x="102" y="598">尽量不阻塞 step 主链路</text>
+
+  <rect class="purple" x="520" y="125" rx="14" width="400" height="58"/>
+  <text class="head" x="547" y="162">Hybrid Connector：生命周期</text>
+  <rect class="box" x="520" y="205" rx="12" width="400" height="430"/>
+  <text class="text" x="547" y="242">Connector</text>
+  <text class="small" x="547" y="270">Scheduler 接入、请求状态、RPC、扩缩容</text>
+  <text class="small" x="547" y="294">Block ref、TP 聚合、abort、mark_loaded</text>
+  <rect x="547" y="325" rx="10" width="346" height="74" fill="#ede9fe"/>
+  <text class="small" x="568" y="350">把未 ready 的 KV I/O 请求移出普通调度</text>
+  <text class="small" x="568" y="375">Scheduler 看到的是异步完成后的 cache hit</text>
+  <text class="text" x="547" y="445">可组合 Backends</text>
+  <rect x="547" y="468" rx="9" width="100" height="55" fill="#f3e8ff"/><text class="small" x="566" y="500">PD</text>
+  <rect x="660" y="468" rx="9" width="100" height="55" fill="#f3e8ff"/><text class="small" x="677" y="500">Migration</text>
+  <rect x="773" y="468" rx="9" width="100" height="55" fill="#f3e8ff"/><text class="small" x="797" y="500">KVS</text>
+  <text class="small" x="547" y="570">关键：请求结束 ≠ 传输结束；transfer ref</text>
+  <text class="small" x="547" y="594">保护在途 RDMA 仍可能访问的 KV Block</text>
+
+  <rect class="green" x="985" y="125" rx="14" width="400" height="58"/>
+  <text class="head" x="1012" y="162">KVT 2.0：通用与隔离</text>
+  <rect class="box" x="985" y="205" rx="12" width="400" height="430"/>
+  <text class="text" x="1012" y="242">更通用的 Cache Spec</text>
+  <text class="small" x="1012" y="270">FA KV、GDN state、DSA、Hybrid KVCache</text>
+  <line x1="1012" y1="298" x2="1358" y2="298" stroke="#cbd5e1"/>
+  <text class="text" x="1012" y="337">更灵活的 Layout Parser</text>
+  <text class="small" x="1012" y="365">不再假定每层/Block/Token 都是规则布局</text>
+  <line x1="1012" y1="393" x2="1358" y2="393" stroke="#cbd5e1"/>
+  <text class="text" x="1012" y="432">流量资源隔离</text>
+  <text class="small" x="1012" y="460">KV transfer 避免干扰 MoE EP all-to-all</text>
+  <text class="small" x="1012" y="484">必要时用 TCP 与 GPU/GDR 通路隔离</text>
+  <rect x="1012" y="530" rx="10" width="346" height="76" fill="#d1fae5"/>
+  <text class="small" x="1033" y="557">优化目标从峰值带宽扩展到：</text>
+  <text class="small" x="1033" y="582">可扩展 layout + tail latency + 故障闭环</text>
+
+  <path class="arrow" d="M455 390 L510 390"/>
+  <path class="arrow" d="M920 390 L975 390"/>
+  <text class="small" x="57" y="700">贯穿三阶段的不变量：控制面与数据面分离；completion 分层；Block/Task/Future 的 owner 显式。</text>
+  <path class="arrow dash" d="M260 745 C540 800 900 800 1180 745"/>
+  <text class="small" x="556" y="792">模型结构、并行策略和流量形态持续变化</text>
+</svg>

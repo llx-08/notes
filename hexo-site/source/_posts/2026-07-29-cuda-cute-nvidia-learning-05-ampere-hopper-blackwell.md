@@ -348,6 +348,23 @@ Hopper：mbarrier transaction + WGMMA groups + cluster
 Blackwell：tcgen05 completion + TMEM lifecycle + CTA pair
 ```
 
+### 9.4 三条主线背后的同一个压力
+
+上面三条不是彼此独立的特性堆叠，它们都在解决同一个逐代恶化的问题：**Tensor Core
+变快的速度远超 HBM 延迟改善的速度**。实测（`ecs` H20 与 `target_p` GB200）：
+
+```text
+每 SM 每周期 Tensor Core 吞吐   896 → 7290 FLOP/cycle   （↑ 8.1×）
+HBM pointer-chase 延迟          675 → 826 cycle          （↑ 1.22×，不降反升）
+```
+
+同一个 CTA tile 能提供的「掩护时间」因此缩水约 10 倍。TMA 减少发射开销、warp
+specialization 让角色独立推进、TMEM 腾出寄存器以支持更大 tile——都是为了把单
+stage 的计算时间拉回到足以掩盖访存延迟的量级，让流水线还能成立。
+
+推导、测量方法与完整数据见
+[11 GEMM 软件流水线深入](/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/)。
+
 ## 10. 官方资料
 
 - [Ampere Tuning Guide](https://docs.nvidia.com/cuda/ampere-tuning-guide/)

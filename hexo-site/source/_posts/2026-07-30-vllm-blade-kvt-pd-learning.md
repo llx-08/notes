@@ -71,6 +71,8 @@ P Worker GPU KV ──Blade-KVT/Barex TCP or RDMA──> D Worker GPU KV
 | 7 | [07 Python 协程与防 hang 设计](/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-07-hybrid-asyncio-and-no-hang/) | 两个 uvloop、RPC、Future、队列唤醒如何协作，哪里有超时、哪里没有？ |
 | 8 | [08 错误传播与 corner cases](/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-08-errors-and-corner-cases/) | 断连、重复完成、abort、finish/save 竞态、404/410、TP 缺信号分别怎样处理？ |
 | 9 | [09 调试、测试与代码地图](/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-09-debugging-testing-code-map/) | 出现 hang、错 KV、内存泄漏或慢传输时从哪里开始查？ |
+| 10 | [10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio](/notes/2026/08/26/2026-08-26-vllm-blade-kvt-pd-learning-10-ata-pd-gdr-asyncio-synthesis/) | KVT/Hybrid Connector 为什么这样演进，RDMA 小包怎样优化，协程语义如何影响控制面可靠性？ |
+| 11 | [11 无中生有的 NaN：vLLM 全局 CUDA Stream 污染](/notes/2026/08/26/2026-08-26-vllm-blade-kvt-pd-learning-11-ata-nan-vllm-cuda-stream-thread-pollution/) | Connector 线程为何会改变主线程的 NCCL stream，并分别导致 NaN 与 invalid resource handle？ |
 
 ## 最重要的十条结论
 

@@ -249,6 +249,25 @@ tile size × element bytes × A/B buffers × stages
 
 与每 SM shared-memory 容量。
 
+定量地说，需要的级数有个下界：
+
+```text
+S ≥ ⌈ 访存延迟 / 单 stage 计算时间 ⌉ + 1
+```
+
+代入实测值（`128×256×64` tile，BF16）：
+
+```text
+H20    ⌈675 / 4681⌉ + 1 = 2
+GB200  ⌈826 /  575⌉ + 1 = 3
+```
+
+上界则由 SMEM 卡死：该 tile 每 stage 占 48 KiB，两卡每 SM 均为 228 KB，最多 4 级。
+tile 开大能拉长单 stage 计算时间（更容易藏延迟），但同时压缩可用级数和 resident
+CTA 数——这就是 CUTLASS tile/stage 组合表在扫的权衡面。
+
+推导与测量方法见 [11 GEMM 软件流水线深入](/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/)。
+
 ## 7. Hopper：TMA + WGMMA
 
 Hopper 常见 persistent GEMM 主线：

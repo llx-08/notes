@@ -622,6 +622,9 @@ XChannel Write/Send
 
 ## 参考
 
+- [06a 从《RDMA 高性能点对点通信库的艺术》看 Barex 的工程设计](/notes/2026/08/26/2026-08-26-nccl-pcie-barex-learning-06a-ata-barex-design-and-optimizations/)
+- ATA：[《RDMA高性能点对点通信库的艺术》](https://ata.atatech.org/articles/11000224222)
+
 - [`ibv_post_send(3)`：post 链式 WR、RDMA Write/Send/Immediate](https://man7.org/linux/man-pages/man3/ibv_post_send.3.html)
 - [`ibv_post_recv(3)`：Receive Queue 与 buffer 生命周期](https://man7.org/linux/man-pages/man3/ibv_post_recv.3.html)
 - [`ibv_poll_cq(3)`：WC opcode、status、wr_id 与 immediate data](https://man7.org/linux/man-pages/man3/ibv_poll_cq.3.html)

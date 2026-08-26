@@ -53,6 +53,7 @@ KVT_ROOT=~/codes/blade-kvt
 | 4 | [04 NCCL 拓扑与传输](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-04-nccl-topology-and-transport/) | P2P/SHM/NET 如何选择？PCIe/NVLink/NIC 如何串起来？ |
 | 5 | [05 NCCL 算法与协议](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-05-nccl-algorithms-protocols-and-performance/) | Ring/Tree 与 Simple/LL/LL128 如何影响性能？ |
 | 6 | [06 Barex 架构](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-06-barex-architecture/) | XContext/XChannel/MR/WR/CQ 的对象与线程模型是什么？ |
+| 6a | [06a ATA Barex 工程设计](/notes/2026/08/26/2026-08-26-nccl-pcie-barex-learning-06a-ata-barex-design-and-optimizations/) | 为什么 Barex 需要 callback、credit、incast admission、MR pool 与软硬件协同？ |
 | 7 | [07 Barex 与 NCCL](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-07-barex-and-nccl-relationship/) | 二者究竟如何“结合”，哪些只是相似或兼容？ |
 | 8 | [08 blade-kvt 发送路径](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-08-blade-kvt-barex-send-path/) | Python API 到 Barex `post_send` 的完整路径是什么？ |
 | 9 | [09 调试与性能](/notes/2026/07/27/2026-07-27-nccl-pcie-barex-learning-09-debugging-and-performance-playbook/) | 如何定位拓扑、MR、队列、CQ、超时与吞吐问题？ |

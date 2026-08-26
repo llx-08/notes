@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="820" viewBox="0 0 1200 820" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">SM 资源静态划分与 PDL 共驻算术</title>
+  <desc id="desc">展示 SM 的 228KB 统一 L1/SMEM、寄存器与 warp slot 静态分配特性，SM90 的 carveout 离散档位，以及四种 producer+consumer smem 组合下共驻是否成立及其实测收益。</desc>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb8d6"/></marker><marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ff9b9b"/></marker><marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7ee6a8"/></marker></defs>
+  <rect x="0" y="0" width="1200" height="820" rx="26" fill="#071522"/>
+  <text x="600.0" y="46" fill="white" font-family="sans-serif" font-size="27" text-anchor="middle" font-weight="700">SM 资源是启动时静态切走的：共驻算术决定 PDL 有没有收益</text><text x="600.0" y="74" fill="#7e9fb8" font-family="sans-serif" font-size="14" text-anchor="middle">H20(SM90) 与 GB200(SM100) 每 SM 均为 228KB 统一 L1/SMEM、65536 寄存器、2048 线程</text>
+  <text x="60" y="118" fill="#cfe6f3" font-family="sans-serif" font-size="15" font-weight="700">一个 SM 的静态资源池</text>
+  <rect x="60" y="132" width="1080" height="92" rx="12" fill="#0d1f2e" stroke="#33566f" stroke-width="1.2"/>
+  <rect x="78" y="148" width="336" height="60" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/><text x="246.0" y="175.0" fill="#82dcff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">统一 L1 / Shared Memory</text><text x="246.0" y="193.0" fill="#cfe6f3" font-family="sans-serif" font-size="11.5" text-anchor="middle">228 KB（可配置切分）</text>
+  <rect x="434" y="148" width="336" height="60" rx="8" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/><text x="602.0" y="175.0" fill="#c9b0ff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">Register File</text><text x="602.0" y="193.0" fill="#cfe6f3" font-family="sans-serif" font-size="11.5" text-anchor="middle">65536 × 32bit = 256 KB</text>
+  <rect x="790" y="148" width="336" height="60" rx="8" fill="#0f3f42" stroke="#4fd6cf" stroke-width="1.2"/><text x="958.0" y="175.0" fill="#7fe8e2" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">Warp Slot</text><text x="958.0" y="193.0" fill="#cfe6f3" font-family="sans-serif" font-size="11.5" text-anchor="middle">64 warp = 2048 线程</text>
+  <text x="60" y="250" fill="#ffd76a" font-family="sans-serif" font-size="13">CTA 被调度到 SM 的那一刻就切走它声明的全部份额，直到 CTA 退出才归还——在 griddepcontrol.wait 上 spin 的 CTA，占用的资源与满负荷计算时完全相同。</text>
+  <text x="60" y="300" fill="#cfe6f3" font-family="sans-serif" font-size="14.5" font-weight="700">SM90 的 SMEM 容量只能取离散档位（carveout）</text>
+  <rect x="60" y="316" width="1080" height="30" rx="6" fill="#0d1f2e" stroke="#33566f" stroke-width="1.2"/>
+  <line x1="60.0" y1="316" x2="60.0" y2="346" stroke="#4a7fa5" stroke-width="1"/>
+  <text x="60.0" y="362" fill="#5f7f96" font-family="sans-serif" font-size="10.5" text-anchor="middle">0</text>
+  <line x1="97.89473684210526" y1="316" x2="97.89473684210526" y2="346" stroke="#4a7fa5" stroke-width="1"/>
+  <text x="97.89473684210526" y="362" fill="#5f7f96" font-family="sans-serif" font-size="10.5" text-anchor="middle">8</text>
+  <line x1="135.78947368421052" y1="316" x2="135.78947368421052" y2="346" stroke="#4a7fa5" stroke-width="1"/>
+  <text x="135.78947368421052" y="362" fill="#5f7f96" font-family="sans-serif" font-size="10.5" text-anchor="middle">16</text>
+  <line x1="211.57894736842104" y1="316" x2="211.57894736842104" y2="346" stroke="#4a7fa5" stroke-width="1"/>
+  <text x="211.57894736842104" y="362" fill="#5f7f96" font-family="sans-serif" font-size="10.5" text-anchor="middle">32</text>
+  <line x1="363.1578947368421" y1="316" x2="363.1578947368421" y2="346" stroke="#4a7fa5" stroke-width="1"/>
+  <text x="363.1578947368421" y="362" fill="#5f7f96" font-family="sans-serif" font-size="10.5" text-anchor="middle">64</text>
+  <line x1="533.6842105263157" y1="316" x2="533.6842105263157" y2="346" stroke="#4a7fa5" stroke-width="1"/>
+  <text x="533.6842105263157" y="362" fill="#5f7f96" font-family="sans-serif" font-size="10.5" text-anchor="middle">100</text>
+  <line x1="685.2631578947368" y1="316" x2="685.2631578947368" y2="346" stroke="#4a7fa5" stroke-width="1"/>
+  <text x="685.2631578947368" y="362" fill="#5f7f96" font-family="sans-serif" font-size="10.5" text-anchor="middle">132</text>
+  <line x1="836.8421052631578" y1="316" x2="836.8421052631578" y2="346" stroke="#4a7fa5" stroke-width="1"/>
+  <text x="836.8421052631578" y="362" fill="#5f7f96" font-family="sans-serif" font-size="10.5" text-anchor="middle">164</text>
+  <line x1="988.4210526315788" y1="316" x2="988.4210526315788" y2="346" stroke="#4a7fa5" stroke-width="1"/>
+  <text x="988.4210526315788" y="362" fill="#5f7f96" font-family="sans-serif" font-size="10.5" text-anchor="middle">196</text>
+  <line x1="1140.0" y1="316" x2="1140.0" y2="346" stroke="#4a7fa5" stroke-width="1"/>
+  <text x="1140.0" y="362" fill="#5f7f96" font-family="sans-serif" font-size="10.5" text-anchor="middle">228</text>
+  <text x="600.0" y="336" fill="#ffd76a" font-family="sans-serif" font-size="12" text-anchor="middle">↑ 请求 113KB 时，若 carveout 偏向 L1，驱动只会挑「能装下 113KB 的最小档」= 132KB</text>
+  <text x="60" y="404" fill="#cfe6f3" font-family="sans-serif" font-size="15" font-weight="700">共驻算术：能不能重叠，取决于两个 kernel 的 smem 之和</text>
+  <text x="70" y="450" fill="#cfe6f3" font-family="sans-serif" font-size="13" font-weight="700">100 KB + 120 KB = 220 KB</text>
+  <rect x="380" y="430" width="520" height="34" rx="6" fill="#0d1f2e" stroke="#33566f" stroke-width="1.2"/>
+  <rect x="380" y="430" width="228.0701754385965" height="34" rx="6" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="494.03508771929825" y="452" fill="#82dcff" font-family="sans-serif" font-size="11.5" text-anchor="middle">producer 100KB</text>
+  <rect x="608.0701754385965" y="430" width="273.6842105263158" height="34" rx="6" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="744.9122807017544" y="452" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle">consumer 120KB</text>
+  <line x1="900.0" y1="422" x2="900.0" y2="472" stroke="#ffd76a" stroke-width="2"/>
+  <text x="900.0" y="416" fill="#ffd76a" font-family="sans-serif" font-size="11" text-anchor="middle">228KB 上限</text>
+  <text x="920" y="452" fill="#7ee6a8" font-family="sans-serif" font-size="12.5">✓ 共驻成立　实测 gain 23~24%</text>
+  <text x="70" y="532" fill="#cfe6f3" font-family="sans-serif" font-size="13" font-weight="700">100 KB + 128 KB = 228 KB</text>
+  <rect x="380" y="512" width="520" height="34" rx="6" fill="#0d1f2e" stroke="#33566f" stroke-width="1.2"/>
+  <rect x="380" y="512" width="228.0701754385965" height="34" rx="6" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="494.03508771929825" y="534" fill="#82dcff" font-family="sans-serif" font-size="11.5" text-anchor="middle">producer 100KB</text>
+  <rect x="608.0701754385965" y="512" width="291.9298245614035" height="34" rx="6" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="754.0350877192982" y="534" fill="#ff9b9b" font-family="sans-serif" font-size="11.5" text-anchor="middle">consumer 128KB</text>
+  <line x1="900.0" y1="504" x2="900.0" y2="554" stroke="#ffd76a" stroke-width="2"/>
+  <text x="900.0" y="498" fill="#ffd76a" font-family="sans-serif" font-size="11" text-anchor="middle">228KB 上限</text>
+  <text x="920" y="534" fill="#ff9b9b" font-family="sans-serif" font-size="12.5">✗ 装不下（还要扣驱动保留）　H20 +6.8% / GB200 −15.5%</text>
+  <text x="70" y="614" fill="#cfe6f3" font-family="sans-serif" font-size="13" font-weight="700">113 KB + 113 KB = 226 KB</text>
+  <rect x="380" y="594" width="520" height="34" rx="6" fill="#0d1f2e" stroke="#33566f" stroke-width="1.2"/>
+  <rect x="380" y="594" width="257.719298245614" height="34" rx="6" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="508.859649122807" y="616" fill="#82dcff" font-family="sans-serif" font-size="11.5" text-anchor="middle">producer 113KB</text>
+  <rect x="637.719298245614" y="594" width="257.719298245614" height="34" rx="6" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="766.578947368421" y="616" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle">consumer 113KB</text>
+  <line x1="900.0" y1="586" x2="900.0" y2="636" stroke="#ffd76a" stroke-width="2"/>
+  <text x="900.0" y="580" fill="#ffd76a" font-family="sans-serif" font-size="11" text-anchor="middle">228KB 上限</text>
+  <text x="920" y="616" fill="#ffd76a" font-family="sans-serif" font-size="12.5">✓ 但必须 carveout=100 才有 228KB 可用</text>
+  <text x="70" y="696" fill="#cfe6f3" font-family="sans-serif" font-size="13" font-weight="700">113 KB + 113 KB，carveout 偏 L1</text>
+  <rect x="380" y="676" width="520" height="34" rx="6" fill="#0d1f2e" stroke="#33566f" stroke-width="1.2"/>
+  <rect x="380" y="676" width="257.719298245614" height="34" rx="6" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="508.859649122807" y="698" fill="#82dcff" font-family="sans-serif" font-size="11.5" text-anchor="middle">producer 113KB</text>
+  <rect x="637.719298245614" y="676" width="257.719298245614" height="34" rx="6" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="766.578947368421" y="698" fill="#ff9b9b" font-family="sans-serif" font-size="11.5" text-anchor="middle">consumer 113KB</text>
+  <line x1="681.0526315789473" y1="668" x2="681.0526315789473" y2="718" stroke="#ffd76a" stroke-width="2"/>
+  <text x="681.0526315789473" y="662" fill="#ffd76a" font-family="sans-serif" font-size="11" text-anchor="middle">132KB 上限</text>
+  <text x="920" y="698" fill="#ff9b9b" font-family="sans-serif" font-size="12.5">✗ 只有 132KB 档位　gain 20.3% → 7.4%</text>
+  <rect x="60" y="762" width="1080" height="44" rx="10" fill="#0d1f2e" stroke="#ff7b7b" stroke-width="1.2"/>
+  <text x="80" y="790" fill="#ff9b9b" font-family="sans-serif" font-size="12.8">⚠ cudaOccupancyMaxActiveBlocksPerMultiprocessor 是错的预测器：它回答「同一个 kernel 能驻留几个 CTA」，不是「producer 一个 + consumer 一个能否共驻」。正确判据是 smem_p + smem_c ≤ 228KB。</text>
+</svg>

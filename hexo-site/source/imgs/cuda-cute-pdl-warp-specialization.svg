@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">Warp Specialization：同构 CTA 与专业化 CTA 的对比</title>
+  <desc id="desc">左侧为所有 warp 执行相同代码的传统双缓冲结构，右侧为 Hopper 起的 producer/consumer warp 分工结构，含 TMA、mbarrier 环形缓冲与 setmaxnreg 寄存器再分配。</desc>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb8d6"/></marker><marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ff9b9b"/></marker><marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7ee6a8"/></marker></defs>
+  <rect x="0" y="0" width="1200" height="760" rx="26" fill="#071522"/>
+  <text x="600.0" y="46" fill="white" font-family="sans-serif" font-size="27" text-anchor="middle" font-weight="700">Warp Specialization：同一个 CTA 里的 warp 分角色</text><text x="600.0" y="74" fill="#7e9fb8" font-family="sans-serif" font-size="14" text-anchor="middle">producer warp 只发访存，consumer warpgroup 只做 MMA，两者通过 smem 环形缓冲 + mbarrier 握手</text>
+  <rect x="50" y="108" width="480" height="40" rx="8" fill="#122636" stroke="#33566f" stroke-width="1.2"/><text x="290.0" y="133.0" fill="#8fb8d6" font-family="sans-serif" font-size="15" text-anchor="middle" font-weight="700">传统同构 CTA：所有 warp 跑同一份代码</text>
+  <text x="62" y="190" fill="#7e9fb8" font-family="sans-serif" font-size="12">warp 0</text>
+  <rect x="120" y="168" width="90" height="32" rx="8" fill="#0f3f42" stroke="#4fd6cf" stroke-width="1.2"/><text x="165.0" y="189.0" fill="#7fe8e2" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">load</text>
+  <rect x="212" y="168" width="74" height="32" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="249.0" y="189.0" fill="#ff9b9b" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">sync</text>
+  <rect x="288" y="168" width="120" height="32" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/><text x="348.0" y="189.0" fill="#82dcff" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">MMA</text>
+  <rect x="410" y="168" width="74" height="32" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="447.0" y="189.0" fill="#ff9b9b" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">sync</text>
+  <text x="62" y="252" fill="#7e9fb8" font-family="sans-serif" font-size="12">warp 1</text>
+  <rect x="120" y="230" width="90" height="32" rx="8" fill="#0f3f42" stroke="#4fd6cf" stroke-width="1.2"/><text x="165.0" y="251.0" fill="#7fe8e2" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">load</text>
+  <rect x="212" y="230" width="74" height="32" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="249.0" y="251.0" fill="#ff9b9b" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">sync</text>
+  <rect x="288" y="230" width="120" height="32" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/><text x="348.0" y="251.0" fill="#82dcff" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">MMA</text>
+  <rect x="410" y="230" width="74" height="32" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="447.0" y="251.0" fill="#ff9b9b" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">sync</text>
+  <text x="62" y="314" fill="#7e9fb8" font-family="sans-serif" font-size="12">warp 2</text>
+  <rect x="120" y="292" width="90" height="32" rx="8" fill="#0f3f42" stroke="#4fd6cf" stroke-width="1.2"/><text x="165.0" y="313.0" fill="#7fe8e2" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">load</text>
+  <rect x="212" y="292" width="74" height="32" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="249.0" y="313.0" fill="#ff9b9b" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">sync</text>
+  <rect x="288" y="292" width="120" height="32" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/><text x="348.0" y="313.0" fill="#82dcff" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">MMA</text>
+  <rect x="410" y="292" width="74" height="32" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="447.0" y="313.0" fill="#ff9b9b" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">sync</text>
+  <text x="62" y="376" fill="#7e9fb8" font-family="sans-serif" font-size="12">warp 3</text>
+  <rect x="120" y="354" width="90" height="32" rx="8" fill="#0f3f42" stroke="#4fd6cf" stroke-width="1.2"/><text x="165.0" y="375.0" fill="#7fe8e2" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">load</text>
+  <rect x="212" y="354" width="74" height="32" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="249.0" y="375.0" fill="#ff9b9b" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">sync</text>
+  <rect x="288" y="354" width="120" height="32" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/><text x="348.0" y="375.0" fill="#82dcff" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">MMA</text>
+  <rect x="410" y="354" width="74" height="32" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="447.0" y="375.0" fill="#ff9b9b" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">sync</text>
+  <line x1="249" y1="160" x2="249" y2="394" stroke="#ff7b7b" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <line x1="447" y1="160" x2="447" y2="394" stroke="#ff7b7b" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="290" y="430" fill="#ff9b9b" font-family="sans-serif" font-size="12.5" text-anchor="middle">__syncthreads()：所有 warp 一起停</text>
+  <text x="60" y="470" fill="#cfe6f3" font-family="sans-serif" font-size="12.8">· 寄存器按最大需求统一分配 → 只发访存的 warp 也占</text>
+  <text x="60" y="492" fill="#cfe6f3" font-family="sans-serif" font-size="12.8">  满累加器配额，occupancy 被拖垮</text>
+  <text x="60" y="518" fill="#cfe6f3" font-family="sans-serif" font-size="12.8">· 一个 warp 做 MMA 时没人发访存，访存/计算互相排队</text>
+  <rect x="610" y="108" width="540" height="40" rx="8" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/><text x="880.0" y="133.0" fill="#7ee6a8" font-family="sans-serif" font-size="15" text-anchor="middle" font-weight="700">Warp Specialization（Hopper 起成为标配）</text>
+  <rect x="610" y="172" width="150" height="96" rx="8" fill="#0f3f42" stroke="#4fd6cf" stroke-width="1.2"/><text x="685.0" y="217.0" fill="#7fe8e2" font-family="sans-serif" font-size="14" text-anchor="middle" font-weight="700">producer warp</text><text x="685.0" y="235.0" fill="#cfe6f3" font-family="sans-serif" font-size="11.5" text-anchor="middle">1 warp / 32 线程</text>
+  <text x="618" y="288" fill="#7fe8e2" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">setmaxnreg  ~32 reg/thr</text>
+  <text x="618" y="306" fill="#7fe8e2" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">tma_load(...)  单线程一条指令</text>
+  <text x="618" y="324" fill="#7fe8e2" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">描述整个 tile，硬件自己搬</text>
+  <rect x="810" y="172" width="130" height="200" rx="10" fill="#0d2c3f" stroke="#4a7fa5" stroke-width="1.2"/>
+  <text x="875" y="194" fill="#8fb8d6" font-family="sans-serif" font-size="12.5" text-anchor="middle" font-weight="700">smem 环形缓冲</text>
+  <rect x="822" y="206" width="106" height="32" rx="6" fill="#1b4a63" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="875" y="227" fill="#bce7f7" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="middle">stage 0</text>
+  <rect x="822" y="246" width="106" height="32" rx="6" fill="#1b4a63" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="875" y="267" fill="#bce7f7" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="middle">stage 1</text>
+  <rect x="822" y="286" width="106" height="32" rx="6" fill="#1b4a63" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="875" y="307" fill="#bce7f7" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="middle">stage 2</text>
+  <rect x="822" y="326" width="106" height="32" rx="6" fill="#1b4a63" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="875" y="347" fill="#bce7f7" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="middle">stage 3</text>
+  <text x="875" y="388" fill="#7e9fb8" font-family="sans-serif" font-size="11.5" text-anchor="middle">N 级流水，producer 领先 N 级</text>
+  <rect x="970" y="172" width="180" height="96" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/><text x="1060.0" y="217.0" fill="#82dcff" font-family="sans-serif" font-size="14" text-anchor="middle" font-weight="700">consumer warpgroup</text><text x="1060.0" y="235.0" fill="#cfe6f3" font-family="sans-serif" font-size="11.5" text-anchor="middle">4 warp / 128 线程</text>
+  <text x="978" y="288" fill="#82dcff" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">setmaxnreg  ~240 reg/thr</text>
+  <text x="978" y="306" fill="#82dcff" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">wgmma  直接从 smem 读操作数</text>
+  <text x="978" y="324" fill="#82dcff" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">累加到寄存器</text>
+  <line x1="762" y1="206" x2="818" y2="206" stroke="#4fd6cf" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="764" y="200" fill="#7fe8e2" font-family="sans-serif" font-size="11" text-anchor="middle">TMA</text>
+  <line x1="944" y1="240" x2="966" y2="240" stroke="#65d0ff" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="988" y="234" fill="#82dcff" font-family="sans-serif" font-size="11" text-anchor="middle">wgmma</text>
+  <line x1="1060" y1="290" x2="944" y2="290" stroke="#f0c040" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+  <text x="910" y="350" fill="#ffd76a" font-family="sans-serif" font-size="12" text-anchor="middle">mbarrier: full[i] / empty[i]　逐级握手，不用全 CTA 屏障</text>
+  <text x="610" y="420" fill="#cfe6f3" font-family="sans-serif" font-size="13.5" font-weight="700">为什么必须分角色：</text>
+  <text x="610" y="446" fill="#cfe6f3" font-family="sans-serif" font-size="12.8">① 寄存器需求极不对称——setmaxnreg 只有分了角色才有意义</text>
+  <text x="610" y="470" fill="#cfe6f3" font-family="sans-serif" font-size="12.8">② TMA 让「发访存」塌缩成单线程一条指令，自然独立成一个 warp</text>
+  <text x="610" y="494" fill="#cfe6f3" font-family="sans-serif" font-size="12.8">③ mbarrier 逐级同步取代 __syncthreads，producer 可一路跑在前面</text>
+  <rect x="50" y="560" width="1100" height="150" rx="12" fill="#0d1f2e" stroke="#33566f" stroke-width="1.2"/>
+  <text x="70" y="588" fill="#ffd76a" font-family="sans-serif" font-size="14.5" font-weight="700">⚠ 术语碰撞：两个不同的 producer/consumer 轴</text>
+  <text x="70" y="616" fill="#cfe6f3" font-family="sans-serif" font-size="13">· warp specialization 的 producer/consumer：同一个 kernel 内、warp 之间的数据生产与消费</text>
+  <text x="70" y="640" fill="#cfe6f3" font-family="sans-serif" font-size="13">· PDL 的 producer/consumer：kernel 与 kernel 之间的先后依赖</text>
+  <text x="70" y="668" fill="#9fc4dc" font-family="sans-serif" font-size="12.5">SGLang 的封装用 PDLWaitPrimary / PDLTriggerSecondary（primary/secondary）命名，很可能正是为了避开这个歧义。</text>
+  <text x="70" y="694" fill="#7ee6a8" font-family="sans-serif" font-size="12.5">两者的接点：PDL 能重叠的 prolog 里最值钱的一块，正是 producer warp 发出的头几笔 TMA load。</text>
+</svg>

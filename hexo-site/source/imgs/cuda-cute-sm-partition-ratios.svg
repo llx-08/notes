@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="920" viewBox="0 0 1280 920" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">SM 的分区结构与各执行单元的实测吞吐比例</title>
+  <desc id="desc">一个 SM 分成四个 processing block，每块独占 warp scheduler、寄存器切片、FP32 lane 和一个 Tensor Core；L1/Shared Memory 与 TMA 引擎由四块共享。下半部分对比 H20 与 GB200 各单元每 SM 每周期的实测吞吐。</desc>
+  <rect width="1280" height="920" rx="26" fill="#071522"/>
+  <text x="640" y="46" text-anchor="middle" fill="white" font-family="sans-serif" font-size="27" font-weight="700">SM 内部：谁独占、谁共享、比例是多少</text>
+  <text x="640" y="76" text-anchor="middle" fill="#7e9fb8" font-family="sans-serif" font-size="14.5">数量以 Hopper/Blackwell 数据中心 SM 为准；吞吐为 ecs H20 与 target_p GB200 实测</text>
+
+  <g font-family="sans-serif">
+    <!-- ===== SM 外框 ===== -->
+    <rect x="36" y="98" width="1208" height="378" rx="16" fill="#0d1f30" stroke="#2b4a63"/>
+    <text x="56" y="126" fill="#8fb8d6" font-size="16" font-weight="700">一个 SM</text>
+    <text x="1224" y="126" text-anchor="end" fill="#5f7f96" font-size="13">H20 有 78 个 · GB200 有 152 个</text>
+
+    <!-- 4 个 partition -->
+    <g>
+      <rect x="60" y="140" width="282" height="212" rx="12" fill="#173f59" stroke="#65d0ff"/>
+      <text x="201" y="166" text-anchor="middle" fill="#82dcff" font-size="15" font-weight="700">Processing Block 0</text>
+      <rect x="76" y="178" width="250" height="26" rx="5" fill="#245571"/><text x="201" y="196" text-anchor="middle" fill="white" font-size="12.5">warp scheduler + dispatch ×1</text>
+      <rect x="76" y="208" width="250" height="26" rx="5" fill="#2f7a52"/><text x="201" y="226" text-anchor="middle" fill="white" font-size="12.5">寄存器 16384 个 = 64 KB</text>
+      <rect x="76" y="238" width="250" height="26" rx="5" fill="#245571"/><text x="201" y="256" text-anchor="middle" fill="white" font-size="12.5">FP32 ×32 · INT32 ×16 · FP64</text>
+      <rect x="76" y="268" width="250" height="26" rx="5" fill="#8f5fd0"/><text x="201" y="286" text-anchor="middle" fill="white" font-size="12.5">Tensor Core ×1</text>
+      <rect x="76" y="298" width="250" height="26" rx="5" fill="#a8722a"/><text x="201" y="316" text-anchor="middle" fill="white" font-size="12.5">LSU 组 · SFU 组</text>
+      <text x="201" y="342" text-anchor="middle" fill="#bce7f7" font-size="12">最多驻留 16 warp</text>
+    </g>
+    <g>
+      <rect x="352" y="140" width="282" height="212" rx="12" fill="#173f59" stroke="#65d0ff"/>
+      <text x="493" y="166" text-anchor="middle" fill="#82dcff" font-size="15" font-weight="700">Processing Block 1</text>
+      <rect x="368" y="178" width="250" height="26" rx="5" fill="#245571"/><text x="493" y="196" text-anchor="middle" fill="white" font-size="12.5">warp scheduler + dispatch ×1</text>
+      <rect x="368" y="208" width="250" height="26" rx="5" fill="#2f7a52"/><text x="493" y="226" text-anchor="middle" fill="white" font-size="12.5">寄存器 16384 个 = 64 KB</text>
+      <rect x="368" y="238" width="250" height="26" rx="5" fill="#245571"/><text x="493" y="256" text-anchor="middle" fill="white" font-size="12.5">FP32 ×32 · INT32 ×16 · FP64</text>
+      <rect x="368" y="268" width="250" height="26" rx="5" fill="#8f5fd0"/><text x="493" y="286" text-anchor="middle" fill="white" font-size="12.5">Tensor Core ×1</text>
+      <rect x="368" y="298" width="250" height="26" rx="5" fill="#a8722a"/><text x="493" y="316" text-anchor="middle" fill="white" font-size="12.5">LSU 组 · SFU 组</text>
+      <text x="493" y="342" text-anchor="middle" fill="#bce7f7" font-size="12">最多驻留 16 warp</text>
+    </g>
+    <g>
+      <rect x="644" y="140" width="282" height="212" rx="12" fill="#173f59" stroke="#65d0ff"/>
+      <text x="785" y="166" text-anchor="middle" fill="#82dcff" font-size="15" font-weight="700">Processing Block 2</text>
+      <rect x="660" y="178" width="250" height="26" rx="5" fill="#245571"/><text x="785" y="196" text-anchor="middle" fill="white" font-size="12.5">warp scheduler + dispatch ×1</text>
+      <rect x="660" y="208" width="250" height="26" rx="5" fill="#2f7a52"/><text x="785" y="226" text-anchor="middle" fill="white" font-size="12.5">寄存器 16384 个 = 64 KB</text>
+      <rect x="660" y="238" width="250" height="26" rx="5" fill="#245571"/><text x="785" y="256" text-anchor="middle" fill="white" font-size="12.5">FP32 ×32 · INT32 ×16 · FP64</text>
+      <rect x="660" y="268" width="250" height="26" rx="5" fill="#8f5fd0"/><text x="785" y="286" text-anchor="middle" fill="white" font-size="12.5">Tensor Core ×1</text>
+      <rect x="660" y="298" width="250" height="26" rx="5" fill="#a8722a"/><text x="785" y="316" text-anchor="middle" fill="white" font-size="12.5">LSU 组 · SFU 组</text>
+      <text x="785" y="342" text-anchor="middle" fill="#bce7f7" font-size="12">最多驻留 16 warp</text>
+    </g>
+    <g>
+      <rect x="936" y="140" width="282" height="212" rx="12" fill="#173f59" stroke="#65d0ff"/>
+      <text x="1077" y="166" text-anchor="middle" fill="#82dcff" font-size="15" font-weight="700">Processing Block 3</text>
+      <rect x="952" y="178" width="250" height="26" rx="5" fill="#245571"/><text x="1077" y="196" text-anchor="middle" fill="white" font-size="12.5">warp scheduler + dispatch ×1</text>
+      <rect x="952" y="208" width="250" height="26" rx="5" fill="#2f7a52"/><text x="1077" y="226" text-anchor="middle" fill="white" font-size="12.5">寄存器 16384 个 = 64 KB</text>
+      <rect x="952" y="238" width="250" height="26" rx="5" fill="#245571"/><text x="1077" y="256" text-anchor="middle" fill="white" font-size="12.5">FP32 ×32 · INT32 ×16 · FP64</text>
+      <rect x="952" y="268" width="250" height="26" rx="5" fill="#8f5fd0"/><text x="1077" y="286" text-anchor="middle" fill="white" font-size="12.5">Tensor Core ×1</text>
+      <rect x="952" y="298" width="250" height="26" rx="5" fill="#a8722a"/><text x="1077" y="316" text-anchor="middle" fill="white" font-size="12.5">LSU 组 · SFU 组</text>
+      <text x="1077" y="342" text-anchor="middle" fill="#bce7f7" font-size="12">最多驻留 16 warp</text>
+    </g>
+
+    <!-- 共享层 -->
+    <rect x="60" y="364" width="1158" height="96" rx="12" fill="#59431f" stroke="#ffd066"/>
+    <text x="80" y="390" fill="#ffdb82" font-size="15" font-weight="700">四个 Block 共享（不属于任何 partition）</text>
+    <rect x="80" y="402" width="248" height="44" rx="8" fill="#7a5a22"/>
+    <text x="204" y="422" text-anchor="middle" fill="white" font-size="13">L1 数据 Cache / Shared Memory</text>
+    <text x="204" y="439" text-anchor="middle" fill="#ffe8b4" font-size="12">同一块 SRAM，最多 228 KB 给 SMEM</text>
+    <rect x="340" y="402" width="180" height="44" rx="8" fill="#7a5a22"/>
+    <text x="430" y="428" text-anchor="middle" fill="white" font-size="13">L1 指令 Cache</text>
+    <rect x="532" y="402" width="200" height="44" rx="8" fill="#7a5a22"/>
+    <text x="632" y="422" text-anchor="middle" fill="white" font-size="13">TMA 引擎（Hopper+）</text>
+    <text x="632" y="439" text-anchor="middle" fill="#ffe8b4" font-size="12">每 SM 一个，绕过 LSU</text>
+    <rect x="744" y="402" width="200" height="44" rx="8" fill="#6d4a9c"/>
+    <text x="844" y="422" text-anchor="middle" fill="white" font-size="13">TMEM（仅 Blackwell）</text>
+    <text x="844" y="439" text-anchor="middle" fill="#ddc6ff" font-size="12">Tensor Core 累加器</text>
+    <rect x="956" y="402" width="246" height="44" rx="8" fill="#7a5a22"/>
+    <text x="1079" y="422" text-anchor="middle" fill="white" font-size="13">barrier / 同步资源</text>
+    <text x="1079" y="439" text-anchor="middle" fill="#ffe8b4" font-size="12">mbarrier · __syncthreads</text>
+
+    <text x="640" y="500" text-anchor="middle" fill="#ffd066" font-size="14.5" font-weight="700">关键：寄存器堆是静态切分给 4 个 partition 的，不是全 SM 共享池；而 Shared Memory 是真正共享的</text>
+
+    <!-- ===== 下半：实测吞吐比例 ===== -->
+    <text x="56" y="552" fill="white" font-size="19" font-weight="700">每 SM 每周期实测吞吐：只有一个单元变快了</text>
+
+    <g fill="#5f7f96" font-size="13.5">
+      <text x="300" y="590">H20 (SM90)</text>
+      <text x="520" y="590">GB200 (SM100)</text>
+      <text x="740" y="590">代际变化</text>
+    </g>
+
+    <!-- FP32 -->
+    <rect x="56" y="602" width="1164" height="60" rx="10" fill="#0d1f30" stroke="#245571"/>
+    <text x="76" y="628" fill="white" font-size="15" font-weight="700">FP32 CUDA Core</text>
+    <text x="76" y="650" fill="#8fb8d6" font-size="12.5">elementwise / 地址计算 / epilogue</text>
+    <text x="300" y="638" fill="#bce7f7" font-size="16" font-family="monospace">232 FLOP</text>
+    <text x="520" y="638" fill="#bce7f7" font-size="16" font-family="monospace">233 FLOP</text>
+    <rect x="740" y="618" width="60" height="28" rx="6" fill="#3a4a56"/>
+    <text x="770" y="638" text-anchor="middle" fill="#c9d6de" font-size="15" font-weight="700">1.00×</text>
+    <text x="820" y="638" fill="#8fb8d6" font-size="13.5">完全没变</text>
+
+    <!-- Tensor Core -->
+    <rect x="56" y="670" width="1164" height="60" rx="10" fill="#241a36" stroke="#8f5fd0"/>
+    <text x="76" y="696" fill="white" font-size="15" font-weight="700">Tensor Core (BF16)</text>
+    <text x="76" y="718" fill="#d3bdf0" font-size="12.5">GEMM 主力</text>
+    <text x="300" y="706" fill="#ddc6ff" font-size="16" font-family="monospace">896 FLOP</text>
+    <text x="520" y="706" fill="#ddc6ff" font-size="16" font-family="monospace">7290 FLOP</text>
+    <rect x="740" y="686" width="60" height="28" rx="6" fill="#8f5fd0"/>
+    <text x="770" y="706" text-anchor="middle" fill="white" font-size="15" font-weight="700">8.1×</text>
+    <text x="820" y="706" fill="#c9a6ff" font-size="13.5">整代升级几乎全在这里</text>
+
+    <!-- SMEM -->
+    <rect x="56" y="738" width="1164" height="60" rx="10" fill="#0d1f30" stroke="#a8722a"/>
+    <text x="76" y="764" fill="white" font-size="15" font-weight="700">Shared Memory 读（经 LSU）</text>
+    <text x="76" y="786" fill="#c9a05a" font-size="12.5">tile 供给 Tensor Core 的通道</text>
+    <text x="300" y="774" fill="#ffd066" font-size="16" font-family="monospace">126 B</text>
+    <text x="520" y="774" fill="#ffd066" font-size="16" font-family="monospace">127 B</text>
+    <rect x="740" y="754" width="60" height="28" rx="6" fill="#3a4a56"/>
+    <text x="770" y="774" text-anchor="middle" fill="#c9d6de" font-size="15" font-weight="700">1.01×</text>
+    <text x="820" y="774" fill="#c9a05a" font-size="13.5">完全没变</text>
+
+    <!-- 结论 -->
+    <rect x="56" y="816" width="1164" height="80" rx="12" fill="#3a2430" stroke="#ff8fa3"/>
+    <text x="76" y="844" fill="#ffb3c1" font-size="15.5" font-weight="700">推论：Tensor Core 与 FP32 CUDA Core 的吞吐比从 3.9× 拉大到 31×</text>
+    <text x="76" y="870" fill="white" font-size="14">所以在 GB200 上，任何没走 Tensor Core 的算子（softmax / layernorm / 采样 / 逐字节拷贝）都不会因换卡而变快，</text>
+    <text x="76" y="890" fill="white" font-size="14">而它们在总时间里的占比会显著上升——非 GEMM 部分成为新的短板。</text>
+  </g>
+</svg>

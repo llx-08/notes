@@ -70,6 +70,9 @@ TMEM 等概念淹没。
 | 8 | [CuTe DSL：Layout 与 Tensor](/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-08-cute-dsl-layout-tensor/) | 理解 CuTe 最核心的坐标到地址映射及 Python DSL 编译路径 |
 | 9 | [CuTe DSL：Copy、MMA 与 GEMM 流水](/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-09-cute-dsl-gemm-pipeline/) | 将 Layout、TiledCopy、TiledMMA 与 Hopper/Blackwell 硬件操作连接起来 |
 | 10 | [性能分析、实验与代码阅读路线](/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-10-profiling-and-practice/) | 使用 nvidia-smi、Nsight、PTX/SASS、roofline 和微基准定位瓶颈 |
+| 11 | [GEMM 软件流水线深入](/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/) | 定量理解延迟隐藏：四代流水线演进、stage 数推导、roofline 里 `max` 的来源，含 H20/GB200 实测 |
+| 12 | [PDL：把 kernel 之间的缝隙压掉](/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/) | Programmatic Dependent Launch 的 wait/trigger 语义、warp specialization、SM 共驻算术、gemm_ar tail-hiding 与 phase counter，含 H20/GB200 实测微基准 |
+| 13 | [CUDA context 与 stream：执行模型的进程视角](/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/) | context/UVA 层级、stream 到硬件工作队列的映射、并发的三个前提（剩余资源/NULL stream/队列数）、优先级实测无效、跨进程隔离与 CUDA IPC |
 
 ## 3. 两台学习机器
 
@@ -84,8 +87,13 @@ TMEM 等概念淹没。
 
 - `ecs` 当前默认 `nvidia-smi` 使用的 NVML 580.173 与内核驱动 570.133.20
   不匹配；探测时显式加载同版本 NVML 570.133.20。这个问题本身是环境问题，
-  不是 GPU 架构特征。
-- `target_p` 当前网络不通，Blackwell 实验统一使用 `target_p_j`。
+  不是 GPU 架构特征。`~/nvfix/` 下已备好指向 570.133.20 的 `libnvidia-ml.so.1`
+  与 `libcuda.so.1` 软链，加 `LD_LIBRARY_PATH=$HOME/nvfix` 即可正常跑 CUDA。
+- `ecs` 有 nvcc 12.8 但**没有 PyTorch**，微基准请直接写 CUDA + cuBLAS。
+- `target_p` 在 2026-07-31 复测可直连（4×GB200，CUDA 13.2，aarch64）；
+  README 早前记录的「网络不通、改用 `target_p_j`」已不成立。
+- CUDA 13 从 `cudaDeviceProp` 移除了 `clockRate`，跨两台机器编译的代码要改用
+  `cudaDeviceGetAttribute(&v, cudaDevAttrClockRate, dev)`。
 - 产品名、芯片名和架构名不是同一个概念：H20 是产品，GH100 是芯片，
   Hopper 是架构；GB200 是 Grace Blackwell 系统/产品命名，SM100 表示本文实机
   GPU 的 Blackwell compute capability 家族。

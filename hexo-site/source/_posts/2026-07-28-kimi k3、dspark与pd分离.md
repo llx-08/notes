@@ -1002,6 +1002,7 @@ DSpark:
 | draft token 间依赖 | 完整 MTP transformer | 完整 Eagle transformer | 通常没有直接自回归依赖 | 低秩 Markov head 串行依赖 |
 | target 信息 | 通常最终 hidden；也可能是模型特有 multi-stream hidden | 多个 target 中间层 hidden 融合 | 一个或多个 target hidden，用来构造 context KV | 同 DFlash |
 | drafter 输入 token | 实际 token embedding | 实际 token embedding | bonus token + MASK queries | anchor token + MASK queries |
+| prefix drafter KV 是否依赖 block 外 next token | 是，当前 `EagleProposer` 路径使用 shifted token | 是 | 否，context KV 只依赖 target hidden | 否，同 DFlash |
 | drafter query slots | `gamma` | `gamma` | `gamma + 1` | `gamma` |
 | attention 语义 | causal | causal | 默认可 non-causal，也支持 causal 配置 | 同 DFlash |
 | checkpoint 来源 | 通常是 target checkpoint 自带 MTP modules | 单独训练的 Eagle3 head/model | DFlash block-draft checkpoint | DSpark checkpoint + Markov weights |
@@ -1321,7 +1322,278 @@ target model 完成 verify 后，后续 DFlash/DSpark propose 会利用新的 ta
 
 ![MTP/Eagle3 与 DFlash/DSpark 的 KV cache 语义对比](/imgs/spec-drafter-kv-cache-comparison.svg)
 
-### 11.10 lookahead slots 和 block allocation
+### 11.10 Prefix cache、最后一个 block 与 next-token hash
+
+这一节讨论的是 prefix-cache lookup 中的以下逻辑：
+
+```python
+if use_eagle and computed_blocks[0]:
+    for computed in computed_blocks:
+        computed.pop()
+```
+
+它位于 `vllm/v1/core/single_type_kv_cache_manager.py` 的
+`FullAttentionManager.find_longest_cache_hit()`。理解它时必须先区分物理 KV
+tensor 与 scheduler 的逻辑 block。
+
+#### 11.10.1 一个 logical block 覆盖 target 和 drafter layers
+
+如果只观察 target attention layer 的物理 tensor，那么由 token
+`[a, b, c, d, e]` 生成的 target K/V 的确完全不依赖下一个 token。这一点对
+causal target model 始终成立。
+
+但 scheduler 中的 `KVCacheBlock`/`block_id` 是一个逻辑分配单位，而不是某一层
+的一小段 tensor。同一个 block ID 会索引同一 KV cache group 中各 attention
+layer 的物理 block。启用 speculative drafter 后，这些 layers 还包括 drafter
+attention layers：
+
+```text
+logical block_id = 42
+
+target layer 0, block 42  -> target KV slots
+target layer 1, block 42  -> target KV slots
+...
+draft layer 0, block 42   -> drafter KV slots
+draft layer 1, block 42   -> drafter KV slots
+```
+
+`GPUModelRunner.get_kv_cache_spec()` 会枚举已经注册的
+`AttentionLayerBase`，而 `EagleProposer.load_model()`、
+`DFlashProposer.load_model()` 会把新增的 draft attention layers 注册进这套配置。
+prefix-cache lookup 对 logical block 作出一次命中判断，等价于承诺这个 block
+对应的所有相关 layer cache 都可复用，而不是只承诺 target cache 正确。
+
+#### 11.10.2 EAGLE/MTP 为什么使用 shifted token
+
+设 target token sequence 为：
+
+```text
+a b c d e
+```
+
+target forward 得到：
+
+```text
+h_a h_b h_c h_d h_e
+```
+
+并从 `h_e` 的 logits 中采样出下一个 token `f`。EAGLE 的目标不是再次预测
+已经产生的 `f`，而是利用：
+
+```text
+(h_e, f) -> 预测 f 对应的下一时刻 feature -> draft 出 g
+```
+
+仅使用 `h_e` 不能确定下一 feature，因为同一个分布可能采样出不同 token，
+不同采样分支会产生不同的下一 feature。已经采样出的 `f` 用来消除这项 feature
+uncertainty；它不是对未来 label 的泄漏。
+
+因此 `EagleProposer.propose()` 将 token 相对 target hidden state 提前一个时间步：
+
+```python
+self.input_ids[: num_tokens - 1] = target_token_ids[1:]
+self.input_ids[last_token_indices] = next_token_ids
+```
+
+对于单请求，最终对齐关系是：
+
+```text
+target hidden:  h_a h_b h_c h_d h_e
+EAGLE token:      b   c   d   e   f
+
+input pair:     (h_a,b) (h_b,c) (h_c,d) (h_d,e) (h_e,f)
+```
+
+第一行 shift 后最后一个 buffer slot 只是临时旧值；第二行会立即用该请求实际的
+`next_token_ids` 覆盖它。因此最终输入是 `[b, c, d, e, f]`，不是
+`[b, c, d, e, e]`。
+
+#### 11.10.3 为什么 EAGLE prefix block 依赖 block 外 token
+
+假设 `block_size = 5`。target layer 的 block 内容是：
+
+```text
+target block:
+  KV(a), KV(b), KV(c), KV(d), KV(e)
+```
+
+它不依赖 `f`。但同一个 logical block 下的 EAGLE draft layer 内容来自：
+
+```text
+draft block:
+  KV(h_a,b)
+  KV(h_b,c)
+  KV(h_c,d)
+  KV(h_d,e)
+  KV(h_e,f)  <- 最后一个 slot 依赖 block 外的 f
+```
+
+考虑两个请求：
+
+```text
+旧请求: a b c d e f_1 ...
+新请求: a b c d e f_2 ...
+```
+
+普通 block hash 只覆盖 `[a, b, c, d, e]`，所以两者会得到相同 hash。
+target block 仍然正确，但旧 EAGLE block 的最后一个 slot 是
+`KV(h_e, f_1)`，新请求需要的是 `KV(h_e, f_2)`。复用它会让后续 drafter
+attention 读取不属于当前请求分支的旧 K/V。
+
+理论上可以只重算最后一个 draft slot，同时继续复用 target block 和前四个
+draft slots。但当前 prefix cache 和 `num_computed_tokens` 是 block 对齐的，不能
+表示“命中一个 block 的 4/5”；同时普通 prefix cache 不保存完整 target hidden
+state `h_e`，也不能一般性地从 target K/V 反推出 `h_e`。因此当前实现选择 pop
+整个最后 block，让 target forward 重新产生 hidden states，再用当前真实 next
+token 重建 drafter K/V。
+
+#### 11.10.4 为什么只 pop 最后一个命中 block
+
+vLLM 的 block hash 是链式的：
+
+```text
+H0 = Hash(NONE, block0_tokens)
+H1 = Hash(H0,   block1_tokens)
+H2 = Hash(H1,   block2_tokens)
+```
+
+如果 `block1` 也命中，那么 `block1` 的第一个 token 已经验证了 `block0` 所需的
+next token。因此除最后一个命中 block 外，前面每个 block 的跨边界依赖都由其
+后继命中 block 间接确认。只有最后一个命中 block 没有后继命中结果来证明边界
+外 token 相同，所以只需 pop 一个 block。
+
+#### 11.10.5 把 next token 纳入 hash 为什么可以取消 pop
+
+对 EAGLE block 使用：
+
+```text
+H0' = Hash(NONE, [a, b, c, d, e, f])
+```
+
+而不是：
+
+```text
+H0 = Hash(NONE, [a, b, c, d, e])
+```
+
+就可以让 cache key 覆盖生成该 draft KV block 所需的全部输入。当 `f_1 != f_2`
+时 hash 不同，错误的 block 不会命中；hash 命中则同时证明 target token 与
+EAGLE shifted next token 一致，因此无需再保守地 pop。
+
+当前实现位于 `vllm/v1/core/kv_cache_utils.py` 的
+`get_request_block_hasher()`：
+
+```python
+if use_eagle_token and end_token_idx + 1 <= num_tokens:
+    end_token_idx += 1
+```
+
+这会让相邻 hash block 在边界 token 上重叠一个 token。当前只在 PD
+disaggregation 的 P/producer 节点启用，因为 prefill 时完整 prompt 已知；普通
+decode 中，一个 block 刚填满时，下一个生成 token 可能尚未产生，无法立刻生成
+稳定的 next-token-aware hash。
+
+还需要区分另一个与 EAGLE 无关的最后-token保护：
+`KVCacheManager.get_computed_blocks()` 将 `max_cache_hit_length` 设置为
+`request.num_tokens - 1`，目的是即使整个 prompt 命中，也至少重新计算最后一个
+token 来得到 logits。它适用于普通模型；next-token hash 解决的是 EAGLE draft
+KV 的跨 block 依赖，不能替代这个 logits 保护。
+
+#### 11.10.6 DFlash/DSpark 为什么没有相同的数据依赖
+
+DFlash/DSpark 同样拥有 drafter KV cache，但 prefix context KV 的生成方式不同：
+
+```python
+self.model.precompute_and_store_context_kv(
+    context_hidden_states,
+    context_positions,
+    context_slot_mapping,
+)
+```
+
+其内容可以抽象为：
+
+```text
+draft context slot i = KV_projection(target_hidden_i)
+```
+
+所以 `[a, b, c, d, e]` 对应：
+
+```text
+KV(Project(h_a))
+KV(Project(h_b))
+KV(Project(h_c))
+KV(Project(h_d))
+KV(Project(h_e))
+```
+
+这些 target hidden states 只依赖 causal prefix，不依赖 block 外的 `f`。
+DFlash 使用 `f` 作为 prefix 后方新分配的 bonus/anchor query，后面再接 MASK
+queries；这些是 speculative lookahead slots，不是已经命中的 prefix context
+block。DSpark 继承相同 context-KV 路径，并在 Markov head 中令
+`prev = next_token_ids` 来影响当前 draft logits；这个依赖同样不进入 prefix
+context KV。
+
+因此，就当前 Qwen3 DFlash/DSpark 实现的数据依赖而言，它们满足：
+
+```text
+需要 target hidden states:                  yes
+prefix drafter KV 依赖 block 外 next token: no
+```
+
+而 EAGLE/MTP 满足：
+
+```text
+需要 target hidden states:                  yes
+prefix drafter KV 依赖 block 外 next token: yes
+```
+
+#### 11.10.7 当前 flag 混用了两种语义
+
+当前 `SpeculativeConfig.use_eagle()` 返回：
+
+```python
+return self.method in ("eagle", "eagle3", "mtp", "dflash", "dspark")
+```
+
+注释说明它也被“需要 target hidden states”的 runner 路径使用。但 scheduler 又用
+同一个 flag 派生 `use_eagle_pop`，EngineCore 也用它决定 P 节点是否把 next token
+加入 block hash。这混合了两种不同语义：
+
+```text
+needs_target_hidden_states
+prefix_draft_kv_depends_on_next_token
+```
+
+结果是当前非 P 节点的 DFlash/DSpark 也会 pop 最后一个命中 block，P 节点也会
+使用 next-token-aware hash。基于当前 context-KV 依赖图，这是保守但可能不必要
+的行为：不会引入错误，但可能减少一个 block 的 prefix hit，或让 cache key 对
+无关的 next token 过度敏感。
+
+更清晰的配置应将两者拆开：
+
+| method | `needs_target_hidden_states` | `prefix_draft_kv_depends_on_next_token` |
+| --- | --- | --- |
+| EAGLE/Eagle3/MTP | true | true |
+| DFlash/DSpark | true | false |
+
+在正式取消 DFlash/DSpark pop 或 next-token hash 之前，还必须用测试证明：
+
+1. 每个 logical block 被标记为 cacheable 前，所有 DFlash/DSpark context KV
+   slots 都已经写入；
+2. local prefix-cache full/partial hit 都能直接复用 drafter context KV；
+3. P/D producer 即使 `skip_decode_drafting=True`，仍先执行 context-KV
+   precompute，并完整传输 drafter groups；
+4. accepted/rejected speculative tokens 的 query slots 会被正确覆盖、压缩或释放，
+   不会被误标为稳定 prefix context KV；
+5. FullAttention、SWA、hybrid group 和异构 block size 下行为一致。
+
+当前 proposer 已把 `precompute_and_store_context_kv()` 放在
+`skip_decode_drafting` 的 early return 之前，这支持取消保守 pop 的方向；但仓库
+中尚未找到 DFlash/DSpark 专用的 prefix-cache full-hit/partial-hit 回归测试，不能
+只根据依赖图直接修改生产逻辑。
+
+### 11.11 lookahead slots 和 block allocation
 
 当前 scheduler 对四类方法的预留不同：
 
@@ -1345,7 +1617,7 @@ DSpark 从 anchor query 的输出开始采样，因此 `gamma` 个 query slots �
 
 MTP/Eagle3 虽然也是 `gamma` 个 lookahead slots，但它们是按自回归 step 顺序写入，而不是一次建立整个 anchor/MASK query block。
 
-### 11.11 cache group 和 metadata 的差异
+### 11.12 cache group 和 metadata 的差异
 
 MTP/Eagle3 当前支持：
 
@@ -1369,7 +1641,7 @@ self.indexer_layer_names = []
 
 主要管理 DFlash/DSpark attention layers。根据 checkpoint，DFlash layers 可以是 FullAttention、SWA 或二者混合，但不会自动沿用 MTP/Eagle 的 draft indexer 路径。
 
-### 11.12 PD 分离中的差异
+### 11.13 PD 分离中的差异
 
 MTP/Eagle3 在 P 节点运行普通 draft prefill forward 时，会自然执行 attention layer 并写入 drafter causal KV。
 
@@ -1411,7 +1683,7 @@ target cache ready
 AND drafter context cache ready
 ```
 
-### 11.13 对 Kimi K3 集成的直接影响
+### 11.14 对 Kimi K3 集成的直接影响
 
 Kimi K3 的 `cache_shape=8` 只定义：
 

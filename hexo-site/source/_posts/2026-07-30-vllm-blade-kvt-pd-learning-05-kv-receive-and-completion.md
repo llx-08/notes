@@ -169,7 +169,7 @@ Barex callback 成功：
 这里的“本地完成语义”不是“数据刚离开 P 的 RNIC”。对 RC RDMA WRITE 来说，正常的
 成功 CQE 建立在 RDMA transport 已完成远端操作的基础上；远端 rkey、地址或 QP
 状态等可检测错误，会通过 NAK/retry/error CQE 反映到发送端。它仍然不是“D 上的
-GPU kernel 已经读取并验证过每个字节”。
+GPU kernel 已经读取并验证过每个字节”。准确的 ACK/CQE 时序见 §8.1。
 
 ### C. Blade-KVT batch completion
 
@@ -186,11 +186,86 @@ RoCE RC/RDMA reliability 的 ACK/retry 在 RNIC/transport 层完成。应用看�
 RNIC 已满足该 transport 的完成条件。这个 ACK 不是 D 侧 CQE 返回给 P：
 
 - P 有自己的 CQE；
-- D 可能没有对应 receive CQE（one-sided WRITE）；
+- D 在 Direct 路径下**没有**任何 CQE。`WriteBatch` 用的是纯
+  `IBV_WR_RDMA_WRITE`（`barex/impl/rdma/xchannel_impl.cc:1652`），不是
+  `IBV_WR_RDMA_WRITE_WITH_IMM`，因此不消耗 D 的 Receive WQE、不产生 D 的 CQE、
+  D CPU 也不被唤醒；
 - 网络 ACK 由 RNIC 协议栈处理；
 - `SEND_DONE` 是 Blade-KVT 应用层另发的 TCP RPC。
 
-### 8.1 “数据到达 D RNIC 后，RNIC→GPU 又失败”会怎样
+因此本章后文凡是说“成功 CQE”，指的都是 **P 端 send CQ 上的 CQE**。不存在“D 的
+CQE”这一环，也就不存在“等 D 的 CQE 再回 ACK”这种时序。
+
+### 8.1 ACK 与 CQE 的先后：ACK 在 CQE 之前
+
+完整时序是：
+
+```text
+P post RDMA WRITE
+  → 网络可靠传输
+  → D RNIC 校验 remote addr / rkey
+  → D RNIC 把该 WR 的 Memory Write TLP 按序推给目标 memory domain
+  → D RNIC 回 ACK                      ← 责任方是 D 的硬件
+  → P RNIC 收到 ACK
+  → P 的 send CQ 产生 IBV_WC_SUCCESS    ← 建立在收到 ACK 之上
+  → Barex DoneCallback(Status::OK)
+```
+
+**D 的 ACK 先，P 的 CQE 后。** P 的 CQE 之所以有意义，正是因为它以收到 D 的
+transport ACK 为前提。
+
+补两个容易记错的点：
+
+**（1）ACK 不是“DMA 写完”才发。** IB 规范要求 responder 回 ACK 前请求已
+*executed*，对 WRITE 而言即数据已 “placed into memory”。但“placed”的实现含义
+是：RNIC 已把全部 Memory Write TLP 按序提交，并依赖 **PCIe posted-write
+ordering** 保证后续经同一路径的访问能看到它。PCIe 的 Memory Write 是 posted
+的——没有 completion TLP，发送方交给 root complex 就算完事，RNIC 无法知道写是否
+真的落到 DRAM，除非额外补一次读。所以：
+
+```text
+D RNIC 回 ACK
+= 所有 write TLP 已按序推出，同路径后续访问可见
+≠ 数据已落到 HBM 存储单元
+≠ GPU SM 能读到
+```
+
+这个区别对两类目标的后果完全不同：
+
+| 目标 | PCIe ordering 是否够用 |
+|---|---|
+| host memory（TCP / staged 的落点） | 够。CPU 读也走同一 root complex，必然排在 posted write 之后 |
+| GPU HBM（GPUDirect RDMA Direct 路径） | **不够**。GPU SM 直读 HBM，不经过那个 ordering domain |
+
+ACK 发出时，数据可能仍在 root complex 或 GPU 的 PCIe inbound 路径上。这正是
+§8.3 末尾“内存可见性”那段的物理根源，也是 NVIDIA GPUDirect RDMA 文档专门写
+Synchronization and Memory Ordering 一节的原因。它不是保守措辞，是规范与硬件之间
+的真实缺口。
+
+**（2）ACK 可以合并。** RC 下 responder ACK 一个较大的 PSN 就隐式确认了之前所有
+PSN，不是每个 WR 一个 ACK 包。
+
+### 8.2 P 端 CQE 的粒度：一个 batch 可能只有一个 CQE
+
+Barex `WriteOrReadBatchOnce()` 支持选择性签名，由 `writebatch_optim_` 控制
+（`xchannel_impl.cc:1633-1661`）：
+
+```text
+writebatch_optim_ <= 1  → 每个 WR 都有 x_wr_id，都带 IBV_SEND_SIGNALED
+writebatch_optim_ == 2  → 只有 batch 内最后一个 WR 带 IBV_SEND_SIGNALED，
+                          且只有它持有 done callback（前面的 done 是空 lambda）
+```
+
+也就是说 optim=2 时，整个 batch 只产生一个 CQE，靠 RC 的按序完成语义覆盖前面所有
+WR：最后一个 WR 成功完成，意味着同 QP 上先于它 post 的 WR 也都已成功。
+
+两个推论：
+
+- 未签名 WR 的 SQ 槽位要等后续签名 CQE 才能回收，`writebatch_optim_` 调大时 SQ
+  深度和 batch 大小要匹配，否则 SQ 满会导致 post 失败；
+- 调试时不要假设“每个 WRITE 都有一条 completion 日志”，缺日志不等于缺传输。
+
+### 8.3 “数据到达 D RNIC 后，RNIC→GPU 又失败”会怎样
 
 先修正一个容易造成误解的两段式想象：
 
@@ -238,15 +313,17 @@ D 目标 rkey/地址无效、权限错误、QP/链路故障、可报告的设备
   `KvSendStub::do_task()`；
 - 最终请求状态变成 `FAILED`，request 级 `send-done` 使用 `code=500`。
 
-但是，成功 CQE 有明确边界。它不能覆盖成功完成之后才发生、或硬件本身无法检测/无法
-归因给这个 WR 的问题：
+但是，**P 端的**成功 CQE 有明确边界。以下这些问题它一律覆盖不到——它们要么发生在
+CQE 产生之后，要么硬件根本无法检测、无法归因给这个 WR。注意 D 侧没有 CQE，所以这
+里说的全部是 P 端观察能力的上限：
 
 1. D GPU 在 CQE 之后 reset、进程退出或目标 Block 被错误地提前释放/复用；
 2. GPU kernel 与 GPUDirect RDMA 并发读写同一范围，造成可见性或数据竞争；
 3. 合法地址内写入了错误 offset，transport 成功但业务布局错误；
 4. 静默数据损坏，没有任何一层产生 error syndrome；
 5. 底层已经报告成功，稍后才出现 PCIe AER/GPU Xid；已产生的成功 CQE不会被
-   “撤销并重发成失败”。
+   “撤销并重发成失败”。第 5 条与 §8.1 的 posted-write 语义直接相关：ACK/CQE 只
+   代表 TLP 已按序推出，写在 PCIe 链路或 GPU 侧出错要晚得多才被观测到。
 
 Direct `WriteBatch` 又明确“不通知 receiver”，因此 D Worker 没有一个逐 WRITE
 callback 可以在上述情况发生后主动把失败回传给 P。`SEND_DONE` 也不是 D 发出的
@@ -285,6 +362,11 @@ synchronization 建立正确顺序。这属于同步协议问题，不一定产�
   <https://docs.nvidia.com/cuda/gpudirect-rdma/#synchronization-and-memory-ordering>
 - `ibv_poll_cq(3)` 的 WC status 与错误字段：
   <https://man7.org/linux/man-pages/man3/ibv_poll_cq.3.html>
+- responder 何时可以回 ACK（WRITE 的 “placed into memory” 语义）：IBTA
+  InfiniBand Architecture Specification Vol.1，Transport Layer 中 Reliable
+  Connection 的 ACK 生成与 ordering 章节；
+- PCIe Memory Write 是 posted、无 completion TLP，可见性依赖 ordering 规则：PCI
+  Express Base Specification，Transaction Ordering 章节。
 
 ## 9. 接收端断开时可能看到什么
 
@@ -317,7 +399,7 @@ synchronization 建立正确顺序。这属于同步协议问题，不一定产�
 | 层次 | 可发现的问题 | 发现不了的问题 |
 |---|---|---|
 | 边界检查 | 错 offset、越界、0 length | 合法范围内写错内容 |
-| transport completion | WR/连接错误、超时 | 应用布局算错但传输成功 |
+| transport completion | WR/连接错误、超时 | 应用布局算错但传输成功；posted write 尚未对 GPU kernel 可见 |
 | CRC | 内容不一致 | 双方用同样错误范围且碰巧一致 |
 | 请求级数值测试 | 最终 logits/KV 对比 | 极低概率、未覆盖 shape |
 
@@ -330,3 +412,7 @@ synchronization 建立正确顺序。这属于同步协议问题，不一定产�
 3. TCP flush 为什么比 RDMA Direct flush 更接近远端完成？
 4. staged RDMA 与 GPUDirect RDMA 的区别是什么？
 5. 为什么 transport success 仍可能得到错误 KV？
+6. D 的 transport ACK 与 P 的 CQE 谁先谁后？为什么 Direct 路径下不存在“D 的
+   CQE”？
+7. 为什么“ACK 已返回”对 host memory 目标够用，对 GPU HBM 目标不够用？
+8. `writebatch_optim_ == 2` 时一个 batch 只有一个 CQE，为什么这仍然是安全的？

@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="700" viewBox="0 0 1120 700">
+  <defs>
+    <style>
+      text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#172033}.title{font-size:26px;font-weight:700}.sub{font-size:18px;font-weight:700}.body{font-size:15px}.small{font-size:13px;fill:#526076}.panel{fill:#f8fafc;stroke:#cbd5e1;stroke-width:2}.blue{fill:#e8f1ff;stroke:#5b8def;stroke-width:2}.green{fill:#e9f8ef;stroke:#41a66b;stroke-width:2}.orange{fill:#fff2df;stroke:#e79835;stroke-width:2}.purple{fill:#f1ebff;stroke:#8b68d7;stroke-width:2}.red{fill:#fff0f0;stroke:#dc6b6b;stroke-width:2}.arrow{fill:none;stroke:#526076;stroke-width:2.2;marker-end:url(#a)}.dash{fill:none;stroke:#8a97aa;stroke-width:2;stroke-dasharray:7 6;marker-end:url(#a)}</style>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#526076"/></marker>
+  </defs>
+  <rect width="1120" height="700" fill="#fff"/>
+  <text x="560" y="42" text-anchor="middle" class="title">Mooncake 类 Linux Reclaim：冷热状态与回收路径</text>
+  <rect x="35" y="70" width="1050" height="365" rx="16" class="panel"/>
+  <rect x="75" y="145" width="160" height="78" rx="12" class="blue"/><text x="155" y="177" text-anchor="middle" class="sub">PutEnd</text><text x="155" y="201" text-anchor="middle" class="small">创建 KeyEvictInfo</text>
+  <rect x="315" y="125" width="230" height="118" rx="14" class="orange"/><text x="430" y="162" text-anchor="middle" class="sub">inactive list</text><text x="430" y="188" text-anchor="middle" class="body">首次访问：referenced = 1</text><text x="430" y="213" text-anchor="middle" class="body">再次访问：promote</text>
+  <rect x="650" y="125" width="210" height="118" rx="14" class="green"/><text x="755" y="162" text-anchor="middle" class="sub">active list</text><text x="755" y="188" text-anchor="middle" class="body">稳定热点集合</text><text x="755" y="213" text-anchor="middle" class="small">后台 aging 后降回 inactive</text>
+  <rect x="905" y="145" width="145" height="78" rx="12" class="purple"/><text x="977" y="177" text-anchor="middle" class="sub">LocalRemove</text><text x="977" y="201" text-anchor="middle" class="small">幂等摘链</text>
+  <path d="M235 184L315 184" class="arrow"/><path d="M545 165C585 115 610 115 650 165" class="arrow"/><text x="598" y="110" text-anchor="middle" class="small">第二次访问</text>
+  <path d="M650 218C605 275 575 275 530 226" class="dash"/><text x="592" y="292" text-anchor="middle" class="small">后台 aging</text>
+  <path d="M860 184L905 184" class="dash"/><path d="M545 205C700 330 850 320 940 223" class="dash"/>
+  <text x="560" y="348" text-anchor="middle" class="body">每个 MetadataShard 独立维护 active / inactive；回收 quota 按 shard.used_bytes 比例分配</text>
+  <rect x="180" y="372" width="760" height="42" rx="9" class="blue"/><text x="560" y="398" text-anchor="middle" class="body">isolate：锁内交换/摘出候选并推进 epoch → 锁外检查 metadata、lease、softpin、primary</text>
+
+  <rect x="35" y="465" width="500" height="190" rx="16" class="panel"/>
+  <text x="285" y="497" text-anchor="middle" class="sub">后台 reclaim（稳态整理）</text>
+  <rect x="70" y="520" width="145" height="58" rx="9" class="green"/><text x="142" y="544" text-anchor="middle" class="body">shrink active</text><text x="142" y="563" text-anchor="middle" class="small">整理冷热</text>
+  <rect x="250" y="520" width="145" height="58" rx="9" class="orange"/><text x="322" y="544" text-anchor="middle" class="body">shrink inactive</text><text x="322" y="563" text-anchor="middle" class="small">选择冷对象</text>
+  <rect x="180" y="595" width="210" height="42" rx="9" class="purple"/><text x="285" y="621" text-anchor="middle" class="body">swapout / offload / delete</text>
+  <path d="M215 549L250 549M322 578L300 595" class="arrow"/>
+
+  <rect x="585" y="465" width="500" height="190" rx="16" class="panel"/>
+  <text x="835" y="497" text-anchor="middle" class="sub">direct reclaim（前台分配失败）</text>
+  <rect x="620" y="520" width="145" height="58" rx="9" class="red"/><text x="692" y="544" text-anchor="middle" class="body">PutStart OOM</text><text x="692" y="563" text-anchor="middle" class="small">同步触发</text>
+  <rect x="810" y="520" width="200" height="58" rx="9" class="orange"/><text x="910" y="544" text-anchor="middle" class="body">只收 inactive</text><text x="910" y="563" text-anchor="middle" class="small">不主动打散 active</text>
+  <path d="M765 549L810 549" class="arrow"/>
+  <rect x="635" y="595" width="390" height="42" rx="9" class="red"/><text x="830" y="621" text-anchor="middle" class="body">batch read / remote swapout：禁用，避免回收环与风暴</text>
+  <text x="560" y="686" text-anchor="middle" class="small">softpin=true：迁移或 offload 成功后再释放；softpin=false：非主副本可直接删除</text>
+</svg>
