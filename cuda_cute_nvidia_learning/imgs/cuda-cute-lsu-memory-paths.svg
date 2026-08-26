@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="880" viewBox="0 0 1280 880" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">LSU 发出的访存请求走向哪里：HBM 与 pinned host 两条路径实测</title>
+  <desc id="desc">同一条 LDG 指令经过 LSU 后，地址落在显存还是主机内存决定了完全不同的数据通路。对比 H20 走 PCIe 与 GB200 走 NVLink-C2C 的带宽和延迟。</desc>
+  <defs>
+    <marker id="m1" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#65d0ff"/></marker>
+    <marker id="m2" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#ff8fa3"/></marker>
+  </defs>
+  <rect width="1280" height="880" rx="26" fill="#071522"/>
+  <text x="640" y="44" text-anchor="middle" fill="white" font-family="sans-serif" font-size="27" font-weight="700">同一条 LDG 指令，两条截然不同的下游路径</text>
+  <text x="640" y="74" text-anchor="middle" fill="#7e9fb8" font-family="sans-serif" font-size="14.5">LSU 只负责「算地址、发请求」；地址落在哪个物理介质，决定了后面差 30~90 倍的代价</text>
+
+  <g font-family="sans-serif">
+    <!-- 共同前段 -->
+    <rect x="40" y="100" width="200" height="150" rx="12" fill="#173f59" stroke="#65d0ff"/>
+    <text x="140" y="128" text-anchor="middle" fill="#82dcff" font-size="16" font-weight="700">SM 内</text>
+    <rect x="58" y="142" width="164" height="30" rx="6" fill="#245571"/>
+    <text x="140" y="162" text-anchor="middle" fill="white" font-size="12.5">线程发出 LDG</text>
+    <rect x="58" y="178" width="164" height="30" rx="6" fill="#a8722a"/>
+    <text x="140" y="198" text-anchor="middle" fill="white" font-size="12.5">LSU 算地址 + 合并</text>
+    <rect x="58" y="214" width="164" height="26" rx="6" fill="#245571"/>
+    <text x="140" y="232" text-anchor="middle" fill="white" font-size="12">L1 → L2</text>
+
+    <text x="290" y="150" fill="#8fb8d6" font-size="14" font-weight="700">地址属于</text>
+    <text x="290" y="172" fill="#8fb8d6" font-size="14" font-weight="700">哪个物理介质?</text>
+    <line x1="244" y1="150" x2="284" y2="150" stroke="#8fb8d6" stroke-width="1.5"/>
+    <line x1="290" y1="190" x2="290" y2="300" stroke="#8fb8d6" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <line x1="290" y1="300" x2="340" y2="300" stroke="#65d0ff" stroke-width="2" marker-end="url(#m1)"/>
+    <line x1="290" y1="190" x2="290" y2="530" stroke="#8fb8d6" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <line x1="290" y1="530" x2="340" y2="530" stroke="#ff8fa3" stroke-width="2" marker-end="url(#m2)"/>
+
+    <!-- 路径 A：HBM -->
+    <rect x="348" y="266" width="880" height="150" rx="12" fill="#0f2a1c" stroke="#6ee7a0"/>
+    <text x="372" y="294" fill="#9bf3c0" font-size="17" font-weight="700">路径 A · cudaMalloc 的显存 → 片内 HBM 控制器</text>
+    <rect x="372" y="308" width="150" height="34" rx="6" fill="#2f7a52"/>
+    <text x="447" y="330" text-anchor="middle" fill="white" font-size="13">HBM 控制器</text>
+    <line x1="526" y1="325" x2="556" y2="325" stroke="#6ee7a0" stroke-width="2"/>
+    <rect x="560" y="308" width="120" height="34" rx="6" fill="#2f7a52"/>
+    <text x="620" y="330" text-anchor="middle" fill="white" font-size="13">HBM 堆栈</text>
+    <text x="372" y="366" fill="white" font-size="14">带宽（流式读）</text>
+    <text x="560" y="366" fill="#9bf3c0" font-size="15" font-family="monospace">H20 3594 GB/s</text>
+    <text x="800" y="366" fill="#9bf3c0" font-size="15" font-family="monospace">GB200 7011 GB/s</text>
+    <text x="372" y="394" fill="white" font-size="14">裸延迟</text>
+    <text x="560" y="394" fill="#9bf3c0" font-size="15" font-family="monospace">676 cycle / 342 ns</text>
+    <text x="800" y="394" fill="#9bf3c0" font-size="15" font-family="monospace">838 cycle / 407 ns</text>
+
+    <!-- 路径 B：pinned host -->
+    <rect x="348" y="440" width="880" height="230" rx="12" fill="#2a1218" stroke="#ff8fa3"/>
+    <text x="372" y="468" fill="#ffb3c1" font-size="17" font-weight="700">路径 B · cudaHostAlloc 的 pinned 主机内存 → 出片</text>
+    <rect x="372" y="482" width="128" height="34" rx="6" fill="#a85070"/>
+    <text x="436" y="504" text-anchor="middle" fill="white" font-size="12.5">UVA 地址翻译</text>
+    <line x1="504" y1="499" x2="530" y2="499" stroke="#ff8fa3" stroke-width="2"/>
+    <rect x="534" y="482" width="190" height="34" rx="6" fill="#8c4359"/>
+    <text x="629" y="504" text-anchor="middle" fill="white" font-size="12.5">出片互连（PCIe 或 C2C）</text>
+    <line x1="728" y1="499" x2="754" y2="499" stroke="#ff8fa3" stroke-width="2"/>
+    <rect x="758" y="482" width="150" height="34" rx="6" fill="#a85070"/>
+    <text x="833" y="504" text-anchor="middle" fill="white" font-size="12.5">主机 DRAM</text>
+
+    <rect x="372" y="532" width="404" height="122" rx="10" fill="#3a1a22" stroke="#ff8fa3"/>
+    <text x="574" y="558" text-anchor="middle" fill="#ffb3c1" font-size="15" font-weight="700">H20 · x86 + PCIe</text>
+    <text x="392" y="584" fill="white" font-size="13.5">zero-copy 读</text>
+    <text x="640" y="584" text-anchor="end" fill="#ff9bb0" font-size="14" font-family="monospace">39 GB/s</text>
+    <text x="656" y="584" fill="#ff5d78" font-size="13">= HBM 的 1/92</text>
+    <text x="392" y="608" fill="white" font-size="13.5">zero-copy 写</text>
+    <text x="640" y="608" text-anchor="end" fill="#ff9bb0" font-size="14" font-family="monospace">53 GB/s</text>
+    <text x="392" y="632" fill="white" font-size="13.5">裸延迟</text>
+    <text x="700" y="632" text-anchor="end" fill="#ff9bb0" font-size="14" font-family="monospace">3366 cycle / 1700 ns</text>
+    <text x="712" y="632" fill="#ff5d78" font-size="13">= HBM 的 5.0×</text>
+
+    <rect x="800" y="532" width="404" height="122" rx="10" fill="#1c2a3a" stroke="#65d0ff"/>
+    <text x="1002" y="558" text-anchor="middle" fill="#82dcff" font-size="15" font-weight="700">GB200 · Grace + NVLink-C2C</text>
+    <text x="820" y="584" fill="white" font-size="13.5">zero-copy 读</text>
+    <text x="1068" y="584" text-anchor="end" fill="#82dcff" font-size="14" font-family="monospace">211 GB/s</text>
+    <text x="1084" y="584" fill="#65d0ff" font-size="13">= HBM 的 1/33</text>
+    <text x="820" y="608" fill="white" font-size="13.5">zero-copy 写</text>
+    <text x="1068" y="608" text-anchor="end" fill="#82dcff" font-size="14" font-family="monospace">194 GB/s</text>
+    <text x="820" y="632" fill="white" font-size="13.5">裸延迟</text>
+    <text x="1128" y="632" text-anchor="end" fill="#82dcff" font-size="14" font-family="monospace">1255 cycle / 609 ns</text>
+    <text x="1140" y="632" fill="#65d0ff" font-size="13">= 1.5×</text>
+
+    <!-- 结论 -->
+    <rect x="40" y="694" width="1200" height="88" rx="12" fill="#0d1f30" stroke="#2b4a63"/>
+    <text x="64" y="722" fill="#ffd066" font-size="16" font-weight="700">对 blade-kvt 的直接含义</text>
+    <text x="64" y="748" fill="white" font-size="14"><tspan font-family="monospace" fill="#9bf3c0">copy_h2d_direct_kernel</tspan> 的 <tspan font-family="monospace" fill="#9bf3c0">host_src</tspan> 是在 kernel 里直接解引用的，因此它跑在路径 B 上：</text>
+    <text x="64" y="772" fill="white" font-size="14">在 H20/x86 上这条 staged 路径被 PCIe 卡在 39~53 GB/s；换到 Grace 上同一份代码能拿到 194~211 GB/s，约 <tspan fill="#82dcff" font-weight="700">4~5 倍</tspan>。</text>
+
+    <rect x="40" y="798" width="1200" height="62" rx="12" fill="#241a36" stroke="#c39bff"/>
+    <text x="64" y="824" fill="#ddc6ff" font-size="15" font-weight="700">另一个实测：向量化宽度比路径选择更值钱（同为 HBM→HBM 拷贝）</text>
+    <text x="64" y="848" fill="white" font-size="14">逐字节 <tspan font-family="monospace">dst[i]=src[i]</tspan>：H20 753 / GB200 1274 GB/s　　int4（16B/线程）：H20 3426 / GB200 6648 GB/s　　<tspan fill="#c9a6ff" font-weight="700">差 4.5~5.2 倍</tspan></text>
+  </g>
+</svg>

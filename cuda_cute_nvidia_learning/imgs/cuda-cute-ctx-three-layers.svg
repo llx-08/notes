@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">GPU 三层并发机制总览</title>
+  <desc id="desc">对比 PDL、CUDA stream、跨进程 context/MPS 三种并发机制各自作用的尺度、实现手段与限制条件。</desc>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb8d6"/></marker></defs>
+  <rect x="0" y="0" width="1200" height="600" rx="26" fill="#071522"/>
+  <text x="600.0" y="46" fill="white" font-family="sans-serif" font-size="27" text-anchor="middle" font-weight="700">GPU 上的三层并发，三套完全不同的机制</text><text x="600.0" y="74" fill="#7e9fb8" font-family="sans-serif" font-size="14" text-anchor="middle">它们是正交的：解决的是不同尺度上的「谁能和谁同时跑」</text>
+  <rect x="60" y="118" width="1080" height="132" rx="12" fill="#0b1c2a" stroke="#22405a" stroke-width="1.2"/>
+  <rect x="80" y="136" width="300" height="52" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/><text x="230.0" y="167.0" fill="#82dcff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">同一条 stream 上相邻的两个 kernel</text>
+  <line x1="390" y1="162" x2="430" y2="162" stroke="#65d0ff" stroke-width="1.6" marker-end="url(#ah)"/>
+  <rect x="440" y="136" width="280" height="52" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/><text x="580.0" y="167.0" fill="#82dcff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">PDL  griddepcontrol</text>
+  <text x="80" y="214" fill="#cfe6f3" font-family="sans-serif" font-size="12.8">硬件允许后继 grid 在前驱 trigger 后就开始，CTA 可共驻同一个 SM</text>
+  <text x="80" y="236" fill="#82dcff" font-family="sans-serif" font-size="12" font-weight="700">第 12 章｜实测收益 24%</text>
+  <rect x="60" y="268" width="1080" height="132" rx="12" fill="#0b1c2a" stroke="#22405a" stroke-width="1.2"/>
+  <rect x="80" y="286" width="300" height="52" rx="8" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/><text x="230.0" y="317.0" fill="#c9b0ff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">不同 stream 之间的多个 kernel</text>
+  <line x1="390" y1="312" x2="430" y2="312" stroke="#b18cff" stroke-width="1.6" marker-end="url(#ah)"/>
+  <rect x="440" y="286" width="280" height="52" rx="8" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/><text x="580.0" y="317.0" fill="#c9b0ff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">CUDA Stream + 硬件工作队列</text>
+  <text x="80" y="364" fill="#cfe6f3" font-family="sans-serif" font-size="12.8">只是「允许」并发；实际能否并发取决于剩余 SM 资源 / NULL stream / 队列数</text>
+  <text x="80" y="386" fill="#c9b0ff" font-family="sans-serif" font-size="12" font-weight="700">本章 §4–§5｜实测 4 路并发</text>
+  <rect x="60" y="418" width="1080" height="132" rx="12" fill="#0b1c2a" stroke="#22405a" stroke-width="1.2"/>
+  <rect x="80" y="436" width="300" height="52" rx="8" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/><text x="230.0" y="467.0" fill="#ffd76a" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">不同进程（不同 CUDA context）</text>
+  <line x1="390" y1="462" x2="430" y2="462" stroke="#f0c040" stroke-width="1.6" marker-end="url(#ah)"/>
+  <rect x="440" y="436" width="280" height="52" rx="8" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/><text x="580.0" y="467.0" fill="#ffd76a" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">MPS（否则只能时间片轮转）</text>
+  <text x="80" y="514" fill="#cfe6f3" font-family="sans-serif" font-size="12.8">地址空间完全隔离；kernel 默认不能跨 context 并发，共享内存要走 CUDA IPC</text>
+  <text x="80" y="536" fill="#ffd76a" font-family="sans-serif" font-size="12" font-weight="700">本章 §7｜实测地址隔离</text>
+  <rect x="60" y="568" width="1080" height="20" rx="0" fill="#071522"/>
+  <text x="600" y="586" fill="#9fc4dc" font-family="sans-serif" font-size="13" text-anchor="middle">三层的收益不叠加也不互斥——先确认你的瓶颈在哪一层，再选对应的机制</text>
+</svg>

@@ -46,6 +46,7 @@ KVT_ROOT=~/codes/blade-kvt
 | 4 | [04 NCCL 拓扑与传输](04_nccl_topology_and_transport.md) | P2P/SHM/NET 如何选择？PCIe/NVLink/NIC 如何串起来？ |
 | 5 | [05 NCCL 算法与协议](05_nccl_algorithms_protocols_and_performance.md) | Ring/Tree 与 Simple/LL/LL128 如何影响性能？ |
 | 6 | [06 Barex 架构](06_barex_architecture.md) | XContext/XChannel/MR/WR/CQ 的对象与线程模型是什么？ |
+| 6a | [06a ATA Barex 工程设计](06a_ata_barex_design_and_optimizations.md) | 为什么 Barex 需要 callback、credit、incast admission、MR pool 与软硬件协同？ |
 | 7 | [07 Barex 与 NCCL](07_barex_and_nccl_relationship.md) | 二者究竟如何“结合”，哪些只是相似或兼容？ |
 | 8 | [08 blade-kvt 发送路径](08_blade_kvt_barex_send_path.md) | Python API 到 Barex `post_send` 的完整路径是什么？ |
 | 9 | [09 调试与性能](09_debugging_and_performance_playbook.md) | 如何定位拓扑、MR、队列、CQ、超时与吞吐问题？ |

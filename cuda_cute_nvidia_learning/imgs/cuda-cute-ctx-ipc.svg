@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">跨进程显存隔离与 CUDA IPC</title>
+  <desc id="desc">实测两个进程的 cudaMalloc 返回相同数值地址但指向不同物理显存，直接解引用静默读到本进程数据，只有通过 CUDA IPC handle 才能真正共享。</desc>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb8d6"/></marker></defs>
+  <rect x="0" y="0" width="1200" height="660" rx="26" fill="#071522"/>
+  <text x="600.0" y="46" fill="white" font-family="sans-serif" font-size="27" text-anchor="middle" font-weight="700">跨进程：同一个数值地址，指向完全不同的物理显存</text><text x="600.0" y="74" fill="#7e9fb8" font-family="sans-serif" font-size="14" text-anchor="middle">实测于 GB200——失败方式不是崩溃，而是静默读到错误数据</text>
+  <rect x="60" y="110" width="520" height="190" rx="12" fill="#0b1c2a" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="80" y="138" fill="#82dcff" font-family="sans-serif" font-size="14" font-weight="700">进程 A（producer）</text>
+  <text x="80" y="164" fill="#9fc4dc" font-family="sans-serif" font-size="11.5">自己的 CUDA context（独立页表）</text>
+  <rect x="80" y="178" width="480" height="44" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="90" y="206" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12.5">cudaMalloc → 0xfffcfdc00000</text>
+  <rect x="80" y="232" width="480" height="50" rx="8" fill="#0d1f2e" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="90" y="252" fill="#8fb8d6" font-family="sans-serif" font-size="11.5">物理显存内容</text>
+  <text x="90" y="272" fill="#82dcff" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="13" font-weight="700">pattern = 0xAA00</text>
+  <rect x="640" y="110" width="520" height="190" rx="12" fill="#0b1c2a" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="660" y="138" fill="#c9b0ff" font-family="sans-serif" font-size="14" font-weight="700">进程 B（consumer）</text>
+  <text x="660" y="164" fill="#9fc4dc" font-family="sans-serif" font-size="11.5">自己的 CUDA context（独立页表）</text>
+  <rect x="660" y="178" width="480" height="44" rx="8" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="670" y="206" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12.5">cudaMalloc → 0xfffcfdc00000</text>
+  <rect x="660" y="232" width="480" height="50" rx="8" fill="#0d1f2e" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="670" y="252" fill="#8fb8d6" font-family="sans-serif" font-size="11.5">物理显存内容</text>
+  <text x="670" y="272" fill="#c9b0ff" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="13" font-weight="700">pattern = 0xBB00</text>
+  <text x="600" y="206" fill="#ffd76a" font-family="sans-serif" font-size="12.5" text-anchor="middle" font-weight="700">数值相同</text>
+  <text x="600" y="224" fill="#ffd76a" font-family="sans-serif" font-size="10.5" text-anchor="middle">（VA 分配是确定性的）</text>
+  <text x="600" y="264" fill="#ff9b9b" font-family="sans-serif" font-size="26" text-anchor="middle" font-weight="700">≠</text>
+  <text x="600" y="290" fill="#ff9b9b" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">物理内存不同</text>
+  <rect x="60" y="320" width="1080" height="120" rx="12" fill="#0d1f2e" stroke="#ff7b7b" stroke-width="1.2"/>
+  <text x="80" y="348" fill="#ff9b9b" font-family="sans-serif" font-size="14" font-weight="700">试验①  B 直接拿 A 的裸地址值去解引用</text>
+  <text x="80" y="374" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12">cudaPointerGetAttributes(0xfffcfdc00000)  →  type=0 (Unregistered), device=-1</text>
+  <text x="80" y="396" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12">kernel 解引用                              →  no error   读到 0xBB00</text>
+  <text x="80" y="424" fill="#ff9b9b" font-family="sans-serif" font-size="12.8">不报错，但读到的是 B 自己的数据。若误以为可以跨进程传指针，你会静默地读到错误数据而不是崩溃。</text>
+  <rect x="60" y="456" width="1080" height="120" rx="12" fill="#102a1e" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="80" y="484" fill="#7ee6a8" font-family="sans-serif" font-size="14" font-weight="700">试验②  通过 CUDA IPC handle</text>
+  <text x="80" y="510" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12">A: cudaIpcGetMemHandle(&amp;h, ptr)   →  把 64 字节的不透明 handle 传给 B（socket/文件/共享内存）</text>
+  <text x="80" y="532" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12">B: cudaIpcOpenMemHandle(&amp;p, h)    →  读到 0xAA00 0xAA01 ... 0xAAFF   ✓ 同一块物理显存</text>
+  <text x="80" y="560" fill="#7ee6a8" font-family="sans-serif" font-size="12.5">传的是 handle，不是指针值。B 得到的是自己 VA 空间里的新映射。NCCL、vLLM 的跨进程 KV cache 共享走这条路。</text>
+  <rect x="60" y="592" width="1080" height="52" rx="10" fill="#0d1f2e" stroke="#f0c040" stroke-width="1.2"/>
+  <text x="80" y="616" fill="#ffd76a" font-family="sans-serif" font-size="12.8" font-weight="700">而且即使共享了内存，kernel 也不能跨 context 真并发——官方文档：</text>
+  <text x="80" y="636" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">&quot;A kernel from one CUDA context cannot execute concurrently with a kernel from another CUDA context ... one must enable MPS&quot;</text>
+</svg>

@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="860" viewBox="0 0 1440 860">
+  <defs>
+    <style>
+      .bg{fill:#f8fafc}.title{font:700 30px system-ui;fill:#0f172a}.sub{font:15px system-ui;fill:#475569}
+      .head{font:700 20px system-ui;fill:#fff}.text{font:15px system-ui;fill:#0f172a}.small{font:13px system-ui;fill:#475569}
+      .box{fill:#fff;stroke:#94a3b8;stroke-width:2}.blue{fill:#2563eb}.purple{fill:#7c3aed}.red{fill:#dc2626}.green{fill:#059669}
+      .arrow{stroke:#334155;stroke-width:3;fill:none;marker-end:url(#a)}.bad{stroke:#dc2626;stroke-width:4;fill:none;marker-end:url(#r)}
+      .good{stroke:#059669;stroke-width:3;fill:none;marker-end:url(#g)}.dash{stroke-dasharray:8 7}
+    </style>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker>
+    <marker id="r" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#dc2626"/></marker>
+    <marker id="g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#059669"/></marker>
+  </defs>
+  <rect class="bg" width="1440" height="860"/>
+  <text class="title" x="55" y="55">vLLM 全局 CUDA Stream 污染：Connector 如何影响主线程 NCCL</text>
+  <text class="sub" x="55" y="84">PyTorch current stream 是线程相关状态；单个 Python global 把两个线程错误地连接起来</text>
+
+  <rect class="purple" x="65" y="130" rx="14" width="430" height="58"/>
+  <text class="head" x="93" y="167">Connector thread</text>
+  <rect class="box" x="65" y="215" rx="12" width="430" height="285"/>
+  <text class="text" x="94" y="253">1. 创建/取得 CONNECTOR_STREAM</text>
+  <text class="small" x="94" y="280">若未 set_device，可能落在默认 cuda:0</text>
+  <rect x="94" y="310" rx="9" width="372" height="68" fill="#ede9fe"/>
+  <text class="small" x="116" y="338">with torch.cuda.stream(s):</text>
+  <text class="small" x="116" y="362">    torch.cuda.set_stream(s)</text>
+  <text class="text" x="94" y="420">2. record KVStore Event / save-load</text>
+  <text class="small" x="94" y="450">业务上与 model NCCL 没有直接调用关系</text>
+
+  <rect class="red" x="555" y="130" rx="14" width="330" height="58"/>
+  <text class="head" x="584" y="167">vLLM monkey patch</text>
+  <rect class="box" x="555" y="215" rx="12" width="330" height="285"/>
+  <text class="text" x="584" y="255">patched_set_stream(s)</text>
+  <rect x="584" y="290" rx="9" width="272" height="78" fill="#fee2e2"/>
+  <text class="small" x="606" y="321">global _current_stream</text>
+  <text class="small" x="606" y="347">_current_stream = s</text>
+  <text class="text" x="584" y="414">进程级 global</text>
+  <text class="small" x="584" y="442">覆盖所有 Python thread 可见值</text>
+
+  <rect class="blue" x="945" y="130" rx="14" width="430" height="58"/>
+  <text class="head" x="973" y="167">Main/model thread</text>
+  <rect class="box" x="945" y="215" rx="12" width="430" height="285"/>
+  <text class="text" x="974" y="253">PyTorch current stream：仍正确</text>
+  <text class="small" x="974" y="280">torch.cuda.current_stream() → MAIN_STREAM</text>
+  <rect x="974" y="310" rx="9" width="372" height="68" fill="#dbeafe"/>
+  <text class="small" x="996" y="338">vllm.current_stream()</text>
+  <text class="small" x="996" y="362">→ CONNECTOR_STREAM（错误）</text>
+  <text class="text" x="974" y="420">pynccl AllReduce(stream=None)</text>
+  <text class="small" x="974" y="450">把全局值作为 cudaStream_t 传给 NCCL</text>
+
+  <path class="bad" d="M495 342 L545 342"/>
+  <path class="bad" d="M885 342 L935 342"/>
+  <text class="small" x="638" y="530">错误的跨线程隐式共享</text>
+
+  <rect class="box" x="95" y="610" rx="12" width="570" height="145"/>
+  <text class="text" x="124" y="648">结果 A：handle 对 main device/context 有效</text>
+  <text class="small" x="124" y="680">NCCL 在错误 stream 上执行，缺 producer/consumer 同步</text>
+  <text class="small" x="124" y="708">→ 数值竞态 → 错误 tensor → NaN</text>
+
+  <rect class="box" x="775" y="610" rx="12" width="570" height="145"/>
+  <text class="text" x="804" y="648">结果 B：handle 来自另一 device/context</text>
+  <text class="small" x="804" y="680">例如 rank worker 使用 cuda:2，后台线程默认创建 cuda:0 stream</text>
+  <text class="small" x="804" y="708">→ CUDA_ERROR_INVALID_HANDLE</text>
+
+  <path class="arrow dash" d="M1050 500 C930 555 650 555 380 600"/>
+  <path class="arrow dash" d="M1170 500 C1190 550 1120 565 1070 600"/>
+
+  <rect x="95" y="790" rx="10" width="1250" height="45" fill="#d1fae5"/>
+  <text class="small" x="122" y="818">修复：移除进程级 stream cache；显式传 stream/device；后台线程先 set_device；跨 stream 用 Event 建立 happens-before。</text>
+</svg>

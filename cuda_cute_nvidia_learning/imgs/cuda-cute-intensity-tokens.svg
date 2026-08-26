@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="800" viewBox="0 0 1240 800" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">算术强度约等于 token 数：H20 与 GB200 实测 M 扫描</title>
+  <desc id="desc">固定 K=N=12288 的 BF16 GEMM，扫描 M 从 1 到 8192，纵轴为达到的峰值算力百分比。两条曲线的拐点分别落在各自机器平衡点 38 与 320 FLOP/Byte 处。</desc>
+  <rect width="1240" height="800" rx="26" fill="#071522"/>
+  <text x="620" y="46" text-anchor="middle" fill="white" font-family="sans-serif" font-size="28" font-weight="700">算术强度 ≈ token 数：实测拐点落在机器平衡点上</text>
+  <text x="620" y="76" text-anchor="middle" fill="#7e9fb8" font-family="sans-serif" font-size="14.5">BF16 GEMM，K=N=12288，cuBLAS。纵轴 = 占该卡实测峰值（8192³ GEMM）的百分比</text>
+
+  <g font-family="sans-serif">
+    <!-- 网格 -->
+    <g stroke="#16293a" stroke-width="1">
+      <line x1="140" y1="120" x2="1180" y2="120"/><line x1="140" y1="220" x2="1180" y2="220"/>
+      <line x1="140" y1="320" x2="1180" y2="320"/><line x1="140" y1="420" x2="1180" y2="420"/>
+      <line x1="140" y1="520" x2="1180" y2="520"/>
+    </g>
+    <line x1="140" y1="620" x2="1180" y2="620" stroke="#2b4a63" stroke-width="1.5"/>
+    <line x1="140" y1="110" x2="140" y2="620" stroke="#2b4a63" stroke-width="1.5"/>
+    <g fill="#5f7f96" font-size="13" text-anchor="end">
+      <text x="130" y="125">100%</text><text x="130" y="225">80%</text><text x="130" y="325">60%</text>
+      <text x="130" y="425">40%</text><text x="130" y="525">20%</text><text x="130" y="625">0%</text>
+    </g>
+    <g fill="#5f7f96" font-size="13" text-anchor="middle">
+      <text x="140" y="644">1</text><text x="216" y="644">2</text><text x="294" y="644">4</text>
+      <text x="371" y="644">8</text><text x="448" y="644">16</text><text x="524" y="644">32</text>
+      <text x="601" y="644">64</text><text x="678" y="644">128</text><text x="755" y="644">256</text>
+      <text x="832" y="644">512</text><text x="909" y="644">1024</text><text x="986" y="644">2048</text>
+      <text x="1063" y="644">4096</text><text x="1140" y="644">8192</text>
+    </g>
+    <text x="660" y="672" text-anchor="middle" fill="#8fb8d6" font-size="15">M = 一次 GEMM 里的 token 数（对数轴）</text>
+
+    <!-- 平衡点标注 -->
+    <line x1="544" y1="110" x2="544" y2="620" stroke="#65d0ff" stroke-width="1.6" stroke-dasharray="6 4" opacity="0.8"/>
+    <rect x="452" y="146" width="184" height="46" rx="8" fill="#0d2c40" stroke="#65d0ff"/>
+    <text x="544" y="166" text-anchor="middle" fill="#82dcff" font-size="13" font-weight="700">H20 平衡点</text>
+    <text x="544" y="184" text-anchor="middle" fill="#bce7f7" font-size="12.5">38 FLOP/B → M≈38</text>
+
+    <line x1="780" y1="110" x2="780" y2="620" stroke="#c39bff" stroke-width="1.6" stroke-dasharray="6 4" opacity="0.8"/>
+    <rect x="688" y="386" width="188" height="46" rx="8" fill="#241a36" stroke="#c39bff"/>
+    <text x="782" y="406" text-anchor="middle" fill="#ddc6ff" font-size="13" font-weight="700">GB200 平衡点</text>
+    <text x="782" y="424" text-anchor="middle" fill="#d3bdf0" font-size="12.5">320 FLOP/B → M≈320</text>
+
+    <!-- H20 曲线 -->
+    <polyline fill="none" stroke="#65d0ff" stroke-width="3"
+      points="140,609 217,612 294,603 371,534 448,448 524,279 570,258 601,135 646,156 678,125 723,120 755,118 800,117 832,116 877,117 909,115 986,113 1063,114 1140,114"/>
+    <g fill="#65d0ff">
+      <circle cx="140" cy="609" r="4"/><circle cx="217" cy="612" r="4"/><circle cx="294" cy="603" r="4"/>
+      <circle cx="371" cy="534" r="4"/><circle cx="448" cy="448" r="4"/><circle cx="524" cy="279" r="4"/>
+      <circle cx="570" cy="258" r="4"/><circle cx="601" cy="135" r="4"/><circle cx="646" cy="156" r="4"/>
+      <circle cx="678" cy="125" r="4"/><circle cx="755" cy="118" r="4"/><circle cx="832" cy="116" r="4"/>
+      <circle cx="909" cy="115" r="4"/><circle cx="986" cy="113" r="4"/><circle cx="1063" cy="114" r="4"/><circle cx="1140" cy="114" r="4"/>
+    </g>
+
+    <!-- GB200 曲线 -->
+    <polyline fill="none" stroke="#c39bff" stroke-width="3"
+      points="140,619 217,619 294,617 371,611 448,602 524,579 570,562 601,532 646,504 678,449 723,410 755,334 800,248 832,253 877,166 909,200 986,199 1063,131 1140,159"/>
+    <g fill="#c39bff">
+      <circle cx="140" cy="619" r="4"/><circle cx="217" cy="619" r="4"/><circle cx="294" cy="617" r="4"/>
+      <circle cx="371" cy="611" r="4"/><circle cx="448" cy="602" r="4"/><circle cx="524" cy="579" r="4"/>
+      <circle cx="570" cy="562" r="4"/><circle cx="601" cy="532" r="4"/><circle cx="646" cy="504" r="4"/>
+      <circle cx="678" cy="449" r="4"/><circle cx="723" cy="410" r="4"/><circle cx="755" cy="334" r="4"/>
+      <circle cx="800" cy="248" r="4"/><circle cx="832" cy="253" r="4"/><circle cx="877" cy="166" r="4"/>
+      <circle cx="909" cy="200" r="4"/><circle cx="986" cy="199" r="4"/><circle cx="1063" cy="131" r="4"/><circle cx="1140" cy="159" r="4"/>
+    </g>
+
+    <!-- 图例 -->
+    <rect x="920" y="480" width="252" height="112" rx="12" fill="#0d1f30" stroke="#2b4a63"/>
+    <line x1="940" y1="510" x2="978" y2="510" stroke="#65d0ff" stroke-width="3"/>
+    <text x="988" y="515" fill="white" font-size="14">H20：138 TF/s ÷ 3646 GB/s</text>
+    <line x1="940" y1="546" x2="978" y2="546" stroke="#c39bff" stroke-width="3"/>
+    <text x="988" y="551" fill="white" font-size="14">GB200：2285 TF/s ÷ 7138 GB/s</text>
+    <text x="940" y="578" fill="#7e9fb8" font-size="12.5">峰值与带宽均为本机实测值</text>
+
+    <!-- 关键读数 -->
+    <rect x="40" y="694" width="560" height="86" rx="12" fill="#0d2c40" stroke="#65d0ff"/>
+    <text x="60" y="722" fill="#82dcff" font-size="15" font-weight="700">H20：M=64 已达 97% 峰值</text>
+    <text x="60" y="748" fill="white" font-size="13.5">M=8→32 时间几乎不变（101 μs）——前 32 个 token 是白送的</text>
+    <text x="60" y="770" fill="#bce7f7" font-size="13">decode batch 到 64 就能把张量核喂饱</text>
+
+    <rect x="620" y="694" width="580" height="86" rx="12" fill="#241a36" stroke="#c39bff"/>
+    <text x="640" y="722" fill="#ddc6ff" font-size="15" font-weight="700">GB200：M=64 只有 17.6% 峰值</text>
+    <text x="640" y="748" fill="white" font-size="13.5">M=1→128 时间几乎不变（49→49 μs）——前 128 个 token 是白送的</text>
+    <text x="640" y="770" fill="#d3bdf0" font-size="13">同样 batch 64，在这张卡上浪费掉 82% 的张量核</text>
+  </g>
+</svg>

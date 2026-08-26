@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">流水线稳态：为什么 roofline 里是 max 而不是 sum</title>
+  <desc id="desc">把主循环时间分解成 prologue、稳态、epilogue 三段，说明当 K 方向迭代次数远大于 stage 数时，总时间收敛到迭代次数乘以搬运与计算的较大者。</desc>
+  <defs>
+    <marker id="a2" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#ffd066"/></marker>
+  </defs>
+  <rect width="1200" height="760" rx="26" fill="#071522"/>
+  <text x="600" y="48" text-anchor="middle" fill="white" font-family="sans-serif" font-size="28" font-weight="700">流水线稳态：max 是怎么出来的</text>
+
+  <g font-family="sans-serif">
+    <!-- 时间轴分段 -->
+    <rect x="70" y="96" width="212" height="40" rx="8" fill="#59431f" stroke="#ffd066"/>
+    <text x="176" y="122" text-anchor="middle" fill="#ffdb82" font-size="16" font-weight="700">prologue  (S-1)·t_m</text>
+    <rect x="290" y="96" width="620" height="40" rx="8" fill="#1e3b2a" stroke="#6ee7a0"/>
+    <text x="600" y="122" text-anchor="middle" fill="#9bf3c0" font-size="16" font-weight="700">稳态  T · max(t_m, t_c)</text>
+    <rect x="918" y="96" width="122" height="40" rx="8" fill="#173f59" stroke="#65d0ff"/>
+    <text x="979" y="122" text-anchor="middle" fill="#82dcff" font-size="16" font-weight="700">drain  t_c</text>
+
+    <!-- 两条 lane -->
+    <text x="66" y="196" text-anchor="end" fill="#8fb8d6" font-size="14">搬运</text>
+    <text x="66" y="256" text-anchor="end" fill="#8fb8d6" font-size="14">计算</text>
+
+    <g fill="#7a5a22">
+      <rect x="78" y="176" width="62" height="28" rx="6"/><rect x="146" y="176" width="62" height="28" rx="6"/>
+      <rect x="214" y="176" width="62" height="28" rx="6"/>
+    </g>
+    <g fill="#2f7a52">
+      <rect x="282" y="176" width="62" height="28" rx="6"/><rect x="350" y="176" width="62" height="28" rx="6"/>
+      <rect x="418" y="176" width="62" height="28" rx="6"/><rect x="486" y="176" width="62" height="28" rx="6"/>
+      <rect x="554" y="176" width="62" height="28" rx="6"/><rect x="622" y="176" width="62" height="28" rx="6"/>
+      <rect x="690" y="176" width="62" height="28" rx="6"/><rect x="758" y="176" width="62" height="28" rx="6"/>
+      <rect x="826" y="176" width="62" height="28" rx="6"/><rect x="894" y="176" width="62" height="28" rx="6"/>
+    </g>
+    <g fill="#3d7ea6">
+      <rect x="282" y="236" width="62" height="28" rx="6"/><rect x="350" y="236" width="62" height="28" rx="6"/>
+      <rect x="418" y="236" width="62" height="28" rx="6"/><rect x="486" y="236" width="62" height="28" rx="6"/>
+      <rect x="554" y="236" width="62" height="28" rx="6"/><rect x="622" y="236" width="62" height="28" rx="6"/>
+      <rect x="690" y="236" width="62" height="28" rx="6"/><rect x="758" y="236" width="62" height="28" rx="6"/>
+      <rect x="826" y="236" width="62" height="28" rx="6"/><rect x="894" y="236" width="62" height="28" rx="6"/>
+      <rect x="962" y="236" width="62" height="28" rx="6"/>
+    </g>
+    <line x1="282" y1="150" x2="282" y2="286" stroke="#6ee7a0" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <line x1="962" y1="150" x2="962" y2="286" stroke="#65d0ff" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <text x="600" y="308" text-anchor="middle" fill="#7e9fb8" font-size="13.5">稳态区里两条 lane 完全重叠：短的那条被长的那条完全遮住</text>
+
+    <!-- 公式 -->
+    <rect x="70" y="340" width="1060" height="128" rx="14" fill="#0d1f30" stroke="#2b4a63"/>
+    <text x="600" y="378" text-anchor="middle" fill="#ffd066" font-size="19" font-family="monospace">T_total = (S-1)·t_m  +  T·max(t_m, t_c)  +  t_c</text>
+    <text x="600" y="414" text-anchor="middle" fill="white" font-size="16">当 T ≫ S（K 维足够长）时，中间项主导：</text>
+    <text x="600" y="448" text-anchor="middle" fill="#9bf3c0" font-size="19" font-family="monospace">T_total ≈ T · max(t_m, t_c)   ← roofline 里那个 max</text>
+
+    <!-- 两种失效 -->
+    <rect x="70" y="500" width="512" height="212" rx="14" fill="#3a2430" stroke="#ff8fa3"/>
+    <text x="326" y="534" text-anchor="middle" fill="#ffb3c1" font-size="18" font-weight="700">失效一：T 太小（K 维短）</text>
+    <text x="96" y="568" fill="white" font-size="14.5">prologue 项 (S-1)·t_m 无法被稀释</text>
+    <text x="96" y="596" fill="#e7b9c4" font-size="14">实测 M=N=4096，相对 roofline 的效率：</text>
+    <text x="96" y="626" fill="#ffb3c1" font-size="14" font-family="monospace">H20    K=64 → 67%    K=4096 → 96%</text>
+    <text x="96" y="652" fill="#ffb3c1" font-size="14" font-family="monospace">GB200  K=64 → 73%    K=4096 → 86%</text>
+    <text x="96" y="686" fill="#e7b9c4" font-size="13.5">split-K 提高并行度，代价正是更多份 prologue</text>
+
+    <rect x="618" y="500" width="512" height="212" rx="14" fill="#3a2b52" stroke="#c39bff"/>
+    <text x="874" y="534" text-anchor="middle" fill="#ddc6ff" font-size="18" font-weight="700">失效二：t_c ≈ 0（decode 的 GEMV）</text>
+    <text x="644" y="568" fill="white" font-size="14.5">M=1 时每读一个权重只做 2 次浮点运算</text>
+    <text x="644" y="596" fill="#d3bdf0" font-size="14">流水线里没有任何计算可以用来遮盖访存</text>
+    <text x="644" y="630" fill="#c9a6ff" font-size="15" font-family="monospace">T_total ≈ T · t_m</text>
+    <text x="644" y="664" fill="#d3bdf0" font-size="13.5">流水线退化成纯数据搬运通道。这不是实现</text>
+    <text x="644" y="686" fill="#d3bdf0" font-size="13.5">不好，是矩阵形状决定的下界。</text>
+
+    <text x="600" y="742" text-anchor="middle" fill="#5f7f96" font-size="12.5">t_m = 单 stage 搬运时间，t_c = 单 stage 计算时间，S = stage 数，T = K 方向迭代次数</text>
+  </g>
+</svg>

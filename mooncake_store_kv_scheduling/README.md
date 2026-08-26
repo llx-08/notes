@@ -28,6 +28,7 @@
 | [05 · 驱逐与迁移设计](05_eviction_and_migration.md) | 饱和实验、迁移原语、前提辨析 |
 | [06 · TODO](06_todo.md) | 按优先级分档，每条带依据与代价 |
 | [07 · 多 master 分区实测](07_partitioning_measured.md) | M1 聚合吞吐、M2 fan-out 代价、M3 均衡度、M4 热点读与副本 |
+| [08 · 内部统一池与 rldev 对照](08_internal_mooncake_rldev_alignment.md) | 两篇内部文章详解、LocalMaster/Linux reclaim、内部分支实查，以及对 B1/B3/C1/C2 TODO 的修订 |
 
 ## 关键数字速查
 

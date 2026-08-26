@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">gemm_ar 的 tail-hiding 机制</title>
+  <desc id="desc">按硬件资源泳道展示 GEMM+AllReduce 融合 kernel 的四个阶段，trigger 放在 k-loop 结束处，使下一个 GEMV 的权重加载完全藏进 all-reduce 等待 peer 的时间。</desc>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb8d6"/></marker><marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ff9b9b"/></marker><marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7ee6a8"/></marker></defs>
+  <rect x="0" y="0" width="1200" height="700" rx="26" fill="#071522"/>
+  <text x="600.0" y="46" fill="white" font-family="sans-serif" font-size="27" text-anchor="middle" font-weight="700">gemm_ar 的 tail-hiding：把 all-reduce 的死等塞进下一个 kernel 的权重加载</text><text x="600.0" y="74" fill="#7e9fb8" font-family="sans-serif" font-size="14" text-anchor="middle">trigger 放在 k-loop 结束——算力密集段刚过、网络等待刚开始，这是资源画像上的最优点</text>
+  <text x="136" y="172" fill="#7e9fb8" font-family="sans-serif" font-size="12.5" text-anchor="end">CUDA Core / TC</text>
+  <rect x="150" y="150" width="980" height="34" rx="6" fill="#0b1c2a" stroke="#22405a" stroke-width="1.2"/>
+  <text x="136" y="228" fill="#7e9fb8" font-family="sans-serif" font-size="12.5" text-anchor="end">HBM 带宽</text>
+  <rect x="150" y="206" width="980" height="34" rx="6" fill="#0b1c2a" stroke="#22405a" stroke-width="1.2"/>
+  <text x="136" y="284" fill="#7e9fb8" font-family="sans-serif" font-size="12.5" text-anchor="end">NVLink / 网络</text>
+  <rect x="150" y="262" width="980" height="34" rx="6" fill="#0b1c2a" stroke="#22405a" stroke-width="1.2"/>
+  <rect x="150" y="153" width="288.40000000000003" height="28" rx="5" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="294.20000000000005" y="172" fill="#82dcff" font-family="sans-serif" font-size="11.5" text-anchor="middle" font-weight="700">① GEMM k-loop</text>
+  <rect x="462.8" y="265" width="233.20000000000002" height="28" rx="5" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="579.4" y="284" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle" font-weight="700">③ boundary spin</text>
+  <rect x="702.0" y="265" width="141.20000000000002" height="28" rx="5" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="772.6" y="284" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle" font-weight="700">④ multimem reduce</text>
+  <rect x="849.1999999999999" y="209" width="67.60000000000001" height="28" rx="5" fill="#0f3f42" stroke="#4fd6cf" stroke-width="1.2"/>
+  <text x="882.9999999999999" y="228" fill="#7fe8e2" font-family="sans-serif" font-size="11.5" text-anchor="middle" font-weight="700">⑤ 写回</text>
+  <text x="582.8" y="316" fill="#c9b0ff" font-family="sans-serif" font-size="12" text-anchor="middle">③ 等最慢的 peer——不吃算力、不吃本地 HBM</text>
+  <line x1="453.59999999999997" y1="132" x2="453.59999999999997" y2="420" stroke="#f0c040" stroke-width="2.4"/>
+  <text x="453.59999999999997" y="126" fill="#ffd76a" font-family="sans-serif" font-size="12.5" text-anchor="middle" font-weight="700">griddepcontrol.launch_dependents</text>
+  <text x="136" y="372" fill="#7e9fb8" font-family="sans-serif" font-size="12.5" text-anchor="end">下一个 GEMV</text>
+  <rect x="150" y="350" width="980" height="34" rx="6" fill="#0b1c2a" stroke="#22405a" stroke-width="1.2"/>
+  <rect x="453.59999999999997" y="353" width="40" height="28" rx="5" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/>
+  <text x="473.59999999999997" y="372" fill="#ffd76a" font-family="sans-serif" font-size="11" text-anchor="middle">L</text>
+  <rect x="495.59999999999997" y="353" width="358.8" height="28" rx="5" fill="#0f3f42" stroke="#4fd6cf" stroke-width="1.2"/>
+  <text x="675.0" y="372" fill="#7fe8e2" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">权重 TMA 加载（本地 HBM）</text>
+  <rect x="856.4" y="353" width="90" height="28" rx="5" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="901.4" y="372" fill="#82dcff" font-family="sans-serif" font-size="11.5" text-anchor="middle">compute</text>
+  <rect x="453.59999999999997" y="140" width="406.48" height="250" rx="8" fill="#58d68d" opacity="0.1"/>
+  <text x="653.5999999999999" y="412" fill="#7ee6a8" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">重叠窗口：AR 的死等 ≈ 下一个 GEMV 的整个权重加载</text>
+  <rect x="60" y="442" width="545" height="120" rx="12" fill="#0d1f2e" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="80" y="470" fill="#7ee6a8" font-family="sans-serif" font-size="14.5" font-weight="700">为什么这个重叠几乎免费</text>
+  <text x="80" y="496" fill="#cfe6f3" font-family="sans-serif" font-size="12.5">③ boundary spin —— 网络延迟受限，不占算力也不占本地 HBM</text>
+  <text x="80" y="518" fill="#cfe6f3" font-family="sans-serif" font-size="12.5">GEMV 权重加载 —— 本地 HBM 带宽受限，不占网络</text>
+  <text x="80" y="540" fill="#cfe6f3" font-family="sans-serif" font-size="12.5">→ 硬件资源几乎不重叠，不是「抢资源换收益」的权衡</text>
+  <rect x="625" y="442" width="515" height="120" rx="12" fill="#0d1f2e" stroke="#f0c040" stroke-width="1.2"/>
+  <text x="645" y="470" fill="#ffd76a" font-family="sans-serif" font-size="14" font-weight="700">为什么必须「融合」而不能 cuBLAS + 独立 AR kernel</text>
+  <text x="645" y="496" fill="#cfe6f3" font-family="sans-serif" font-size="12.5">cuBLAS 是闭源二进制，没法在它的 k-loop 结束处插 trigger</text>
+  <text x="645" y="518" fill="#cfe6f3" font-family="sans-serif" font-size="12.5">拆成两个 kernel，最早也只能在 grid 边界放行</text>
+  <text x="645" y="540" fill="#cfe6f3" font-family="sans-serif" font-size="12.5">→ 融合的真正价值是「在 kernel 中段任意一条指令处放行」</text>
+  <rect x="60" y="580" width="1080" height="96" rx="12" fill="#0d1f2e" stroke="#ff7b7b" stroke-width="1.2"/>
+  <text x="80" y="608" fill="#ff9b9b" font-family="sans-serif" font-size="14.5" font-weight="700">⚠ 语义陷阱：wait 配对的是前驱的 TRIGGER，不是 COMPLETION</text>
+  <text x="80" y="634" fill="#ffc9c9" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12.5">PDLWaitPrimary — prior grid reached ITS trigger (k-loop end) — NOT done</text>
+  <text x="80" y="660" fill="#cfe6f3" font-family="sans-serif" font-size="12.5">后继 kernel 的 wait 返回，只说明 gemm_ar 执行到了 ②，不说明 ③④⑤ 做完、最终输出可读。要读最终输出，必须另有同步——见 phase counter 一图。</text>
+</svg>

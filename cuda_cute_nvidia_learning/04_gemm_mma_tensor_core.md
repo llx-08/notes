@@ -247,6 +247,10 @@ mainloop 不一定改善端到端。
 
 ## 12. Ampere GEMM 流水
 
+> 本节到 §14 只给出三代流水线的骨架。定量分析——要藏的延迟有多大、stage 数怎么
+> 推、为什么 roofline 写 `max` 而不是 `sum`、以及 H20/GB200 的实测对比——见
+> [11 GEMM 软件流水线深入](11_gemm_pipeline_deep_dive.md)。
+
 典型：
 
 ```text
@@ -320,6 +324,30 @@ L2 roofline
 shared-memory roofline
 Tensor Core instruction throughput
 ```
+
+### 15.1 权重 GEMM 的算术强度 ≈ token 数
+
+对权重矩阵 `[K, N]` 喂进 M 个 token：
+
+```text
+FLOPs = 2 · M · K · N
+Bytes = 2 · K · N        (BF16 权重，读一次)
+强度  = FLOPs / Bytes ≈ M
+```
+
+于是「这个 GEMM 算力受限还是带宽受限」化简成一个非常好记的判据：**把 token 数和
+机器平衡点（peak FLOPS ÷ HBM 带宽）比大小**。
+
+实测平衡点差异极大，不能跨卡套用：
+
+| | 实测峰值 BF16 | 实测 HBM 读带宽 | 平衡点 |
+|---|---|---|---|
+| H20 | 138.4 TFLOP/s | 3646 GB/s | 38 FLOP/B |
+| GB200 | 2284.6 TFLOP/s | 7138 GB/s | 320 FLOP/B |
+
+对应到实测 GEMM：H20 在 M=64 就到 97% 峰值，GB200 在 M=64 只有 17.6%，要到 M≈768
+才接近 91%。完整扫描数据与推导见
+[11 GEMM 软件流水线深入](11_gemm_pipeline_deep_dive.md)。
 
 高性能 GEMM 的目标是：
 

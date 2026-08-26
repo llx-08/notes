@@ -39,7 +39,7 @@
 输入 `hyper_input [T, HC*HS]`，输出 `(mixed_input [T,HS], residual=hyper_input, mix_aux)`：
 
 1. **RMSNorm**（`Qwen4Exp2RMSNorm`，可选 `hc_per_branch_norm` 分组按 lane 归一）；
-2. **down** 投影 `HC*HS → K`（`hc_lowrank`，默认 16）；
+2. **down** 投影 `HC*HS → K`（`hc_lowrank`；通用 `HyperConnectionConfig` 默认 16，Qwen4 模型包装层未配置时默认取 128）；
 3. **up** 投影 `K → HC*HS`，view 成 `[HC, HS, K]`；
 4. **GSM**（gemm_sigmoid_mul_mean，`_gsm` @ `:594`）：
    ```
@@ -57,6 +57,58 @@ combine(block_out[T,HS], residual[T,HC*HS], mix_aux):
     return (R + injection).flatten()                   # [T, HC*HS]
 ```
 即：block 输出被以**每条 lane 各自的注入门控**加回该 lane。
+
+#### 1.3.1 block 只计算一次，lane 为什么还会分化？
+
+一个容易误解的点是：HC 并不执行 `Block(lane_1) ... Block(lane_HC)`。每个 attention / MLP block 只接收 `mix()` 产生的一个 `[T, HS]` 输入，因此只产生一份 block 输出 `y[T, HS]`。HC 条 lane 是**多条残差记忆通道**，不是 HC 个并行 Transformer。
+
+Qwen4 进入第一层时会把 embedding 复制 `HC` 份，所以初始确实有：
+
+```
+lane_1 = lane_2 = ... = lane_HC = x
+```
+
+但第一个 block 计算出 `y = Block(mix(X))` 后，`combine()` 使用每条 lane 独立的、输入相关的注入系数：
+
+```
+beta[c] = 2 * sigmoid((W_inject @ norm(X))[c] / HC)
+lane_c' = lane_c + beta[c] * y
+```
+
+`W_inject` 的每个输出行对应不同 lane，且是 checkpoint 中训练出来的参数；因此不同 lane 的 `beta[c]` 通常不同。例如 `HC=2`：
+
+```
+beta = [0.2, 1.5]
+lane_1' = x + 0.2 * y
+lane_2' = x + 1.5 * y
+```
+
+虽然两条 lane 写入的是同一个更新方向 `y`，但它们的**旧状态和写入幅度不同**，所以从第一次写回开始就会分化。下一个 `mix()` 又使用细到 `[lane, hidden_channel]` 的读取门控 `gate[c,h]` 从这些已经不同的 lane 中取数，使分化继续积累。
+
+#### 1.3.2 每条 lane 的输入、输出和所保存的信息
+
+对某个 token，第 `l` 层第 `c` 条 lane 的输入是它在前面所有 block 中累积的残差状态 `x_c^(l)`；当前 block 的输出为 `y^(l)`；写回后输出为：
+
+```
+x_c^(l+1) = x_c^(l) + beta_c^(l) * y^(l)
+```
+
+递归展开后，可以把它近似理解为：
+
+```
+x_c^(L) = x_initial + sum_l beta_c^(l) * y^(l)
+```
+
+所以每条 lane 保存的不是人为规定的“语法 / 事实 / 位置”等固定语义，而是**对各层 block 更新采用不同系数累积而成的一份深度历史**。这些系数还随 token 和当前上下文变化，因此 lane 的角色是模型自行学习的动态分布式表示，不宜给每条 lane 贴固定语义标签。
+
+扩展成多条 lane 的主要好处是：
+
+- **减少信息覆盖**：某些 lane 可以用较小的 `beta` 保留旧信息，另一些 lane 则积极吸收新信息；新旧信息不必全部挤在唯一状态中。
+- **保留多份深度历史**：有的 lane 可能更像慢更新的 residual highway，有的更像快速变化的工作状态；后续层通过 `mix()` 再按需重组。
+- **增加梯度和信息传播路径**：当某条 lane 的 `beta` 很小时，它可以近似原样穿过当前层，同时其他 lane 继续更新，从而缓解“保持稳定”与“学习新表示”之间的跷跷板。
+- **主体计算仍只做一次**：多路表示的代价主要是 lane 激活、低秩门控和 mix/combine，而不是把 Attention / MoE 重复 `HC` 遍。
+
+这也说明了 HC 的边界：同一个 block 在一次计算中只产生一个更新方向，lane 的多样性来自**不同的历史状态、动态读门和动态写入强度**，而不是 HC 个完全独立的 block 分支。
 
 ### 1.4 融合与后端（`VLLM_GATED_RESIDUAL_BACKEND`）
 
@@ -119,7 +171,7 @@ vLLM 里的 GR 就是这篇论文的工程实现。下面按 motivation / insigh
 - **几乎零开销**：如 OLMo-1B-DHC×4 仅 +0.033% 参数、+0.2% FLOPs，复杂度 `O(d·n·(n+1))` 相对 attention/FFN 可忽略。
 - 论文还指出 HC 能表达 **Sequential-Parallel Duality**：特定矩阵可退化成串行残差或并行 transformer block，学出来的连接常呈 "Λ 形"（混合 Pre/Post-Norm 风格）。
 
-**对应到 vLLM 代码**（`hyperconnection.py`）：`hc_count` = 论文的 **n**；隐状态 `[*, HC*HS]` = 展开的 n 条流；`mix()` = **Aₘ 读入**（RMSNorm + 低秩门控 GSM 把 n 流汇成 1）；`combine()` = **B 写回 + Aᵣ 宽度混合**（把 block 输出按每流门控 `iw_scaled` 注入回 n 流）；`HyperConnectionBase`(average) ≈ 最简 **SHC**，`GatedResidualSimple`（低秩、输入相关门控）≈ **DHC**。
+**对应到 vLLM 代码**（`hyperconnection.py`）：`hc_count` = 论文的 **n**；隐状态 `[*, HC*HS]` = 展开的 n 条流；`mix()` 对应 **Aₘ 读入**（RMSNorm + 低秩门控 GSM 把 n 流汇成 1）；`combine()` 直接实现的是 **B 式的门控写回**（把 block 输出按每流 `iw_scaled` 注入回 n 流）。需要注意，当前 `GatedResidualSimple.combine()` 没有单独计算完整的 `Aᵣᵀ H` lane-to-lane 矩阵；lane 间交换主要通过“多 lane 动态 mix → block → 分别写回”间接发生。因此这里是对论文思想的 gated/low-rank 工程变体映射，不是完整 HC 矩阵的逐项照搬。`HyperConnectionBase`(average) 是无参数参考实现，`GatedResidualSimple` 则使用低秩、输入相关的读写门控。
 
 #### Results（论文）
 

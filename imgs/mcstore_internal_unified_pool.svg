@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="650" viewBox="0 0 1120 650">
+  <defs>
+    <style>
+      text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;fill:#172033}
+      .title{font-size:26px;font-weight:700}.sub{font-size:18px;font-weight:700}.body{font-size:15px}.small{font-size:13px;fill:#526076}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px}
+      .panel{fill:#f8fafc;stroke:#cbd5e1;stroke-width:2}.blue{fill:#e8f1ff;stroke:#5b8def;stroke-width:2}.green{fill:#e9f8ef;stroke:#41a66b;stroke-width:2}.orange{fill:#fff2df;stroke:#e79835;stroke-width:2}.purple{fill:#f1ebff;stroke:#8b68d7;stroke-width:2}.red{fill:#fff0f0;stroke:#dc6b6b;stroke-width:2}.dash{fill:none;stroke:#8a97aa;stroke-width:2;stroke-dasharray:7 6}.arrow{fill:none;stroke:#526076;stroke-width:2.2;marker-end:url(#arrow)}
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#526076"/></marker>
+  </defs>
+  <rect width="1120" height="650" fill="#fff"/>
+  <text x="560" y="40" text-anchor="middle" class="title">统一内存池：从多套私有状态到一份 Pod 内资源视图</text>
+
+  <rect x="30" y="65" width="505" height="535" rx="16" class="panel"/>
+  <text x="282" y="98" text-anchor="middle" class="sub">改造前：池、allocator、生命周期彼此割裂</text>
+  <rect x="178" y="120" width="210" height="55" rx="10" class="red"/>
+  <text x="283" y="143" text-anchor="middle" class="body">Global Master</text><text x="283" y="162" text-anchor="middle" class="small">心跳 / 元数据 / 分配集中</text>
+  <rect x="55" y="205" width="140" height="70" rx="10" class="blue"/><text x="125" y="232" text-anchor="middle" class="body">RealClient</text><text x="125" y="253" text-anchor="middle" class="small">local + hot cache</text>
+  <rect x="218" y="205" width="135" height="70" rx="10" class="orange"/><text x="285" y="232" text-anchor="middle" class="body">Dummy 1</text><text x="285" y="253" text-anchor="middle" class="small">private shm</text>
+  <rect x="376" y="205" width="135" height="70" rx="10" class="orange"/><text x="443" y="232" text-anchor="middle" class="body">Dummy 2</text><text x="443" y="253" text-anchor="middle" class="small">private shm</text>
+  <path d="M255 175L135 205M283 175L285 205M312 175L432 205" class="arrow"/>
+  <rect x="55" y="315" width="456" height="180" rx="12" class="dash"/>
+  <text x="75" y="343" class="body">同一个 key 的数据路径</text>
+  <rect x="78" y="365" width="105" height="52" rx="8" class="purple"/><text x="130" y="397" text-anchor="middle" class="body">global copy</text>
+  <rect x="212" y="365" width="105" height="52" rx="8" class="blue"/><text x="264" y="397" text-anchor="middle" class="body">local copy</text>
+  <rect x="346" y="365" width="135" height="52" rx="8" class="orange"/><text x="413" y="389" text-anchor="middle" class="body">Dummy copies</text><text x="413" y="408" text-anchor="middle" class="small">随 client 数增长</text>
+  <path d="M183 391L212 391M317 391L346 391" class="arrow"/>
+  <text x="75" y="455" class="small">问题：重复 memcpy、重复副本、独立 free list、生命周期难统一</text>
+  <rect x="92" y="525" width="380" height="45" rx="9" class="red"/><text x="282" y="553" text-anchor="middle" class="body">内存占用 ≈ 固定成本 + DummyClient 数 × 副本</text>
+
+  <rect x="565" y="65" width="525" height="535" rx="16" class="panel"/>
+  <text x="827" y="98" text-anchor="middle" class="sub">改造后：LocalMaster + Unified Pool G</text>
+  <rect x="720" y="120" width="215" height="58" rx="10" class="green"/>
+  <text x="827" y="144" text-anchor="middle" class="body">LocalMaster</text><text x="827" y="164" text-anchor="middle" class="small">MetaMap / HandleTable / allocator</text>
+  <rect x="600" y="215" width="135" height="68" rx="10" class="blue"/><text x="667" y="242" text-anchor="middle" class="body">RealClient</text><text x="667" y="262" text-anchor="middle" class="small">create G</text>
+  <rect x="760" y="215" width="135" height="68" rx="10" class="orange"/><text x="827" y="242" text-anchor="middle" class="body">Dummy 1</text><text x="827" y="262" text-anchor="middle" class="small">attach G</text>
+  <rect x="920" y="215" width="135" height="68" rx="10" class="orange"/><text x="987" y="242" text-anchor="middle" class="body">Dummy 2</text><text x="987" y="262" text-anchor="middle" class="small">attach G</text>
+  <path d="M785 178L681 215M827 178L827 215M870 178L975 215" class="arrow"/>
+  <rect x="610" y="330" width="435" height="135" rx="14" class="green"/>
+  <text x="827" y="360" text-anchor="middle" class="sub">共享池 G：同一 key 只保留一份 memory replica</text>
+  <rect x="650" y="385" width="120" height="48" rx="8" class="purple"/><text x="710" y="414" text-anchor="middle" class="body">replica bytes</text>
+  <rect x="790" y="385" width="105" height="48" rx="8" class="blue"/><text x="842" y="414" text-anchor="middle" class="body">allocator</text>
+  <rect x="915" y="385" width="95" height="48" rx="8" class="orange"/><text x="962" y="414" text-anchor="middle" class="body">refcount</text>
+  <path d="M667 283L690 330M827 283L827 330M987 283L968 330" class="arrow"/>
+  <rect x="620" y="500" width="415" height="70" rx="10" class="blue"/>
+  <text x="827" y="527" text-anchor="middle" class="mono">offset = ptr_creator - g_base_creator</text>
+  <text x="827" y="551" text-anchor="middle" class="mono">ptr_i  = g_base_i + offset</text>
+  <text x="560" y="630" text-anchor="middle" class="small">控制面本地化减少全局 Master 流量；数据面统一化解决副本、allocator 与生命周期割裂</text>
+</svg>
