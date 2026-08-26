@@ -14,10 +14,11 @@ tags: [Mooncake, KV Cache, PD 分离, cache-aware 调度, vLLM, 驱逐策略, �
 
 | # | 事项 | 依据 | 代价 |
 |---|---|---|---|
-| A0 | **`block_size` 64 → 512** | **实测支撑最强的一条。** master 上限实测 4.5M keys/s，而冷缓存 100 实例外推 14M（超载 3 倍）；砍 8 倍后是 1.75M，**低于上限**。零代码改动，代价是最小命中粒度 64→512 token，可实测 | 一个参数 + 一轮对照 |
+| A0 | ~~**`block_size` 64 → 512**~~ | **撤销。** `block_size` 由实际业务需求决定，不是我们能动的旋钮。原依据（把 14M 压到 1.75M）仍然成立，但杠杆不在我们手上 | — |
 | A1 | ~~`local_first` vs `random` 对照~~ | 原为迁移设计的前提，但迁移已判定不需要（store 是全局池），此条随之降级。若将来做 `local_first` 才需要 | — |
-| A2 | **Config C：收窄 store 带宽** | 唯一被实测过能产生两位数策略差异的条件（跨机单网卡曾 +27%）。`run_node.sh` 已支持 `MC_DEVICE`，设成单个 `mlx5_bond_0` 即可；或 protocol 换 tcp | 一个变量 + 一次重启 |
-| A3 | **metadata key 跨 tp rank 去重** | 零精度代价，砍 `tp_size` 倍 master 压力。语义上本来冗余：lookup 的逻辑就是「全 rank 都为 1 才算命中」，一个 block 的各 rank 分片要么都在要么都不在 | vLLM 侧 Python，中等 |
+| A2 | ~~**Config C：收窄 store 带宽**~~ | **已做，INDISTINGUISHABLE。** 见 [03 章阶段八](/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-03-experiments/)。只补了「store 读贵」而没补「store 流量大」，而 store 份额只有 2%，给一条只承载 2% 流量的通道降速没用 | 已花费 25 分钟 |
+| A2b | ~~**Config D：3P+1D 让 store 承担流量**~~ | **已做，INDISTINGUISHABLE。** store 份额 2%→44%、单网卡、仅 3 节点，两个策略差 +0.39%（噪声 0.2%）。见 [03 章阶段九](/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-03-experiments/)。**cache-aware 这条线到此收结论** | 已花费 45 分钟 |
+| A3 | ~~**metadata key 跨 tp rank 去重**~~ | **撤销**（早前已判定）。三项收益里两项已被 grouping 零协调拿到（租约合并刷新、元数据路由局部性），剩下「key 数量」那一项要付跨 rank 协调的代价 | — |
 | A4 | **`VLLM_KVS_ON_MIN_LENGTH` 提到 `2 × block_size`** | 命中 1 个 block 只省 `block_size` 个 token 的重算，却要付 `tp_size` 个 key 的 RPC + master 侧租约写锁 | 一行 |
 
 ## B. 驱逐改动（需从源码重编 mooncake）
@@ -40,10 +41,14 @@ salt-per-arm 的负载里垃圾严格比工作集更旧，LRU 怎么砍都对，
 
 ## C. 独立线：master 扩展性
 
-| # | 事项 | 依据 |
-|---|---|---|
-| C1 | **接 `kv_events`（mooncake 侧 + vLLM 侧两条流）** | 消除 `batch_is_exist` RPC——冷缓存外推 14M keys/s 必然过载，这是单 master 会先撞的墙。顺带消除索引假阳性（但那个只值 2%，不是主要理由）。**零 C++ 改动**，master 加两个 flag + 写 ZMQ 订阅端 |
-| C2 | 按 key hash 把 metadata 分片到多 master | 当前完全不支持。设计与四个待解问题见 [01 章 §8.6](/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-01-store-architecture/)。**但按实测 A0 就能把超载解掉，所以这是「量级再上一个台阶」才需要的** |
+M1~M4 已经把这条线的前提测清楚了，见 [07 章](/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-07-partitioning-measured/)。优先级随之重排。
+
+| # | 事项 | 依据 | 代价 |
+|---|---|---|---|
+| C0 | **把 store 调用做成真异步** | **现在排第一。** M2 证明 fan-out 的代价（N=8 付 50% 吞吐）不是协议开销而是**客户端 RPC 流水线 4 线程就饱和**；同一个原因也造成单 client 1.5M 的上限。改它同时降低这两个数字，是它们共同的成因。而 A0 被撤销后，master 降压只剩这条和 C1 | vLLM 侧，中等 |
+| C1 | **接 `kv_events` 做负向过滤** | 消除大部分 `batch_is_exist` RPC。冷缓存正是超载场景，而负向过滤恰好在冷缓存时最有效、在不需要时零成本（索引为空 → 全部「可能有」→ 完全等于现状）。**零 C++ 改动**，master 加两个 flag + 写 ZMQ 订阅端。注意只能作负向过滤，不能反过来用 | 中等 |
+| C2 | 按 key hash 分片到多 master | **前提已验证**：M1 实测 8 个 master 聚合 11.74M（单 master 4.5M 的 2.6 倍），14M 外推需 ≥4 个。而且 owner 是纯函数 → **分区逻辑可以完全做在客户端，不需要 mooncake 支持「多 master」**。两个已知代价：fan-out 约 50%（见 C0），以及热点探测流量 N=8 最坏偏差 29-47% 且无法用副本缓解 | 客户端侧可先做 |
+| C3 | 多机 reader 的热点读实验 | M4 的唯一缺口：现在 reader 全在一台机上，所以永远测不到源端热点。按实测外推 1 台读端拉 28 GB/s、3 台就要 84 GB/s（超过单 bond），所以热点在更大规模下是真实的 | 需要多机 harness |
 
 ## D. 已知但暂缓
 
@@ -58,6 +63,12 @@ salt-per-arm 的负载里垃圾严格比工作集更旧，LRU 怎么砍都对，
   `remove_by_regex(pattern, force=True)` 或等 10 秒。四步实验确证见记忆库。
 - **vLLM safetensors 加载器单流读**：280 GB 模型 90 分钟，其中绝大部分是白等
   （共享盘单流 71 MB/s，12 并行 490 MB/s）。本身是个可优化点。
+- **`preferred_segment` / `preferred_segments` 在 0.3.12.post1 被忽略**：实测把落位钉到具名
+  远端 segment，对象照样落在本机。所以客户端无法请求落位，只能读回落位后拒绝采样。
+  要做任何依赖落位的实验（本机 vs 跨机、热点复制）都会撞上这条。
+- **`dynamic_replication` 热点自动扇出**是 HEAD 才有的（`#3389`），我们这版没有。
+  手动版 `replica_num=2` 在 M4 里测不出读带宽收益，但那是因为瓶颈在读端，
+  **所以「要不要 backport」这个问题还没被回答**——需要先做 C3。
 
 ## 附：复现步骤
 
