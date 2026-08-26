@@ -14,7 +14,8 @@ tags: [Mooncake, KV Cache, PD 分离, cache-aware 调度, vLLM, 驱逐策略, �
 
 | # | 事项 | 依据 | 代价 |
 |---|---|---|---|
-| A1 | **`local_first` vs `random` 对照** | 这是迁移设计的唯一定量前提。已知不利事实：RDMA 模式下本机命中也走 loopback、不退化成 memcpy，所以差距可能很小。**差距小 → `local_first` 不值得 → 迁移失去目的**，必须先测 | 一个 flag + 一次重启（3 分钟）+ 两轮 campaign |
+| A0 | **`block_size` 64 → 512** | **实测支撑最强的一条。** master 上限实测 4.5M keys/s，而冷缓存 100 实例外推 14M（超载 3 倍）；砍 8 倍后是 1.75M，**低于上限**。零代码改动，代价是最小命中粒度 64→512 token，可实测 | 一个参数 + 一轮对照 |
+| A1 | ~~`local_first` vs `random` 对照~~ | 原为迁移设计的前提，但迁移已判定不需要（store 是全局池），此条随之降级。若将来做 `local_first` 才需要 | — |
 | A2 | **Config C：收窄 store 带宽** | 唯一被实测过能产生两位数策略差异的条件（跨机单网卡曾 +27%）。`run_node.sh` 已支持 `MC_DEVICE`，设成单个 `mlx5_bond_0` 即可；或 protocol 换 tcp | 一个变量 + 一次重启 |
 | A3 | **metadata key 跨 tp rank 去重** | 零精度代价，砍 `tp_size` 倍 master 压力。语义上本来冗余：lookup 的逻辑就是「全 rank 都为 1 才算命中」，一个 block 的各 rank 分片要么都在要么都不在 | vLLM 侧 Python，中等 |
 | A4 | **`VLLM_KVS_ON_MIN_LENGTH` 提到 `2 × block_size`** | 命中 1 个 block 只省 `block_size` 个 token 的重算，却要付 `tp_size` 个 key 的 RPC + master 侧租约写锁 | 一行 |
@@ -42,7 +43,7 @@ salt-per-arm 的负载里垃圾严格比工作集更旧，LRU 怎么砍都对，
 | # | 事项 | 依据 |
 |---|---|---|
 | C1 | **接 `kv_events`（mooncake 侧 + vLLM 侧两条流）** | 消除 `batch_is_exist` RPC——冷缓存外推 14M keys/s 必然过载，这是单 master 会先撞的墙。顺带消除索引假阳性（但那个只值 2%，不是主要理由）。**零 C++ 改动**，master 加两个 flag + 写 ZMQ 订阅端 |
-| C2 | 按 key hash 把 metadata 分片到多 master | 当前完全不支持（grep 过 `master_shard`/`multi_master`/`consistent_hash` 全无）。是比改驱逐**更有上游价值**的贡献方向 |
+| C2 | 按 key hash 把 metadata 分片到多 master | 当前完全不支持。设计与四个待解问题见 [01 章 §8.6](/notes/2026/08/25/2026-08-25-mooncake-store-kv-scheduling-01-store-architecture/)。**但按实测 A0 就能把超载解掉，所以这是「量级再上一个台阶」才需要的** |
 
 ## D. 已知但暂缓
 
@@ -52,6 +53,9 @@ salt-per-arm 的负载里垃圾严格比工作集更旧，LRU 怎么砍都对，
 - **旧 KVS backend 的 group 维切片 + 缺 `is_hybrid` 保护**，hybrid 下会静默出错（既存 bug）。
 - **PD 只有冷启动第一个请求输出正确**，之后退化成 `. . . .`。
   已确认与本分支改动无关（纯 kvt 的 P 也一样）。待查 `--async-scheduling`。
+- **`store.remove()` 对有租约的对象返回 -706（OBJECT_HAS_LEASE）**，而「探测即续命」意味着刚被
+  `batch_is_exist` 碰过的 key 在 10 秒内删不掉。写清理工具要用
+  `remove_by_regex(pattern, force=True)` 或等 10 秒。四步实验确证见记忆库。
 - **vLLM safetensors 加载器单流读**：280 GB 模型 90 分钟，其中绝大部分是白等
   （共享盘单流 71 MB/s，12 并行 490 MB/s）。本身是个可优化点。
 
@@ -73,15 +77,26 @@ ssh test1 'cd .../runs/mcstore && setsid nohup ./campaign.sh c8k 2 >/dev/null 2>
 # 4. 饱和实验（8 臂，不中止，靠累积溢出）
 ssh test1 'cd .../runs/mcstore && setsid nohup ./saturate.sh 8 >/dev/null 2>&1 &'
 
-# 5. 分析
+# 5. master 上限（合成负载，不占 GPU、不经过 vLLM）
+export LD_LIBRARY_PATH=/dashscope/caches/workspace/llx/mcstore_deps
+python3 master_stress.py --seed-keys 20000 --batches 1,32,256,1024 --threads 1,4,16,32,64
+#    多进程聚合以区分 client 上限与 master 上限：
+#    N 个进程各 --single --batches 256 --threads 4，用不同 --prefix 和 --local-hostname
+
+# 6. 分析
 python3 compare_campaigns.py campaign_c8k.log campaign_c3k.log
 python3 analyze_saturate.py
 python3 master_load.py
 python3 recover_mix.py n2          # NODE_TAG 配错时事后补算 mix
 ```
 
-**注意**：`campaign.sh` / `saturate.sh` 里的 `NODE_TAG` 必须与 bringup 的 tag 一致
-（`n1` / `n2`），否则 `run_policy.sh` 会扫错节点日志，mix 三列静默变 0%。
+**`NODE_TAG` 已不需要手工对齐**：`run_policy.sh` 现在从最新的 `p0_*.log` 自动推导，
+并在任一节点日志缺失时大声警告。这条曾经踩过——campaign 里写死 `n1` 而节点日志是 `_n2`，
+扫到旧日志、时间窗对不上，mix 三列静默变 0%。同一天在 `saturate.sh` 的 `metrics()` 里
+又踩了一次（写死 `master_n2.log`，读到上一轮的 store/驱逐数字），也已改成 `ls -t master_*.log | head -1`。
+
+**中止后重启必须换 label**：salt 取自 label，同名重跑会命中被中止那次的残留，
+第一个臂变成热启动（实测重算 4% < 8% 下界，被判据当场抓出）。用 `--exclude <tag>` 剔除。
 
 ### 脚本清单（都在 `runs/mcstore/`，旧版备份 `*.bak_32b`）
 
@@ -98,3 +113,5 @@ python3 recover_mix.py n2          # NODE_TAG 配错时事后补算 mix
 | `compare_campaigns.py` | 合并对照表 + 噪声判据（自动拒绝小于噪声的「结论」） |
 | `analyze_saturate.py` | 饱和 breakdown，按驱逐状态自动分组 |
 | `recover_mix.py` | 按时间戳聚类事后补算 mix |
+| `master_stress.py` | 合成负载直打 `batch_is_exist`，不经过 vLLM；`--single` 供多进程聚合。用于测 master 的真实上限 |
+| `analyze_saturate.py` | 支持 `--exclude <tag>`，并自动检查驱逐 key 数的偶性（tp2 组原子驱逐必为偶数） |
