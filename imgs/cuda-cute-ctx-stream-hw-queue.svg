@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="760" viewBox="0 0 780 760" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">stream 到硬件工作队列的映射与假依赖</title>
+  <desc id="desc">展示软件 stream 如何映射到有限条硬件工作队列，深度优先提交在队列不足时产生假依赖，以及 H20 与 GB200 上的实测差异。</desc>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb8d6"/></marker></defs>
+  <rect x="0" y="0" width="780" height="760" rx="26" fill="#071522"/>
+  <text x="390.0" y="46" fill="white" font-family="sans-serif" font-size="27" text-anchor="middle" font-weight="700">stream 映射到有限条硬件工作队列</text><text x="390.0" y="74" fill="#7e9fb8" font-family="sans-serif" font-size="14" text-anchor="middle">CUDA_DEVICE_MAX_CONNECTIONS：1~32，默认 8</text>
+  <text x="60" y="124" fill="#cfe6f3" font-family="sans-serif" font-size="14" font-weight="700">软件层：stream 数量不限</text>
+  <rect x="60" y="140" width="104" height="34" rx="6" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="112" y="162" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle">stream 0</text>
+  <rect x="175" y="140" width="104" height="34" rx="6" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="227" y="162" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle">stream 1</text>
+  <rect x="290" y="140" width="104" height="34" rx="6" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="342" y="162" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle">stream 2</text>
+  <rect x="405" y="140" width="104" height="34" rx="6" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="457" y="162" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle">stream 3</text>
+  <rect x="520" y="140" width="104" height="34" rx="6" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="572" y="162" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle">stream 4</text>
+  <rect x="635" y="140" width="104" height="34" rx="6" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="687" y="162" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle">stream 5</text>
+  <text x="680" y="162" fill="#8fb8d6" font-family="sans-serif" font-size="16">...</text>
+  <line x1="112" y1="176" x2="112" y2="204" stroke="#33566f" stroke-width="1.3" marker-end="url(#ah)"/>
+  <line x1="227" y1="176" x2="227" y2="204" stroke="#33566f" stroke-width="1.3" marker-end="url(#ah)"/>
+  <line x1="342" y1="176" x2="342" y2="204" stroke="#33566f" stroke-width="1.3" marker-end="url(#ah)"/>
+  <line x1="457" y1="176" x2="457" y2="204" stroke="#33566f" stroke-width="1.3" marker-end="url(#ah)"/>
+  <line x1="572" y1="176" x2="572" y2="204" stroke="#33566f" stroke-width="1.3" marker-end="url(#ah)"/>
+  <line x1="687" y1="176" x2="687" y2="204" stroke="#33566f" stroke-width="1.3" marker-end="url(#ah)"/>
+  <text x="60" y="232" fill="#cfe6f3" font-family="sans-serif" font-size="14" font-weight="700">硬件层：只有 N 条工作队列（connections）</text>
+  <rect x="50" y="246" width="680" height="56" rx="10" fill="#0d1f2e" stroke="#f0c040" stroke-width="1.2"/>
+  <rect x="68" y="258" width="150" height="32" rx="6" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/>
+  <text x="143" y="279" fill="#ffd76a" font-family="sans-serif" font-size="11.5" text-anchor="middle">work queue 0</text>
+  <rect x="236" y="258" width="150" height="32" rx="6" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/>
+  <text x="311" y="279" fill="#ffd76a" font-family="sans-serif" font-size="11.5" text-anchor="middle">work queue 1</text>
+  <rect x="404" y="258" width="150" height="32" rx="6" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/>
+  <text x="479" y="279" fill="#ffd76a" font-family="sans-serif" font-size="11.5" text-anchor="middle">work queue 2</text>
+  <rect x="572" y="258" width="150" height="32" rx="6" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/>
+  <text x="647" y="279" fill="#ffd76a" font-family="sans-serif" font-size="11.5" text-anchor="middle">work queue 3</text>
+  <text x="390" y="326" fill="#ffd76a" font-family="sans-serif" font-size="12.5" text-anchor="middle">stream 多于队列数时，多个 stream 共享一条队列</text>
+  <text x="60" y="368" fill="#cfe6f3" font-family="sans-serif" font-size="14" font-weight="700">共享队列 + 深度优先提交 = 假依赖</text>
+  <text x="60" y="392" fill="#9fc4dc" font-family="sans-serif" font-size="12">单队列里的提交顺序：</text>
+  <rect x="60" y="406" width="96" height="34" rx="6" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="108" y="428" fill="#82dcff" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">A1</text>
+  <rect x="168" y="406" width="96" height="34" rx="6" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="216" y="428" fill="#82dcff" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">A2</text>
+  <rect x="276" y="406" width="96" height="34" rx="6" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="324" y="428" fill="#82dcff" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">A3</text>
+  <rect x="384" y="406" width="96" height="34" rx="6" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="432" y="428" fill="#7ee6a8" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">B1</text>
+  <rect x="492" y="406" width="96" height="34" rx="6" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="540" y="428" fill="#7ee6a8" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">B2</text>
+  <rect x="600" y="406" width="96" height="34" rx="6" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="648" y="428" fill="#7ee6a8" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">B3</text>
+  <line x1="168" y1="446" x2="168" y2="470" stroke="#ff7b7b" stroke-width="1.6"/>
+  <text x="230" y="466" fill="#ff9b9b" font-family="sans-serif" font-size="12">A2 等 A1（同 stream，正确）</text>
+  <line x1="384" y1="446" x2="384" y2="494" stroke="#ff7b7b" stroke-width="1.6" stroke-dasharray="4 3"/>
+  <text x="430" y="490" fill="#ff9b9b" font-family="sans-serif" font-size="12" text-anchor="middle">B1 排在 A2 后面被连坐堵住 ← 这就是假依赖</text>
+  <text x="60" y="524" fill="#7ee6a8" font-family="sans-serif" font-size="12.3">广度优先提交 A1 B1 C1 | A2 B2 C2 可以规避：每一轮的几个 kernel 彼此独立，能连续发射。</text>
+  <text x="60" y="566" fill="#cfe6f3" font-family="sans-serif" font-size="14" font-weight="700">实测：8 streams × 6 kernels，各占 1/8 GPU</text>
+  <rect x="50" y="580" width="680" height="150" rx="12" fill="#0b1c2a" stroke="#22405a" stroke-width="1.2"/>
+  <text x="70" y="604" fill="#82dcff" font-family="sans-serif" font-size="12.8" font-weight="700">H20 (SM90, CUDA 12.8) — 教科书式复现</text>
+  <text x="78" y="624" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">CONN=1</text>
+  <text x="158" y="624" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">深度优先</text>
+  <text x="250" y="624" fill="#ff9b9b" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="end">1.17</text>
+  <text x="266" y="624" fill="#ff9b9b" font-family="sans-serif" font-size="11.5">假串行</text>
+  <text x="78" y="646" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">CONN=1</text>
+  <text x="158" y="646" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">广度优先</text>
+  <text x="250" y="646" fill="#7ee6a8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="end">7.94</text>
+  <text x="266" y="646" fill="#7ee6a8" font-family="sans-serif" font-size="11.5">免疫</text>
+  <text x="78" y="668" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">CONN=2</text>
+  <text x="158" y="668" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">深度优先</text>
+  <text x="250" y="668" fill="#ffd76a" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="end">2.27</text>
+  <text x="266" y="668" fill="#ffd76a" font-family="sans-serif" font-size="11.5">≈队列数</text>
+  <text x="78" y="690" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">CONN=8</text>
+  <text x="158" y="690" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">深度优先</text>
+  <text x="250" y="690" fill="#7ee6a8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="end">7.73</text>
+  <text x="266" y="690" fill="#7ee6a8" font-family="sans-serif" font-size="11.5">恢复</text>
+  <text x="390" y="604" fill="#7ee6a8" font-family="sans-serif" font-size="12.8" font-weight="700">GB200 (SM100, CUDA 13.2) — 完全无此现象</text>
+  <text x="398" y="624" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">CONN=1</text>
+  <text x="478" y="624" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">深度优先</text>
+  <text x="570" y="624" fill="#7ee6a8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="end">7.81</text>
+  <text x="398" y="646" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">CONN=1</text>
+  <text x="478" y="646" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">广度优先</text>
+  <text x="570" y="646" fill="#7ee6a8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="end">7.94</text>
+  <text x="398" y="668" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">CONN=2</text>
+  <text x="478" y="668" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">深度优先</text>
+  <text x="570" y="668" fill="#7ee6a8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="end">7.79</text>
+  <text x="398" y="690" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5">CONN=32</text>
+  <text x="478" y="690" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">深度优先</text>
+  <text x="570" y="690" fill="#7ee6a8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11.5" text-anchor="end">7.79</text>
+  <text x="586" y="646" fill="#7ee6a8" font-family="sans-serif" font-size="11.5">队列数无影响</text>
+</svg>

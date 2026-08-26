@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">CUDA context 与 UVA 的层级关系</title>
+  <desc id="desc">上半部分展示进程级的统一虚拟地址空间与四种指针的实测地址和属性，下半部分展示每设备一个 primary context 及其拥有的资源与建立代价。</desc>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb8d6"/></marker></defs>
+  <rect x="0" y="0" width="1200" height="700" rx="26" fill="#071522"/>
+  <text x="600.0" y="46" fill="white" font-family="sans-serif" font-size="27" text-anchor="middle" font-weight="700">context 是 per-(进程,设备)，UVA 是 per-进程</text><text x="600.0" y="74" fill="#7e9fb8" font-family="sans-serif" font-size="14" text-anchor="middle">两者不是一个层级；实测于 target_p 4×GB200</text>
+  <rect x="60" y="104" width="1080" height="300" rx="14" fill="#0b1c2a" stroke="#33566f" stroke-width="1.2"/>
+  <text x="80" y="132" fill="#8fb8d6" font-family="sans-serif" font-size="15" font-weight="700">一个进程</text>
+  <rect x="90" y="150" width="1020" height="40" rx="8" fill="#123047" stroke="#4a7fa5" stroke-width="1.2"/>
+  <text x="600" y="175" fill="#82dcff" font-family="sans-serif" font-size="14" text-anchor="middle" font-weight="700">UVA  统一虚拟地址空间（整个进程只有一个）</text>
+  <rect x="95" y="206" width="238" height="86" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="214" y="230" fill="#ff9b9b" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">普通 malloc</text>
+  <text x="214" y="252" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12" text-anchor="middle">0xaaaae69de7b0</text>
+  <text x="214" y="272" fill="#9fc4dc" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">unregistered</text>
+  <text x="214" y="287" fill="#9fc4dc" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">device = -1</text>
+  <rect x="347" y="206" width="238" height="86" rx="8" fill="#0f3f42" stroke="#4fd6cf" stroke-width="1.2"/>
+  <text x="466" y="230" fill="#7fe8e2" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">cudaHostAlloc</text>
+  <text x="466" y="252" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12" text-anchor="middle">0xfffce0000000</text>
+  <text x="466" y="272" fill="#9fc4dc" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">host</text>
+  <text x="466" y="287" fill="#9fc4dc" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">device = 0</text>
+  <line x1="466" y1="206" x2="466" y2="190" stroke="#4fd6cf" stroke-width="1.6"/>
+  <rect x="599" y="206" width="238" height="86" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="718" y="230" fill="#82dcff" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">cudaMalloc dev0</text>
+  <text x="718" y="252" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12" text-anchor="middle">0xfffd1dc00000</text>
+  <text x="718" y="272" fill="#9fc4dc" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">device</text>
+  <text x="718" y="287" fill="#9fc4dc" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">device = 0</text>
+  <line x1="718" y1="206" x2="718" y2="190" stroke="#65d0ff" stroke-width="1.6"/>
+  <rect x="851" y="206" width="238" height="86" rx="8" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="970" y="230" fill="#7ee6a8" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">cudaMalloc dev1</text>
+  <text x="970" y="252" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12" text-anchor="middle">0xfffcbde00000</text>
+  <text x="970" y="272" fill="#9fc4dc" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">device</text>
+  <text x="970" y="287" fill="#9fc4dc" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">device = 1</text>
+  <line x1="970" y1="206" x2="970" y2="190" stroke="#58d68d" stroke-width="1.6"/>
+  <text x="95" y="318" fill="#ff9b9b" font-family="sans-serif" font-size="12.8">⚠ 普通 malloc 的内存不在 UVA 里（虚线框）——只有注册过的主机内存才进来。</text>
+  <text x="95" y="340" fill="#cfe6f3" font-family="sans-serif" font-size="12.5">注意后三者都落在 0xfffc~0xfffd 这一段连续区间：pinned 主机内存 + 两张不同卡的显存共享同一个 VA 空间。</text>
+  <text x="95" y="368" fill="#7ee6a8" font-family="sans-serif" font-size="12.5">这张表由 cudaPointerGetAttributes 实测得到——runtime 确实在维护「地址 → 属于谁」的映射表。</text>
+  <text x="60" y="444" fill="#cfe6f3" font-family="sans-serif" font-size="15" font-weight="700">而 context 是每个设备一个，各自拥有独立的 GPU 页表</text>
+  <rect x="70" y="464" width="252" height="150" rx="12" fill="#0d1f2e" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="196" y="490" fill="#c9b0ff" font-family="sans-serif" font-size="12.5" text-anchor="middle" font-weight="700">device 0 的 primary context</text>
+  <text x="84" y="512" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· GPU 虚拟地址空间 + 页表</text>
+  <text x="84" y="532" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· 该 context 内的所有显存分配</text>
+  <text x="84" y="552" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· 加载的 module / cubin</text>
+  <text x="84" y="572" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· stream、event 等对象</text>
+  <text x="196" y="600" fill="#7e9fb8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">懒创建，首次 CUDA 调用时</text>
+  <rect x="342" y="464" width="252" height="150" rx="12" fill="#0d1f2e" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="468" y="490" fill="#c9b0ff" font-family="sans-serif" font-size="12.5" text-anchor="middle" font-weight="700">device 1 的 primary context</text>
+  <text x="356" y="512" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· GPU 虚拟地址空间 + 页表</text>
+  <text x="356" y="532" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· 该 context 内的所有显存分配</text>
+  <text x="356" y="552" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· 加载的 module / cubin</text>
+  <text x="356" y="572" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· stream、event 等对象</text>
+  <text x="468" y="600" fill="#7e9fb8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">懒创建，首次 CUDA 调用时</text>
+  <rect x="614" y="464" width="252" height="150" rx="12" fill="#0d1f2e" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="740" y="490" fill="#c9b0ff" font-family="sans-serif" font-size="12.5" text-anchor="middle" font-weight="700">device 2 的 primary context</text>
+  <text x="628" y="512" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· GPU 虚拟地址空间 + 页表</text>
+  <text x="628" y="532" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· 该 context 内的所有显存分配</text>
+  <text x="628" y="552" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· 加载的 module / cubin</text>
+  <text x="628" y="572" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· stream、event 等对象</text>
+  <text x="740" y="600" fill="#7e9fb8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">懒创建，首次 CUDA 调用时</text>
+  <rect x="886" y="464" width="252" height="150" rx="12" fill="#0d1f2e" stroke="#b18cff" stroke-width="1.2"/>
+  <text x="1012" y="490" fill="#c9b0ff" font-family="sans-serif" font-size="12.5" text-anchor="middle" font-weight="700">device 3 的 primary context</text>
+  <text x="900" y="512" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· GPU 虚拟地址空间 + 页表</text>
+  <text x="900" y="532" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· 该 context 内的所有显存分配</text>
+  <text x="900" y="552" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· 加载的 module / cubin</text>
+  <text x="900" y="572" fill="#cfe6f3" font-family="sans-serif" font-size="11.5">· stream、event 等对象</text>
+  <text x="1012" y="600" fill="#7e9fb8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10.5" text-anchor="middle">懒创建，首次 CUDA 调用时</text>
+  <rect x="60" y="634" width="1080" height="48" rx="10" fill="#102a1e" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="80" y="654" fill="#7ee6a8" font-family="sans-serif" font-size="13">实测建立代价（GB200）：device 0 的 context 208.5 ms；再建 device 1 的 context 又要 288.0 ms。</text>
+  <text x="80" y="674" fill="#cfe6f3" font-family="sans-serif" font-size="12.3">每张卡各付一次两三百毫秒——这就是多卡程序启动慢、以及框架都要做 context 预热的原因。</text>
+</svg>

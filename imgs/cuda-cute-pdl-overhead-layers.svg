@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">kernel 启动开销分层与 CUDA Graph / PDL 的分工</title>
+  <desc id="desc">把一次 kernel 从提交到执行的开销分为 CPU 侧、硬件 dispatch、kernel 间串行化三层，指出 Graph 与 PDL 各自消除哪一层，并附 H20 实测的 2×2 对比。</desc>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb8d6"/></marker><marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ff9b9b"/></marker><marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7ee6a8"/></marker></defs>
+  <rect x="0" y="0" width="1200" height="620" rx="26" fill="#071522"/>
+  <text x="600.0" y="46" fill="white" font-family="sans-serif" font-size="27" text-anchor="middle" font-weight="700">CUDA Graph 与 PDL 打的是不同层：正交、收益叠加</text><text x="600.0" y="74" fill="#7e9fb8" font-family="sans-serif" font-size="14" text-anchor="middle">H20 实测，64 对 producer→consumer 链，grid = SM 数（bs=1 形态）</text>
+  <rect x="70" y="116" width="700" height="56" rx="10" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="90" y="142" fill="#e6f2fa" font-family="sans-serif" font-size="13">Python / 框架逻辑、参数打包、driver 调用 cuLaunchKernel</text>
+  <rect x="800" y="116" width="250" height="56" rx="10" fill="#0d1f2e" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="925" y="149.0" fill="#7ee6a8" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">CUDA Graph 消掉</text>
+  <rect x="70" y="188" width="700" height="56" rx="10" fill="#122636" stroke="#33566f" stroke-width="1.2"/>
+  <text x="90" y="214" fill="#e6f2fa" font-family="sans-serif" font-size="13">GPU 硬件 grid dispatch、CTA 分发</text>
+  <rect x="800" y="188" width="250" height="56" rx="10" fill="#0d1f2e" stroke="#33566f" stroke-width="1.2"/>
+  <text x="925" y="221.0" fill="#8fb8d6" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">固定成本，谁都消不掉</text>
+  <rect x="70" y="260" width="700" height="78" rx="10" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="90" y="284" fill="#e6f2fa" font-family="sans-serif" font-size="13">前驱所有 CTA 退出 + grid-ending membar（全局内存可见性刷新）</text>
+  <text x="90" y="306" fill="#e6f2fa" font-family="sans-serif" font-size="13">+ 后继的 launch 与 prolog 必须等这一切结束</text>
+  <rect x="800" y="260" width="250" height="78" rx="10" fill="#0d1f2e" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="925" y="304.0" fill="#82dcff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">PDL 消掉</text>
+  <text x="70" y="366" fill="#cfe6f3" font-family="sans-serif" font-size="15" font-weight="700">H20 实测（ns / pair，越低越好）</text>
+  <text x="316" y="412" fill="#7e9fb8" font-family="sans-serif" font-size="12.5" text-anchor="end">graph off, pdl off</text>
+  <rect x="330" y="390" width="611.5504761904763" height="30" rx="5" fill="#122636" stroke="#33566f" stroke-width="1.2"/>
+  <text x="953.5504761904763" y="411" fill="#8fb8d6" font-family="sans-serif" font-size="12.5">20,066</text>
+  <text x="316" y="454" fill="#7e9fb8" font-family="sans-serif" font-size="12.5" text-anchor="end">graph on,  pdl off</text>
+  <rect x="330" y="432" width="555.6114285714285" height="30" rx="5" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="897.6114285714285" y="453" fill="#7ee6a8" font-family="sans-serif" font-size="12.5">18,231</text>
+  <text x="316" y="496" fill="#7e9fb8" font-family="sans-serif" font-size="12.5" text-anchor="end">graph off, pdl on</text>
+  <rect x="330" y="474" width="452.5866666666667" height="30" rx="5" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="794.5866666666667" y="495" fill="#82dcff" font-family="sans-serif" font-size="12.5">14,850</text>
+  <text x="316" y="538" fill="#7e9fb8" font-family="sans-serif" font-size="12.5" text-anchor="end">graph on,  pdl on</text>
+  <rect x="330" y="516" width="420.6171428571429" height="30" rx="5" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/>
+  <text x="762.6171428571429" y="537" fill="#ffd76a" font-family="sans-serif" font-size="12.5">13,802</text>
+  <text x="1030" y="412" fill="#7ee6a8" font-family="sans-serif" font-size="12.8">Graph 单独  −9.1%</text>
+  <text x="1030" y="454" fill="#82dcff" font-family="sans-serif" font-size="12.8">PDL 单独   −26.0%</text>
+  <text x="1030" y="496" fill="#ffd76a" font-family="sans-serif" font-size="13.5" font-weight="700">两者合计   −31.2%</text>
+  <rect x="70" y="566" width="1060" height="40" rx="10" fill="#102a1e" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="90" y="592" fill="#7ee6a8" font-family="sans-serif" font-size="12.8">负 launch gap 实测：%globaltimer 测得 gap 从 +1242 ns 变为 −2722 ns —— consumer 的 grid 确实在 producer 结束前 2.7μs 就开始执行。</text>
+</svg>

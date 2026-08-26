@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">并发微基准的设计方法与踩过的坑</title>
+  <desc id="desc">说明如何用 dynamic shared memory 钉住 occupancy、为何选择纯自旋 kernel、并发度指标的定义，以及实验过程中踩过的四个坑。</desc>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb8d6"/></marker></defs>
+  <rect x="0" y="0" width="1200" height="660" rx="26" fill="#071522"/>
+  <text x="600.0" y="46" fill="white" font-family="sans-serif" font-size="27" text-anchor="middle" font-weight="700">怎么设计一个能回答「能不能并发」的微基准</text><text x="600.0" y="74" fill="#7e9fb8" font-family="sans-serif" font-size="14" text-anchor="middle">三个设计点：自旋 kernel、用 smem 钉住 occupancy、并发度指标</text>
+  <rect x="60" y="108" width="540" height="250" rx="12" fill="#0b1c2a" stroke="#22405a" stroke-width="1.2"/>
+  <text x="80" y="136" fill="#82dcff" font-family="sans-serif" font-size="14" font-weight="700">① 用 dynamic smem 钉住 1 CTA/SM</text>
+  <text x="80" y="164" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12">GB200 每 SM 有 228KB smem</text>
+  <text x="80" y="184" fill="#ffd76a" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12">给每个 CTA 申请 228/2 + 4 = 118KB</text>
+  <text x="80" y="204" fill="#7ee6a8" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12">118 × 2 = 236 &gt; 228  →  1 CTA/SM</text>
+  <text x="80" y="232" fill="#cfe6f3" font-family="sans-serif" font-size="12.5">于是得到干净的等价关系：</text>
+  <text x="80" y="254" fill="#7ee6a8" font-family="sans-serif" font-size="14" font-weight="700">grid = N  ⟺  占用 N 个 SM</text>
+  <rect x="84" y="274" width="36" height="30" rx="5" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="102" y="294" fill="#82dcff" font-family="sans-serif" font-size="10.5" text-anchor="middle">K1</text>
+  <rect x="126" y="274" width="36" height="30" rx="5" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="144" y="294" fill="#82dcff" font-family="sans-serif" font-size="10.5" text-anchor="middle">K1</text>
+  <rect x="168" y="274" width="36" height="30" rx="5" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="186" y="294" fill="#82dcff" font-family="sans-serif" font-size="10.5" text-anchor="middle">K1</text>
+  <rect x="210" y="274" width="36" height="30" rx="5" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/>
+  <text x="228" y="294" fill="#82dcff" font-family="sans-serif" font-size="10.5" text-anchor="middle">K1</text>
+  <rect x="252" y="274" width="36" height="30" rx="5" fill="#122636" stroke="#33566f" stroke-width="1.2" stroke-dasharray="3 2"/>
+  <text x="270" y="294" fill="#8fb8d6" font-family="sans-serif" font-size="10.5" text-anchor="middle">·</text>
+  <rect x="294" y="274" width="36" height="30" rx="5" fill="#122636" stroke="#33566f" stroke-width="1.2" stroke-dasharray="3 2"/>
+  <text x="312" y="294" fill="#8fb8d6" font-family="sans-serif" font-size="10.5" text-anchor="middle">·</text>
+  <rect x="336" y="274" width="36" height="30" rx="5" fill="#122636" stroke="#33566f" stroke-width="1.2" stroke-dasharray="3 2"/>
+  <text x="354" y="294" fill="#8fb8d6" font-family="sans-serif" font-size="10.5" text-anchor="middle">·</text>
+  <rect x="378" y="274" width="36" height="30" rx="5" fill="#122636" stroke="#33566f" stroke-width="1.2" stroke-dasharray="3 2"/>
+  <text x="396" y="294" fill="#8fb8d6" font-family="sans-serif" font-size="10.5" text-anchor="middle">·</text>
+  <rect x="420" y="274" width="36" height="30" rx="5" fill="#122636" stroke="#33566f" stroke-width="1.2" stroke-dasharray="3 2"/>
+  <text x="438" y="294" fill="#8fb8d6" font-family="sans-serif" font-size="10.5" text-anchor="middle">·</text>
+  <rect x="462" y="274" width="36" height="30" rx="5" fill="#122636" stroke="#33566f" stroke-width="1.2" stroke-dasharray="3 2"/>
+  <text x="480" y="294" fill="#8fb8d6" font-family="sans-serif" font-size="10.5" text-anchor="middle">·</text>
+  <rect x="504" y="274" width="36" height="30" rx="5" fill="#122636" stroke="#33566f" stroke-width="1.2" stroke-dasharray="3 2"/>
+  <text x="522" y="294" fill="#8fb8d6" font-family="sans-serif" font-size="10.5" text-anchor="middle">·</text>
+  <rect x="546" y="274" width="36" height="30" rx="5" fill="#122636" stroke="#33566f" stroke-width="1.2" stroke-dasharray="3 2"/>
+  <text x="564" y="294" fill="#8fb8d6" font-family="sans-serif" font-size="10.5" text-anchor="middle">·</text>
+  <text x="80" y="324" fill="#9fc4dc" font-family="sans-serif" font-size="11.5">grid=4：占 4 个 SM，其余空闲留给别的 kernel</text>
+  <text x="80" y="344" fill="#7e9fb8" font-family="sans-serif" font-size="11">（256 线程在这里是无关变量——smem 才是卡住的约束）</text>
+  <rect x="620" y="108" width="520" height="250" rx="12" fill="#0b1c2a" stroke="#22405a" stroke-width="1.2"/>
+  <text x="640" y="136" fill="#c9b0ff" font-family="sans-serif" font-size="14" font-weight="700">③ 并发度 = Σ(各 kernel 时长) / 跨度</text>
+  <text x="640" y="172" fill="#ff9b9b" font-family="sans-serif" font-size="12.5" font-weight="700">完全串行</text>
+  <rect x="732" y="162" width="66" height="12" rx="3" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/>
+  <rect x="804" y="177" width="66" height="12" rx="3" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/>
+  <rect x="876" y="192" width="66" height="12" rx="3" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/>
+  <rect x="948" y="207" width="66" height="12" rx="3" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/>
+  <text x="1040" y="200" fill="#ff9b9b" font-family="sans-serif" font-size="15" font-weight="700">→ 1.0</text>
+  <text x="640" y="270" fill="#7ee6a8" font-family="sans-serif" font-size="12.5" font-weight="700">完全并发</text>
+  <rect x="732" y="260" width="66" height="12" rx="3" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/>
+  <rect x="732" y="275" width="66" height="12" rx="3" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/>
+  <rect x="732" y="290" width="66" height="12" rx="3" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/>
+  <rect x="732" y="305" width="66" height="12" rx="3" fill="#14432f" stroke="#58d68d" stroke-width="1.2"/>
+  <text x="1040" y="298" fill="#7ee6a8" font-family="sans-serif" font-size="15" font-weight="700">→ 4.0</text>
+  <text x="640" y="352" fill="#9fc4dc" font-family="sans-serif" font-size="11.5">跨度在设备上用 %globaltimer 测，不含 CPU 提交与同步开销</text>
+  <rect x="60" y="374" width="1080" height="110" rx="12" fill="#0d1f2e" stroke="#4fd6cf" stroke-width="1.2"/>
+  <text x="80" y="402" fill="#7fe8e2" font-family="sans-serif" font-size="14" font-weight="700">② 为什么用纯自旋 kernel</text>
+  <text x="80" y="428" fill="#cfe6f3" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12">long long t0 = clock64();  while (clock64() - t0 &lt; cyc) { }</text>
+  <text x="80" y="454" fill="#7fe8e2" font-family="sans-serif" font-size="12.5">时长完全可预测（不受缓存/访存排队影响）· 不消耗 HBM 带宽 → 把「调度问题」和「带宽争用」彻底解耦。</text>
+  <text x="80" y="474" fill="#cfe6f3" font-family="sans-serif" font-size="12">变慢就只可能是没并发。对比：第 12 章测 PDL 时反而故意让 prolog 吃满 HBM——测什么就让什么成为唯一变量。</text>
+  <rect x="60" y="500" width="1080" height="144" rx="12" fill="#0d1f2e" stroke="#ff7b7b" stroke-width="1.2"/>
+  <text x="80" y="528" fill="#ff9b9b" font-family="sans-serif" font-size="14" font-weight="700">踩过的三个坑</text>
+  <text x="80" y="552" fill="#cfe6f3" font-family="sans-serif" font-size="12">· 每个 stream 只放 1 个 kernel，测不出工作队列不足的假依赖——必须同 stream 内有多个 kernel 才会触发</text>
+  <text x="80" y="574" fill="#cfe6f3" font-family="sans-serif" font-size="12">· 给 NULL stream 的填充 kernel 传 0 字节 dynamic smem，而 kernel 里写 extern __shared__ → 越界崩溃</text>
+  <text x="80" y="596" fill="#cfe6f3" font-family="sans-serif" font-size="12">· 跨进程裸地址实验里 kernel 解引用「成功」了，差点误判成可以跨进程访问——必须再填一个不同 pattern 才能证伪</text>
+  <text x="80" y="618" fill="#cfe6f3" font-family="sans-serif" font-size="12">· cudaFuncSetAttribute 设的 carveout 是持久函数属性，会跨实验泄漏；每个配置都要显式设</text>
+</svg>

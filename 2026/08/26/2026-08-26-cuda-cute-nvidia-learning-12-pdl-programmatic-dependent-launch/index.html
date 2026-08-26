@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉 前面几章讲的都是 一个 kernel 内部 怎么快：tiling（ 04 ）、 架构指令演进（ 05 ）、软件流水线与延迟隐藏 （ 11 ）。 这一章讲 两个 kernel 之间 。当模型做 bs&amp;#x3D;1 decode，一个 step 要串行穿过几百个小 kernel 时，瓶颈不再是任何单个"><meta property="og:type" content="blog"><meta property="og:title" content="12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉"><meta property="og:url" content="https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉 前面几章讲的都是 一个 kernel 内部 怎么快：tiling（ 04 ）、 架构指令演进（ 05 ）、软件流水线与延迟隐藏 （ 11 ）。 这一章讲 两个 kernel 之间 。当模型做 bs&amp;#x3D;1 decode，一个 step 要串行穿过几百个小 kernel 时，瓶颈不再是任何单个"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-pdl-timeline.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-pdl-warp-specialization.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-pdl-sm-residency.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-pdl-overhead-layers.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-pdl-gemm-ar.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-pdl-phase-counter.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-pdl-cliff.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-pdl-trigger-position.svg"><meta property="article:published_time" content="2026-08-26T00:00:00.000Z"><meta property="article:modified_time" content="2026-08-26T14:17:26.963Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="CUDA"><meta property="article:tag" content="CuTe DSL"><meta property="article:tag" content="CUTLASS"><meta property="article:tag" content="GPU"><meta property="article:tag" content="Tensor Core"><meta property="article:tag" content="NVIDIA"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/cuda-cute-pdl-timeline.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/"},"headline":"12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉","image":[],"datePublished":"2026-08-26T00:00:00.000Z","dateModified":"2026-08-26T14:17:26.963Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉 前面几章讲的都是 一个 kernel 内部 怎么快：tiling（ 04 ）、 架构指令演进（ 05 ）、软件流水线与延迟隐藏 （ 11 ）。 这一章讲 两个 kernel 之间 。当模型做 bs&#x3D;1 decode，一个 step 要串行穿过几百个小 kernel 时，瓶颈不再是任何单个"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-08-26T00:00:00.000Z" title="8/26/2026, 12:00:00 AM">2026-08-26</time>发表</span><span class="level-item"><time dateTime="2026-08-26T14:17:26.963Z" title="8/26/2026, 2:17:26 PM">2026-08-26</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></span><span class="level-item">1 小时读完 (大约8935个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉</h1><div class="content"><h1 id="12-PDL（Programmatic-Dependent-Launch）：把-kernel-之间的缝隙压掉"><a href="#12-PDL（Programmatic-Dependent-Launch）：把-kernel-之间的缝隙压掉" class="headerlink" title="12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉"></a>12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉</h1><p>前面几章讲的都是<strong>一个 kernel 内部</strong>怎么快：tiling（<a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-04-gemm-mma-tensor-core/">04</a>）、<br>架构指令演进（<a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-05-ampere-hopper-blackwell/">05</a>）、软件流水线与延迟隐藏<br>（<a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/">11</a>）。</p>
+<p>这一章讲<strong>两个 kernel 之间</strong>。当模型做 bs=1 decode，一个 step 要串行穿过几百个小<br>kernel 时，瓶颈不再是任何单个 kernel 的 FLOPs，而是它们之间的空隙。</p>
+<blockquote>
+<p>PDL 管的是<strong>同一条 stream 上相邻的两个 kernel</strong>。往外还有两层并发：不同 stream 之间、<br>不同进程（context）之间——见 <a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/">第 13 章</a>。三层是正交的，<br>机制完全不同。</p>
+</blockquote>
+<p>起因是读 SGLang 的一篇文章《PDL 在 SGLang Kimi K3 中的应用》。K3 是 2.8T 参数的混合<br>注意力模型，decode 一个 token 要过 93 个注意力层（69 层 KDA + 24 层 MLA）和 92 层<br>latent-MoE，day-0 吞吐约 113 tok/s。文章按调用链梳理了 K3 里接入 PDL 的 kernel。</p>
+<p>本章做三件事：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">一、把文章里靠文字讲不清的概念补齐（prolog / warp specialization / SM 资源划分）</span><br><span class="line">二、拆解两条真实链路：gemm_ar 的 tail-hiding，spin_add3 的 phase counter</span><br><span class="line">三、写一个微基准，在 H20 和 GB200 上把文章的每条定性结论定量验证一遍</span><br></pre></td></tr></table></figure>
+
+<p><strong>所有性能数字都是在 <code>ecs</code>（8×H20，SM90）和 <code>target_p</code>（4×GB200，SM100）上实测的</strong>，<br>基准源码与复现命令见 §9。文章里的代码引用我尽量核实了出处，核实状态在 §11 单独说明。</p>
+<p>不熟悉微架构术语的读者可以先看 §2.2 的缩写表。</p>
+<hr>
+<h2 id="1-PDL-是什么"><a href="#1-PDL-是什么" class="headerlink" title="1. PDL 是什么"></a>1. PDL 是什么</h2><h3 id="1-1-默认串行的代价"><a href="#1-1-默认串行的代价" class="headerlink" title="1.1 默认串行的代价"></a>1.1 默认串行的代价</h3><p>同一条 stream 上的两个 kernel，默认是严格串行的：<strong>前一个 grid 的所有 CTA 退出、并且<br>完成全局内存可见性刷新（grid-ending memory barrier）之后</strong>，后一个 kernel 才开始 launch。</p>
+<p>但 consumer 的 launch 和一部分 prolog 根本不依赖 producer 的输出。Yifan Yang 在他的<br>PDL 博客里点出了这件事：「FC2 的 launch 开销和 prolog 并不<em>依赖</em>于 FC1 的结果，只有<br>FC2 的 mainloop 的执行才依赖于 FC1 的结果」。</p>
+<h3 id="1-2-两条-PTX-指令"><a href="#1-2-两条-PTX-指令" class="headerlink" title="1.2 两条 PTX 指令"></a>1.2 两条 PTX 指令</h3><p>Hopper（sm_90）及更新架构提供两条指令来表达这种「部分依赖」：</p>
+<table>
+<thead>
+<tr>
+<th>指令</th>
+<th>谁执行</th>
+<th>语义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>griddepcontrol.launch_dependents</code></td>
+<td>producer</td>
+<td>放行后继 kernel。<strong>trigger 之后不能再有 consumer 会读的写操作</strong></td>
+</tr>
+<tr>
+<td><code>griddepcontrol.wait</code></td>
+<td>consumer</td>
+<td>在第一次读 producer 输出前等待</td>
+</tr>
+</tbody></table>
+<p>host 侧还要通过 extensible launch API 打开这个行为：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">cudaLaunchConfig_t cfg = {};</span><br><span class="line">cfg.gridDim = grid; cfg.blockDim = blk;</span><br><span class="line">cfg.dynamicSmemBytes = smem; cfg.stream = st;</span><br><span class="line">cudaLaunchAttribute attr[<span class="number">1</span>];</span><br><span class="line">attr[<span class="number">0</span>].id = cudaLaunchAttributeProgrammaticStreamSerialization;</span><br><span class="line">attr[<span class="number">0</span>].val.programmaticStreamSerializationAllowed = <span class="number">1</span>;</span><br><span class="line">cfg.attrs = attr; cfg.numAttrs = <span class="number">1</span>;</span><br><span class="line"><span class="built_in">cudaLaunchKernelEx</span>(&amp;cfg, kernel, args...);</span><br></pre></td></tr></table></figure>
+
+<p><img src="/notes/imgs/cuda-cute-pdl-timeline.svg" alt="PDL 时间线"></p>
+<p><strong>wait 是一条屏障线</strong>，它把 consumer 的代码切成两段：wait 之前的可以和 producer 并行跑，<br>wait 之后的必须等 producer trigger。挪动这条线不改变 producer 何时 trigger，所以：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">T_consumer ≈ max(wait 前的工作, producer 剩余时间) + wait 后的工作</span><br></pre></td></tr></table></figure>
+
+<p>把一条指令从 wait 后搬到 wait 前，只要重叠窗口还没填满，这条指令的耗时就<strong>净归零</strong>。<br>这就是「wait 放得越后，可重叠的 prolog 越多」的机制——不是 wait 变短了，是重叠区变大了。</p>
+<h3 id="1-3-SGLang-的封装"><a href="#1-3-SGLang-的封装" class="headerlink" title="1.3 SGLang 的封装"></a>1.3 SGLang 的封装</h3><p>K3 对 PDL 的封装只有两个模板函数（<strong>已核实</strong>，见 §11）：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// python/sglang/kernels/jit/include/sgl_kernel/utils.cuh</span></span><br><span class="line"><span class="keyword">template</span> &lt;<span class="type">bool</span> kUsePDL&gt; <span class="function">SGL_DEVICE <span class="type">void</span> <span class="title">PDLWaitPrimary</span><span class="params">()</span> </span>{</span><br><span class="line"><span class="meta">#<span class="keyword">if</span> SGL_ARCH_HOPPER_OR_GREATER</span></span><br><span class="line">  <span class="function"><span class="keyword">if</span> <span class="title">constexpr</span> <span class="params">(kUsePDL)</span> <span class="keyword">asm</span> <span class="title">volatile</span><span class="params">(<span class="string">"griddepcontrol.wait;"</span> ::: <span class="string">"memory"</span>)</span></span>;</span><br><span class="line"><span class="meta">#<span class="keyword">endif</span></span></span><br><span class="line">}</span><br><span class="line"><span class="keyword">template</span> &lt;<span class="type">bool</span> kUsePDL&gt; <span class="function">SGL_DEVICE <span class="type">void</span> <span class="title">PDLTriggerSecondary</span><span class="params">()</span> </span>{</span><br><span class="line"><span class="meta">#<span class="keyword">if</span> SGL_ARCH_HOPPER_OR_GREATER</span></span><br><span class="line">  <span class="function"><span class="keyword">if</span> <span class="title">constexpr</span> <span class="params">(kUsePDL)</span> <span class="keyword">asm</span> <span class="title">volatile</span><span class="params">(<span class="string">"griddepcontrol.launch_dependents;"</span> :::)</span></span>;</span><br><span class="line"><span class="meta">#<span class="keyword">endif</span></span></span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+
+<p>注意一个细节：<code>wait</code> 带了 <code>::: "memory"</code> 的 clobber，<code>trigger</code> 没有。这个设计是对的，<br>但<strong>它防不住 §8.2 要讲的那个 ptxas 重排 bug</strong>——<code>"memory"</code> 约束的是 NVCC 生成 PTX 的阶段，<br>而那个 bug 发生在 ptxas 把 PTX 编译成 SASS 的阶段。源码级的 barrier 语义在这里保护不了你。</p>
+<p>命名用 primary/secondary 而不是 producer/consumer，很可能是为了避开 §2.3 会讲的术语碰撞。</p>
+<hr>
+<h2 id="2-概念补课"><a href="#2-概念补课" class="headerlink" title="2. 概念补课"></a>2. 概念补课</h2><h3 id="2-1-prolog-到底指什么"><a href="#2-1-prolog-到底指什么" class="headerlink" title="2.1 prolog 到底指什么"></a>2.1 prolog 到底指什么</h3><p><strong>prolog（前导段）= kernel 启动后、到第一次需要读 producer 输出之前的所有工作。</strong><br>对一个典型的 Hopper GEMM kernel，具体是：</p>
+<ul>
+<li>CTA 算自己的 tile 坐标，从 param space 读 kernel 参数</li>
+<li>申请 / 清零 shared memory，清零累加器寄存器</li>
+<li>初始化 mbarrier，warp specialization 分角色</li>
+<li><strong>发起不依赖前驱的访存</strong>：权重、bias、scale、routing table 的 HBM→smem 加载</li>
+</ul>
+<p>最后一条是 bs=1 场景下最值钱的。对 M=1 的 skinny GEMM（实际退化成 GEMV），权重加载<br>几乎就是整个 kernel 的时间，所以「权重能不能提前加载」直接决定收益。K3 的 <code>tiny_gemm</code><br>注释写的是 “Weight prefetch: address is input-independent, load before the PDL wait” ——<br>权重的地址只跟 layer id 有关，不依赖 producer 算出什么。</p>
+<h3 id="2-2-缩写表"><a href="#2-2-缩写表" class="headerlink" title="2.2 缩写表"></a>2.2 缩写表</h3><table>
+<thead>
+<tr>
+<th>缩写</th>
+<th>全称</th>
+<th>一句话</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>CTA</td>
+<td>Cooperative Thread Array</td>
+<td>即 CUDA 的 thread block，调度到 SM 的最小单位</td>
+</tr>
+<tr>
+<td>SM</td>
+<td>Streaming Multiprocessor</td>
+<td>GPU 的基本计算单元，H20 有 78 个，GB200 有 152 个</td>
+</tr>
+<tr>
+<td>warp</td>
+<td>—</td>
+<td>32 个线程，SIMT 锁步执行，硬件调度单位</td>
+</tr>
+<tr>
+<td>warpgroup</td>
+<td>—</td>
+<td>Hopper 引入，4 个连续 warp = 128 线程，<code>wgmma</code> 的操作粒度</td>
+</tr>
+<tr>
+<td>TMA</td>
+<td>Tensor Memory Accelerator</td>
+<td>Hopper 的专用拷贝硬件，一条指令描述整个多维 tile 的搬运</td>
+</tr>
+<tr>
+<td>mbarrier</td>
+<td>—</td>
+<td>shared memory 里的异步屏障对象，支持逐级（而非全 CTA）同步</td>
+</tr>
+<tr>
+<td>smem</td>
+<td>shared memory</td>
+<td>每 SM 一块，与 L1 共用同一块物理 SRAM</td>
+</tr>
+<tr>
+<td>carveout</td>
+<td>—</td>
+<td>L1 / smem 之间的容量切分比例</td>
+</tr>
+<tr>
+<td>PDL</td>
+<td>Programmatic Dependent Launch</td>
+<td>本章主题</td>
+</tr>
+</tbody></table>
+<h3 id="2-3-warp-specialization"><a href="#2-3-warp-specialization" class="headerlink" title="2.3 warp specialization"></a>2.3 warp specialization</h3><p><img src="/notes/imgs/cuda-cute-pdl-warp-specialization.svg" alt="warp specialization"></p>
+<p><strong>传统同构写法</strong>：CTA 里所有 warp 跑同一份代码——发起拷贝、<code>__syncthreads()</code>、做 MMA、<br>再 <code>__syncthreads()</code>。</p>
+<p><strong>warp specialization</strong>：同一个 CTA 里不同 warp 跑<strong>不同的代码路径</strong>：</p>
+<ul>
+<li><strong>producer warp</strong>（DMA warp / load warp）：只发访存，从不碰计算单元</li>
+<li><strong>consumer warpgroup</strong>（math warp）：只读 smem 做 tensor core 运算</li>
+</ul>
+<p>两者通过 shared memory 里的环形缓冲 + mbarrier 握手：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">smem: N 级环形缓冲，每级存一个 A-tile + B-tile</span><br><span class="line">      2N 个 mbarrier: full[i](数据到位) / empty[i](缓冲可复用)</span><br><span class="line"></span><br><span class="line">producer warp (1 warp，实际只有 1 个线程 elect 出来发指令):</span><br><span class="line">  for stage:</span><br><span class="line">      wait empty[stage%N]</span><br><span class="line">      tma_load(A → smem[stage%N], 完成时硬件自动 arrive full[stage%N])</span><br><span class="line">      tma_load(B → smem[stage%N], 同上)</span><br><span class="line">      ← 不等拷贝完成，立刻发下一级</span><br><span class="line"></span><br><span class="line">consumer warpgroup (4 warp):</span><br><span class="line">  for stage:</span><br><span class="line">      wait full[stage%N]</span><br><span class="line">      wgmma(smem[stage%N] → 累加器寄存器)</span><br><span class="line">      arrive empty[stage%N]</span><br></pre></td></tr></table></figure>
+
+<p>producer 领先 consumer N 级，HBM 延迟（H20 实测 675 cycle，GB200 826 cycle，见<br><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/">11</a> §1）被流水线深度吃掉。</p>
+<p><strong>为什么 Hopper 之后这套变成标配——三个动因：</strong></p>
+<ol>
+<li><strong>寄存器需求极不对称。</strong> math warp 需要巨量累加器寄存器，load warp 几乎不需要。而<br>CUDA 的寄存器分配是每线程统一的，同构 kernel 里所有 warp 拿一样的配额，按最大需求<br>分配 → occupancy 掉光。Hopper 加了 <code>setmaxnreg</code> PTX 指令，允许一个 warpgroup 动态<br>归还/索取寄存器：producer 缩到约 32 regs/thread，consumer 涨到约 240。<strong>这条指令<br>只有在 warp 分了角色之后才有意义。</strong></li>
+<li><strong>TMA 让「发访存」塌缩成单线程一条指令。</strong> TMA 之前需要很多线程各自算地址、发<br><code>cp.async</code>，那些指令要占 math warp 的发射槽。有了 TMA，访存自然独立成一个专职 warp。</li>
+<li><strong>消除全 CTA 屏障。</strong> <code>__syncthreads()</code> 让所有 warp 一起停。换成 mbarrier 后，<br>producer 和 consumer 只在具体某一级缓冲上同步，producer 可以一路跑在前面。</li>
+</ol>
+<blockquote>
+<p>⚠ <strong>术语碰撞</strong>：warp specialization 的 producer/consumer 是<strong>同一个 kernel 内、warp<br>之间</strong>的数据生产消费；PDL 的 producer/consumer 是<strong>kernel 与 kernel 之间</strong>的。两个<br>完全不同的轴，只是恰好用了同一组词。</p>
+<p>两者的接点：在 warp-specialized kernel 里，PDL 能重叠的 prolog 里最值钱的一块，正是<br>producer warp 发出的头几笔 TMA load。K3 的 <code>kda_decode_mtp</code>（CuTe-DSL 实现）「提前<br>发起状态 tile 的 TMA load」就是把它挪到了 <code>griddepcontrol.wait</code> 之前。</p>
+</blockquote>
+<p>Blackwell（SM100）把这套又深化了一层：<code>tcgen05</code> MMA + TMEM（Tensor Memory，独立于<br>寄存器的新存储层级），角色分得更细，还多出专门管 TMEM 分配/释放的 warp。</p>
+<hr>
+<h2 id="3-SM-资源是启动时静态切走的"><a href="#3-SM-资源是启动时静态切走的" class="headerlink" title="3. SM 资源是启动时静态切走的"></a>3. SM 资源是启动时静态切走的</h2><p>这是理解 PDL 为什么会有副作用的关键，也是最容易被 CPU 直觉误导的地方。</p>
+<p><img src="/notes/imgs/cuda-cute-pdl-sm-residency.svg" alt="SM 资源与共驻"></p>
+<h3 id="3-1-「阻塞」在-GPU-上不释放资源"><a href="#3-1-「阻塞」在-GPU-上不释放资源" class="headerlink" title="3.1 「阻塞」在 GPU 上不释放资源"></a>3.1 「阻塞」在 GPU 上不释放资源</h3><p>CPU 线程阻塞时，OS 把它换出，寄存器存到内存，核心让给别人。GPU 上完全不是这样。<br>CTA 一旦被调度到 SM 上：</p>
+<ul>
+<li>它的<strong>寄存器</strong>从 SM 的 register file 里静态切走一块</li>
+<li>它的 <strong>shared memory</strong> 从 SM 的 smem 容量里切走一块</li>
+<li>它占掉若干 <strong>warp slot</strong></li>
+</ul>
+<p>这些分配在 <strong>CTA 退出</strong>时才归还。CTA 不可抢占、不可迁移、不可换出。所以一个 CTA<br>在 <code>griddepcontrol.wait</code> 上 spin，和它在满负荷计算，<strong>占用的物理资源完全一样</strong>。</p>
+<p>H20 和 GB200 的静态资源相同（实测，见 <a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-07-blackwell-gb200-lab/">07</a>）：<br>每 SM 228KB 统一 L1/SMEM、65536 个 32-bit 寄存器（256KB）、2048 线程 / 64 warp slot。</p>
+<h3 id="3-2-共驻算术"><a href="#3-2-共驻算术" class="headerlink" title="3.2 共驻算术"></a>3.2 共驻算术</h3><p>于是「两个 kernel 能不能重叠」变成一个加法不等式：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">smem(producer 的 CTA) × n₁  +  smem(consumer 的 CTA) × n₂  ≤  SM 的 smem 容量</span><br></pre></td></tr></table></figure>
+
+<p>consumer 的 CTA 想上 SM，SM 必须有<strong>当前空闲</strong>的 smem 够它的<strong>全额</strong>请求，而不是<br>「producer 用完了的部分」。</p>
+<p>这直接解释了 K3 <code>gemm_ar</code> 里那个看起来很怪的 113KB：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">113KB × 2 = 226KB  ≤  228KB  ✓</span><br><span class="line">114KB × 2 = 228KB  ≈  刚好卡死（还要扣驱动保留量）✗</span><br></pre></td></tr></table></figure>
+
+<p><strong>113KB 就是「保证 2 CTA/SM」能取到的最大 smem。</strong></p>
+<h3 id="3-3-carveout：不只是容量，还是配置"><a href="#3-3-carveout：不只是容量，还是配置" class="headerlink" title="3.3 carveout：不只是容量，还是配置"></a>3.3 carveout：不只是容量，还是配置</h3><p>那 228KB 是 <strong>L1 cache 和 shared memory 共用的一块物理 SRAM</strong>，按离散档位切分<br>（SM90 的档位约为 0/8/16/32/64/100/132/164/196/228 KB）。</p>
+<p>请求 113KB 时，如果 carveout 偏向 L1，驱动只会挑「能装下 113KB 的最小档」= 132KB。<br>那 2×113 = 226 就放不下了。只有显式设 <code>cudaFuncAttributePreferredSharedMemoryCarveout = 100</code><br>把整块 SRAM 全要成 smem，才有 228KB 可用。</p>
+<p>这正是 <code>gemm_ar.cuh</code> 里那句注释的含义：默认 carveout 会<br>“blocks dual residency and with it the whole tail-hiding scheme”。</p>
+<p>§10.3 会给出这个开关的实测代价：**20.3% vs 7.4%**，三分之二的 PDL 收益系在一个 attribute 上。</p>
+<hr>
+<h2 id="4-PDL-是一笔资源交易"><a href="#4-PDL-是一笔资源交易" class="headerlink" title="4. PDL 是一笔资源交易"></a>4. PDL 是一笔资源交易</h2><p>搞清楚 §3 之后，「trigger 太早会怎样」就不需要猜了。</p>
+<p><strong>PDL 不是「提前 launch」。</strong> launch 本来就要发生，顺序也没变。PDL 改变的是<strong>硬件允许<br>后继 grid 开始执行的时刻</strong>——从「前驱所有 CTA 退出 + 全局内存可见性 flush 完成之后」，<br>提前到「前驱执行了 <code>launch_dependents</code> 之后」。CPU 侧 / CUDA Graph 侧的顺序完全不动。</p>
+<p>代价在于：<strong>被放行的 consumer CTA 一旦上了 SM，就会从 producer 手里切走资源。</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>净赚的条件</th>
+<th>净亏的条件</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>producer 的状态</td>
+<td>尾部阶段资源利用率低（等 peer 的 spin、membar、最后一波 CTA）</td>
+<td>还在算力饱和的 mainloop</td>
+</tr>
+<tr>
+<td>consumer 的 prolog</td>
+<td>延迟受限（发几笔 load 就等着），几乎不耗计算资源</td>
+<td>吞吐受限，且与 producer 争同一单元</td>
+</tr>
+<tr>
+<td>共驻</td>
+<td>smem/reg 预算够</td>
+<td>挤不进去——收益为零，甚至为负（§10.2）</td>
+</tr>
+</tbody></table>
+<p>所以 <strong>trigger 的位置就是这笔交易的调节旋钮</strong>：你在选择「producer 从哪一刻开始分享资源」。<br><code>gemm_ar</code> 选在 k-loop 结束（算力密集段刚完），<code>add3</code> 选在 kernel 入口（它本身是个轻量<br>elementwise kernel，没什么好保护的）——差异完全来自各自的资源画像。</p>
+<p>这也解释了原文那句很克制的话：「公开结果证明”融合 + PDL”有效，但还不能把收益全部归因<br>于 PDL」。这笔交易的盈亏是<strong>形状相关、机器相关</strong>的。§10.4 会实测出这条曲线的形状，<br>并给出它<strong>什么时候才有最优点</strong>。</p>
+<hr>
+<h2 id="5-CUDA-Graph-与-PDL：正交，收益叠加"><a href="#5-CUDA-Graph-与-PDL：正交，收益叠加" class="headerlink" title="5. CUDA Graph 与 PDL：正交，收益叠加"></a>5. CUDA Graph 与 PDL：正交，收益叠加</h2><p>一个常见疑问：CUDA Graph 不是已经解决 launch overhead 了吗？</p>
+<p><img src="/notes/imgs/cuda-cute-pdl-overhead-layers.svg" alt="开销分层"></p>
+<p>两者打的是完全不同的层：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">┌─ CPU 侧：Python/框架逻辑、参数打包、driver 调用 cuLaunchKernel</span><br><span class="line">│    → CUDA Graph 消掉这一层（整个 DAG 预先烘焙，一次提交）</span><br><span class="line">├─ GPU 侧：硬件 grid dispatch、CTA 分发</span><br><span class="line">│    → 固定成本，谁都消不掉</span><br><span class="line">└─ kernel 间串行化：前驱所有 CTA 退出 + grid-ending membar</span><br><span class="line">   + 后继的 launch 与 prolog 必须等这一切结束</span><br><span class="line">     → PDL 消掉这一层</span><br></pre></td></tr></table></figure>
+
+<p>Graph 保证「GPU 不会因为等 CPU 而挨饿」；PDL 保证「GPU 拿到活之后，相邻的活能叠着干」。<br><strong>开了 Graph 之后，剩下的可优化空间正好就是 PDL 的战场</strong>——反过来，如果不开 Graph，<br>bs=1 下 CPU 提交才是瓶颈，PDL 省的那点 GPU 侧 gap 根本看不出来。</p>
+<p>机制上，PDL 的 launch attribute 在 stream capture 时会被捕获进 graph node 的参数里，<br>回放时沿着 graph 的边生效。§10.1 有 2×2 的实测。</p>
+<blockquote>
+<p><strong>一个真实的坑</strong>：graph 只是把调用序列固化了，<strong>它不会帮你补上断掉的 PDL 链</strong>。<br>K3 里 <code>seq_lens.to(int32)</code> 这个每层触发一次的 dtype copy 不支持 PDL，作为一个 graph<br>node 插在链中间，前后的 PDL 关系就断了。因为它在 graph 里、在 Python 层又不显眼，<br>只能靠 <strong>trace 里重新出现的 launch gap</strong> 反推定位。</p>
+</blockquote>
+<hr>
+<h2 id="6-gemm-ar-的-tail-hiding"><a href="#6-gemm-ar-的-tail-hiding" class="headerlink" title="6. gemm_ar 的 tail-hiding"></a>6. gemm_ar 的 tail-hiding</h2><p>这是 K3 里最巧的一处设计。</p>
+<p><img src="/notes/imgs/cuda-cute-pdl-gemm-ar.svg" alt="gemm_ar tail hiding"></p>
+<h3 id="6-1-要解决的问题"><a href="#6-1-要解决的问题" class="headerlink" title="6.1 要解决的问题"></a>6.1 要解决的问题</h3><p>all-reduce 有一段<strong>不可压缩的死等</strong>——必须等最慢的 peer rank。这段时间本地什么都不干。<br>而它有多贵，中文版 day-0 文章里有一句很好的量化：</p>
+<blockquote>
+<p>All-reduce 是一个同步点，因此在那里节省一微秒，就会一比一地转化为 step 时间的缩短；<br>而位于另一个 stream 的重叠空隙中的 kernel，转化比例大约只有十分之一。</p>
+</blockquote>
+<p>93 层 attention，每层至少一次 AR。</p>
+<h3 id="6-2-结构"><a href="#6-2-结构" class="headerlink" title="6.2 结构"></a>6.2 结构</h3><p><code>gemm_ar</code> 把 o_proj GEMM 和 all-reduce 融进一个 kernel：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">① GEMM k-loop：算本 rank 的 o_proj 局部结果        ← 算力饱和</span><br><span class="line">② griddepcontrol.launch_dependents                ← trigger 就放在这</span><br><span class="line">③ boundary spin：自旋等所有 peer rank 发布分片      ← 纯等待，算力全闲</span><br><span class="line">④ multimem reduce：跨 rank 归约                    ← 网络/访存，算力仍闲</span><br><span class="line">⑤ 写回最终输出</span><br></pre></td></tr></table></figure>
+
+<p>关键在于 <strong>trigger 放在 ② 而不是 ⑤</strong>。后继 kernel（下一层的 GEMV）在 ② 就被放行，<br>它的整个 “feed”（权重 TMA 加载）在 ③④ 期间跑完。</p>
+<h3 id="6-3-为什么这个重叠几乎免费"><a href="#6-3-为什么这个重叠几乎免费" class="headerlink" title="6.3 为什么这个重叠几乎免费"></a>6.3 为什么这个重叠几乎免费</h3><p>③ 是<strong>网络延迟受限</strong>，④ 是<strong>跨 rank 访存受限</strong>，而下一个 GEMV 的权重加载是<strong>本地 HBM<br>带宽受限</strong>。三者用的是几乎不重叠的硬件资源——spin 不吃 HBM 带宽，GEMV 不吃网络。</p>
+<p>所以这不是「抢资源换收益」的那种权衡，而是接近免费的填充。对 bs=1 的 GEMV 来说，权重<br>加载几乎就是它的全部时间，等于<strong>下一个 kernel 被整个塞进了 AR 的等待窗口</strong>。</p>
+<p>§10.4 的实验 C 就是这个场景的抽象，实测确认：<strong>资源不冲突时，trigger 越早越好，单调。</strong></p>
+<h3 id="6-4-为什么必须「融合」"><a href="#6-4-为什么必须「融合」" class="headerlink" title="6.4 为什么必须「融合」"></a>6.4 为什么必须「融合」</h3><p>文件头注释里有一句 “an unfused cublas composite cannot cooperate across the boundary”。</p>
+<p>cuBLAS 的 GEMM kernel 是闭源二进制，你没法在它的 k-loop 结束处插一条 <code>launch_dependents</code>。<br>它的放行时刻最早也只能是整个 grid 结束。<strong>把 GEMM 和 AR 融进同一个 grid，才能拿到<br>「在 kernel 中段任意一条指令处放行」的能力。</strong>省一次 launch 只是附带的。</p>
+<h3 id="6-5-语义陷阱"><a href="#6-5-语义陷阱" class="headerlink" title="6.5 语义陷阱"></a>6.5 语义陷阱</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">PDLWaitPrimary — prior grid reached ITS trigger (k-loop end) — NOT done</span><br></pre></td></tr></table></figure>
+
+<p>后继 kernel 的 <code>wait</code> 返回，只意味着 gemm_ar <strong>执行到了第 ② 步</strong>，<strong>不意味着 ③④⑤<br>做完了、最终输出可读</strong>。所以后继 kernel 如果要读 gemm_ar 的最终输出，光靠 PDL wait 是<br>不够的。这就引出下一节。</p>
+<hr>
+<h2 id="7-spin-add3-的-phase-counter：正确性与调度解耦"><a href="#7-spin-add3-的-phase-counter：正确性与调度解耦" class="headerlink" title="7. spin_add3 的 phase counter：正确性与调度解耦"></a>7. spin_add3 的 phase counter：正确性与调度解耦</h2><p><code>gemm_ag.cuh</code> 里的消费侧 <code>spin_add3</code> 有一句很反直觉的注释：</p>
+<blockquote>
+<p>Deliberately NO PDLWaitPrimary: the dependency is carried through data</p>
+</blockquote>
+<p><img src="/notes/imgs/cuda-cute-pdl-phase-counter.svg" alt="phase counter"></p>
+<h3 id="7-1-为什么故意不用-PDL-wait"><a href="#7-1-为什么故意不用-PDL-wait" class="headerlink" title="7.1 为什么故意不用 PDL wait"></a>7.1 为什么故意不用 PDL wait</h3><p>PDL wait 给的保证是「前驱<strong>执行到了 trigger</strong>」，不是「前驱<strong>做完了</strong>」。而它的前驱<br>fused-norm AR 为了拿 tail-hiding 收益，<strong>必须</strong>在 push 完自己的分片后立刻 trigger。<br>所以 wait 返回的那一刻，AR 的最终输出根本还没写完。</p>
+<p>于是形成死结：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>trigger 早</th>
+<th>trigger 晚</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>tail-hiding 收益</td>
+<td>✅ 拿到</td>
+<td>❌ 全丢</td>
+</tr>
+<tr>
+<td>用 PDL wait 保证正确性</td>
+<td>❌ 读到脏数据</td>
+<td>✅ 安全</td>
+</tr>
+</tbody></table>
+<p><strong>只要把「能否开始」和「数据是否有效」都压在同一根 PDL 上，就必须二选一。</strong></p>
+<h3 id="7-2-naive-flag-为什么不行"><a href="#7-2-naive-flag-为什么不行" class="headerlink" title="7.2 naive flag 为什么不行"></a>7.2 naive flag 为什么不行</h3><figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// producer</span></span><br><span class="line">写 payload;  __threadfence();  flag = <span class="number">1</span>;</span><br><span class="line"><span class="comment">// consumer</span></span><br><span class="line"><span class="keyword">while</span> (flag != <span class="number">1</span>) {}  读 payload;</span><br></pre></td></tr></table></figure>
+
+<p>在 decode 循环里这个立刻崩，因为<strong>谁来把 flag 清零</strong>：</p>
+<ul>
+<li>让 consumer 清：第 N 层还没清完，第 N+1 层的 producer 已置 1 → 信号丢失</li>
+<li>不清：第 N+1 层一进来就看到上一轮残留的 <code>flag==1</code> → 读到上一层的旧数据</li>
+</ul>
+<p>这是经典 <strong>ABA 问题</strong>。而且清零本身要么多一个 kernel、要么多一次 memset——正是我们<br>在费力消除的那种 launch。</p>
+<h3 id="7-3-phase-counter：永不清零，只单调递增"><a href="#7-3-phase-counter：永不清零，只单调递增" class="headerlink" title="7.3 phase counter：永不清零，只单调递增"></a>7.3 phase counter：永不清零，只单调递增</h3><figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 每个 buffer slot 配一个 64-bit 计数器 seq，初始 0，全程不复位</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// producer，第 s 步</span></span><br><span class="line">   ... 写 payload ...</span><br><span class="line">   __threadfence();                       <span class="comment">// release：payload 必须先可见</span></span><br><span class="line">   <span class="keyword">if</span> (elected_thread) <span class="built_in">atomicExch</span>(seq, s + <span class="number">1</span>);</span><br><span class="line"></span><br><span class="line"><span class="comment">// consumer，第 s 步</span></span><br><span class="line">   <span class="keyword">if</span> (elected_thread)</span><br><span class="line">       <span class="keyword">while</span> (<span class="built_in">atomicAdd</span>(seq, <span class="number">0</span>) &lt; s + <span class="number">1</span>) { <span class="comment">/* spin */</span> }</span><br><span class="line">   __syncthreads();                       <span class="comment">// 广播给整个 CTA</span></span><br><span class="line">   __threadfence();                       <span class="comment">// acquire</span></span><br><span class="line">   ... 读 payload（须绕 L1：ld.<span class="keyword">volatile</span> / .acquire）...</span><br></pre></td></tr></table></figure>
+
+<p>计数器只增不减，所以不需要复位、不会 ABA、幂等可重放。落后的 consumer 看到 <code>seq</code> 比<br>预期更大也不会误判。</p>
+<h3 id="7-4-三个必须做对的细节"><a href="#7-4-三个必须做对的细节" class="headerlink" title="7.4 三个必须做对的细节"></a>7.4 三个必须做对的细节</h3><ol>
+<li><p><strong>producer 的 release 序。</strong> payload 的所有 store 必须<strong>先于</strong> seq 的 store 变得<br>全局可见。跨 GPU 时需要 system scope（<code>__threadfence_system</code> / <code>fence.release.sys</code>），<br>否则 consumer 看到 seq 更新却读到半写的 payload。</p>
+</li>
+<li><p><strong>consumer 的 acquire 序 + 绕过陈旧 L1。</strong> spin 之后的 payload load 不能命中 spin<br>之前缓存的旧行。<strong>这正是原文那个 <code>__ldg()</code> bug 的病根</strong>：<code>__ldg()</code> 生成<br><code>ld.global.nc</code>，<code>.nc</code> 的语义契约就是「这块数据在 kernel 生命周期内不会变」。用它读<br>一个正在被另一个 grid 并发写入的地址，是直接违约——编译器可以缓存它、ptxas 可以把它<br>提前调度、硬件可以预取它。</p>
+</li>
+<li><p><strong>只让一个线程 spin，再 <code>__syncthreads()</code>。</strong> 256 个线程一起轮询同一地址，请求会在<br>L2 的那个 sector 上排队，产生巨量无用流量，还会拖慢 producer 自己的访存。跨 rank<br>场景可以用 Hopper 的 <code>multimem.ld_reduce</code> 一条指令读所有 peer 的副本并归约。</p>
+</li>
+</ol>
+<h3 id="7-5-解耦之后"><a href="#7-5-解耦之后" class="headerlink" title="7.5 解耦之后"></a>7.5 解耦之后</h3><table>
+<thead>
+<tr>
+<th>问题</th>
+<th>机制</th>
+<th>搞错的后果</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>我可以开始占 SM 了吗？</td>
+<td>PDL <code>griddepcontrol</code></td>
+<td><strong>只是慢</strong>（白占资源 / 少重叠）</td>
+</tr>
+<tr>
+<td>这块数据可以读了吗？</td>
+<td>phase counter spin</td>
+<td><strong>竞态</strong>，读脏数据，精度错</td>
+</tr>
+</tbody></table>
+<p>拆开之后，trigger 就可以放得任意早——因为它已经<strong>不可能破坏正确性了</strong>。这才是敢在<br><code>gemm_ar</code> 里把 trigger 塞到 k-loop 中间的底气。</p>
+<h3 id="7-6-一个隐含前提（本文推论，非原文）"><a href="#7-6-一个隐含前提（本文推论，非原文）" class="headerlink" title="7.6 一个隐含前提（本文推论，非原文）"></a>7.6 一个隐含前提（本文推论，非原文）</h3><p>phase-counter spin 的 CTA <strong>占着 SM 在等</strong>。这引出一个正确性（而非性能）问题：<br><strong>如果 consumer 占满了 SM，导致 producer 剩下的 CTA 排不进来，就会死锁</strong>——CUDA 不保证<br>不同 grid 的 co-resident CTA 都能前进。</p>
+<p>推论：<strong>这类 spin 协议要求 grid ≤ SM 数（单波）</strong>，producer 的所有 CTA 必须在第一波<br>就全部驻留。bs=1 decode 天然满足（grid 只有几十个 CTA），但这套写法<strong>不能</strong>照搬到<br>prefill 那种 grid 远大于 SM 数的场景。</p>
+<hr>
+<h2 id="8-实现中的三类问题"><a href="#8-实现中的三类问题" class="headerlink" title="8. 实现中的三类问题"></a>8. 实现中的三类问题</h2><h3 id="8-1-trigger-before-store-竞态"><a href="#8-1-trigger-before-store-竞态" class="headerlink" title="8.1 trigger-before-store 竞态"></a>8.1 trigger-before-store 竞态</h3><p>旧版 <code>concat_mla_absorb_q</code> 在读完输入、写回输出之前执行 trigger。后继 fmha 尚未启用<br>PDL 时，提前 trigger 没有可见影响；fmha 设置 <code>enable_pdl</code> 后就暴露了——consumer 可能在<br>concat 写回完成前继续执行，因为它的 wait 对应 concat 的 <strong>trigger</strong>，而不是 concat 的<br><strong>完成</strong>。</p>
+<p><code>route_radix</code>（选出 top-k 后、renorm 写回前 trigger）和<br><code>situ_and_mul_masked_post_quant</code> 也出现过同类问题。修法是把 trigger 移到全部写回之后。</p>
+<p><strong>提前 trigger 前必须确认：之后不再有 consumer 会读取的写操作。</strong></p>
+<h3 id="8-2-ptxas-把-load-调度到-wait-之前"><a href="#8-2-ptxas-把-load-调度到-wait-之前" class="headerlink" title="8.2 ptxas 把 load 调度到 wait 之前"></a>8.2 ptxas 把 load 调度到 wait 之前</h3><p>《PDL 遇上 <code>__ldg()</code>：Bug 还是 Feature？》记录了一个 B300 / CUDA 13.2 环境的问题：<br>PDL consumer 在源码和 PTX 中都先执行 <code>griddepcontrol.wait</code> 再用 <code>ld.global.nc</code> 读<br>producer 输出，但 ptxas 生成 SASS 时可能把该 load 调度到 wait 之前。</p>
+<p>如 §1.3 所述，<code>asm volatile(... ::: "memory")</code> 挡不住这个——它约束的是 PTX 生成阶段。<br><strong>对影响正确性的 kernel，需要检查 SASS，确认相关 load 没有越过 <code>griddepcontrol.wait</code>。</strong></p>
+<h3 id="8-3-profiler-里的-kernel-duration-失真"><a href="#8-3-profiler-里的-kernel-duration-失真" class="headerlink" title="8.3 profiler 里的 kernel duration 失真"></a>8.3 profiler 里的 kernel duration 失真</h3><p>启用 PDL 后，torch profiler 和 Nsight Systems 里的 per-kernel duration 不再等同于<br>kernel 独占执行时间：后继 kernel 从被放行时开始计时，其中包含停在 wait 上的时间。</p>
+<p>§10.1 的实测直接印证了这点：PDL 开关两种情况下 <code>prod_ns</code> 都是 11048ns，因为时间戳记在<br><code>griddepcontrol.wait</code> 之前。</p>
+<p><strong>性能判断应以 e2e ITL（或 tok/s）和 NCU cycle 计数为准；trace 里的 duration 更适合用来<br>检查调用链是否连续（有没有负 gap、有没有意外断链）。</strong></p>
+<hr>
+<h2 id="9-微基准设计"><a href="#9-微基准设计" class="headerlink" title="9. 微基准设计"></a>9. 微基准设计</h2><p>源码：<code>ecs:~/nvfix/pdl_probe.cu</code>，<code>target_p:/tmp/pdl_probe.cu</code>（同一份）。</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># H20 (SM90) —— 注意 PATH 上的 nvcc 是 12.0，要显式用 12.8</span></span><br><span class="line">ssh ecs &amp;&amp; <span class="built_in">cd</span> ~/nvfix</span><br><span class="line">/usr/local/cuda/bin/nvcc -O3 -<span class="built_in">arch</span>=sm_90 -o pdl_probe pdl_probe.cu</span><br><span class="line">LD_LIBRARY_PATH=<span class="variable">$HOME</span>/nvfix DEV=0 ./pdl_probe</span><br><span class="line"></span><br><span class="line"><span class="comment"># GB200 (SM100)</span></span><br><span class="line">ssh target_p &amp;&amp; <span class="built_in">cd</span> /tmp</span><br><span class="line">/usr/local/cuda/bin/nvcc -O3 -<span class="built_in">arch</span>=sm_100 -o pdl_probe pdl_probe.cu</span><br><span class="line">DEV=0 ./pdl_probe</span><br><span class="line"></span><br><span class="line"><span class="comment"># 可调：MAIN TAIL PROLOG PFMA PAIRS REPS BLK DEV</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="9-1-构造"><a href="#9-1-构造" class="headerlink" title="9.1 构造"></a>9.1 构造</h3><p>64 对 producer→consumer 串成链（模拟 layer stack，第 i 对读第 i-1 对的输出），<br><code>grid = SM 数 × 256 线程</code>，即每 kernel 1 CTA/SM——bs=1 decode 的形态。</p>
+<ul>
+<li><strong>producer</strong>：700 × 8 条<strong>独立</strong> FMA 链（算力饱和）+ 6000 cycle 尾部 spin<br>（模拟 <code>gemm_ar</code> 的 boundary spin：占时间但不吃 HBM / 不吃算力）</li>
+<li><strong>consumer</strong>：prolog 流式读 N MB 独立「权重」（与 producer 无关），然后 <code>wait</code>，<br>再读 producer 输出</li>
+</ul>
+<p>六组实验：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A</td>
+<td>PDL × CUDA Graph 的 2×2</td>
+</tr>
+<tr>
+<td>A2</td>
+<td>prolog 大小扫描</td>
+</tr>
+<tr>
+<td>B</td>
+<td>consumer smem 扫描，找共驻悬崖</td>
+</tr>
+<tr>
+<td>B2</td>
+<td>carveout（含 producer/consumer 不一致的 mismatch）</td>
+</tr>
+<tr>
+<td>C</td>
+<td>trigger 位置扫描，prolog 为 HBM 流式读</td>
+</tr>
+<tr>
+<td>C2</td>
+<td>trigger 位置扫描，prolog 为 FP32 FMA</td>
+</tr>
+</tbody></table>
+<h3 id="9-2-两个必踩的坑（都实际踩过并修）"><a href="#9-2-两个必踩的坑（都实际踩过并修）" class="headerlink" title="9.2 两个必踩的坑（都实际踩过并修）"></a>9.2 两个必踩的坑（都实际踩过并修）</h3><p><strong>坑 1：trigger 不能放在热循环里的 <code>if</code> 后面。</strong></p>
+<p>第一版写成：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; iters; ++i) {</span><br><span class="line">  acc = <span class="built_in">fmaf</span>(acc, x, c);</span><br><span class="line">  <span class="keyword">if</span> (i + <span class="number">1</span> == trig_at) <span class="built_in">pdl_trigger</span>&lt;kPDL&gt;();   <span class="comment">// ← 灾难</span></span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+
+<p><code>asm volatile</code> 在循环体里会成为<strong>每次迭代的调度屏障</strong>，并阻止展开；而 <code>kPDL=false</code><br>时 <code>pdl_trigger</code> 编译成空，整个分支被 DCE 掉。<strong>两个变体不再是同一个程序</strong>，测出来<br>「PDL 慢 3.4 倍」的假结果。</p>
+<p>正确做法是把 mainloop <strong>拆成两段</strong>，trigger 放中间，位置做成运行时参数：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; it_pre; ++i)  { <span class="built_in">FMA8</span>(a, x) }</span><br><span class="line"><span class="built_in">pdl_trigger</span>&lt;kPDL&gt;();                        <span class="comment">// 无分支</span></span><br><span class="line"><span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; it_post; ++i) { <span class="built_in">FMA8</span>(a, x) }</span><br></pre></td></tr></table></figure>
+
+<p><strong>坑 2：mainloop 必须是吞吐受限，不能是依赖链。</strong></p>
+<p>单条依赖 FMA 链是延迟受限的，CUDA core 大量空闲，consumer 进来也抢不到东西，实验 C2<br>测不出任何争用。必须用 8 条独立链把 FP32 pipe 打满。</p>
+<p>另外两个小坑：</p>
+<ul>
+<li><code>cudaFuncSetAttribute</code> 设的 carveout 是<strong>持久函数属性</strong>，会跨实验泄漏。第一版里<br>实验 B2 的 MISMATCH 配置泄漏进了实验 C，同样参数下 A 测 12914ns、C 测 16070ns。<br>每个配置都要显式设。</li>
+<li>跨 kernel 比时间戳**必须用 <code>%globaltimer</code>**（全局 ns 计数器）。<code>clock64()</code> 是 per-SM<br>的，不同 SM、不同 kernel 之间不可比。<code>clock64()</code> 只能用于 CTA 内的时长测量（如尾部 spin）。</li>
+</ul>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">__device__ __forceinline__ <span class="type">unsigned</span> <span class="type">long</span> <span class="type">long</span> <span class="title">gtime</span><span class="params">()</span> </span>{</span><br><span class="line">  <span class="type">unsigned</span> <span class="type">long</span> <span class="type">long</span> t;</span><br><span class="line">  <span class="function"><span class="keyword">asm</span> <span class="title">volatile</span><span class="params">(<span class="string">"mov.u64 %0, %%globaltimer;"</span> : <span class="string">"=l"</span>(t))</span></span>;</span><br><span class="line">  <span class="keyword">return</span> t;</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="10-实测结果"><a href="#10-实测结果" class="headerlink" title="10. 实测结果"></a>10. 实测结果</h2><p>环境：<code>ecs</code> 8×H20（78 SM @ 1.98GHz，CUDA 12.8），<code>target_p</code> 4×GB200（152 SM @ 2.06GHz，<br>CUDA 13.2，aarch64）。两卡每 SM 均为 228KB smem。</p>
+<h3 id="10-1-PDL-×-CUDA-Graph：正交叠加"><a href="#10-1-PDL-×-CUDA-Graph：正交叠加" class="headerlink" title="10.1 PDL × CUDA Graph：正交叠加"></a>10.1 PDL × CUDA Graph：正交叠加</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">                        H20                      GB200</span><br><span class="line">graph off, pdl off    20066.5 ns/pair          16782.5</span><br><span class="line">graph off, pdl on     14850.5                  12336.5</span><br><span class="line">graph on,  pdl off    18231.0                  15734.5</span><br><span class="line">graph on,  pdl on     13801.5                  11920.5</span><br><span class="line">--------------------------------------------------------</span><br><span class="line">Graph 单独              -9.1%                    -6.2%</span><br><span class="line">PDL（在 Graph 之上）    -24.3%                   -24.2%</span><br><span class="line">两者合计               -31.2%                   -29.0%</span><br><span class="line">gap_ns              +1242 → -2722            +1095 → -2826</span><br></pre></td></tr></table></figure>
+
+<p><strong>结论 1：两者不冲突，收益叠加。</strong> 在 Graph 之上 PDL 还能再拿 24%。</p>
+<p><strong>结论 2：负 launch gap 真实存在。</strong> <code>%globaltimer</code> 测得 consumer 的 grid 确实在<br>producer 结束前约 2.7μs 就开始执行。这在没有 PDL 时不可能出现。</p>
+<p><strong>结论 3：共驻成立时，PDL 收益跨两代架构几乎相同</strong>（24.3% vs 24.2%）。</p>
+<h3 id="10-2-重叠窗口的上限-producer-的尾部长度"><a href="#10-2-重叠窗口的上限-producer-的尾部长度" class="headerlink" title="10.2 重叠窗口的上限 = producer 的尾部长度"></a>10.2 重叠窗口的上限 = producer 的尾部长度</h3><p>H20，扫 prolog 大小：</p>
+<table>
+<thead>
+<tr>
+<th>prolog</th>
+<th>pdl_off</th>
+<th>pdl_on</th>
+<th>gain</th>
+<th>gap_ns</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2.4 MB</td>
+<td>14782.0</td>
+<td>12537.5</td>
+<td>15.2%</td>
+<td>-2702</td>
+</tr>
+<tr>
+<td>4.9 MB</td>
+<td>15485.5</td>
+<td>12565.5</td>
+<td>18.9%</td>
+<td>-2713</td>
+</tr>
+<tr>
+<td>9.8 MB</td>
+<td>16561.5</td>
+<td>12412.5</td>
+<td><strong>25.1%</strong></td>
+<td>-2895</td>
+</tr>
+<tr>
+<td>14.6 MB</td>
+<td>17946.5</td>
+<td>14087.5</td>
+<td>21.5%</td>
+<td>-3132</td>
+</tr>
+<tr>
+<td>19.5 MB</td>
+<td>19357.5</td>
+<td>15450.0</td>
+<td>20.2%</td>
+<td>-3019</td>
+</tr>
+<tr>
+<td>29.2 MB</td>
+<td>22191.0</td>
+<td>20275.5</td>
+<td>8.6%</td>
+<td>-3956</td>
+</tr>
+</tbody></table>
+<p>收益有峰，不是越预取越好。尾部 spin = 6000 cycle / 1.98GHz = <strong>3.03μs</strong>，而 <code>gap_ns</code><br>就饱和在 −2.7 ~ −3.9μs ≈ 尾部长度。</p>
+<p><strong>重叠窗口由 producer 的尾部有多长决定，prolog 超出窗口的部分一点也藏不住。</strong> 这给<br>原文「不能把每个站点节省的时间简单相加作为 e2e 收益」提供了机制。</p>
+<h3 id="10-3-共驻悬崖"><a href="#10-3-共驻悬崖" class="headerlink" title="10.3 共驻悬崖"></a>10.3 共驻悬崖</h3><p><img src="/notes/imgs/cuda-cute-pdl-cliff.svg" alt="共驻悬崖"></p>
+<p>producer smem 固定 100KB，扫 consumer smem（两卡 carveout 均为 100）：</p>
+<table>
+<thead>
+<tr>
+<th>cons smem</th>
+<th>H20 gain</th>
+<th>H20 gap_ns</th>
+<th>GB200 gain</th>
+<th>GB200 gap_ns</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>8 KB</td>
+<td>24.6%</td>
+<td>-2770</td>
+<td>24.3%</td>
+<td>-2744</td>
+</tr>
+<tr>
+<td>96 KB</td>
+<td>21.0%</td>
+<td>-3212</td>
+<td>24.3%</td>
+<td>-2797</td>
+</tr>
+<tr>
+<td>113 KB</td>
+<td>20.4%</td>
+<td>-3149</td>
+<td>24.3%</td>
+<td>-2809</td>
+</tr>
+<tr>
+<td><strong>120 KB</strong></td>
+<td>23.1%</td>
+<td>-3034</td>
+<td>24.3%</td>
+<td>-2795</td>
+</tr>
+<tr>
+<td><strong>128 KB</strong></td>
+<td><strong>6.8%</strong></td>
+<td>-72</td>
+<td><strong>−15.5%</strong></td>
+<td>-3647</td>
+</tr>
+<tr>
+<td>132 KB</td>
+<td>6.9%</td>
+<td>+109</td>
+<td>−14.0%</td>
+<td>-3869</td>
+</tr>
+<tr>
+<td>200 KB</td>
+<td>6.4%</td>
+<td>+9</td>
+<td>−8.9%</td>
+<td>-3405</td>
+</tr>
+</tbody></table>
+<p><strong>悬崖在 120→128 KB 之间</strong>，与 <code>100 + smem_c ≤ 228KB</code> 的预测吻合（128 时 100+128=228，<br>刚好放不下，还要扣驱动保留量）。<strong>悬崖位置两卡相同。</strong></p>
+<p>三个发现：</p>
+<p><strong>(a) <code>cudaOccupancyMaxActiveBlocksPerMultiprocessor</code> 是错的预测器。</strong> 它在 120KB 就<br>报 <code>occ_cons = 1</code>，但那一行重叠还好得很（23.1%）。因为这个 API 回答的是「<strong>同一个</strong><br>kernel 能驻留几个 CTA」，而 PDL 需要的是「<strong>一个 producer CTA + 一个 consumer CTA</strong><br>能否共驻」。<strong>正确判据是两者 smem 之和</strong>，没有现成 API，得自己算。</p>
+<p><strong>(b) 共驻失效不等于 PDL 归零。</strong> H20 上还剩约 6.5%——那是 launch/dispatch 和<br>grid-ending membar 的重叠：即使 CTA 挤不进同一个 SM，PDL 仍让后继的启动流程与前驱的<br>排空重叠。所以 PDL 不是二值的，但<strong>大头（prolog 隐藏）必须靠共驻</strong>。</p>
+<p><strong>(c) 两卡失效后的行为相反——GB200 会变成净亏。</strong></p>
+<p>H20 是优雅降级到 +6.8%，GB200 是净亏 −15.5%，而且 <code>ovlp</code>（consumer 观测到 producer<br>仍驻留的比例）从 3% 跳到 57%——<strong>重叠不是消失了，而是发生了却有害</strong>。</p>
+<p>假设：过悬崖后 consumer 的 CTA 只能随 producer CTA 退出而<strong>涓流填入</strong>，而 GB200 的<br>7138 GB/s 需要极高的访存并发才能打满，涓流式的 grid 打不满带宽，prolog 反而比作为一个<br>完整 grid 一次性突发要慢。</p>
+<p>可验证的预言：<strong>惩罚应随 prolog 字节数增长，prolog 很小时消失。</strong> 固定<br><code>cons_smem = 128KB</code> 扫 prolog：</p>
+<table>
+<thead>
+<tr>
+<th>prolog</th>
+<th>H20 gain / gap_ns</th>
+<th>GB200 gain / gap_ns</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2.4 MB</td>
+<td>+9.3% / +171</td>
+<td>+7.8% / -204</td>
+</tr>
+<tr>
+<td>4.8 MB</td>
+<td>+9.2% / +169</td>
+<td>+6.3% / -450</td>
+</tr>
+<tr>
+<td>9.5 MB</td>
+<td>+8.7% / +194</td>
+<td><strong>−9.6%</strong> / -2948</td>
+</tr>
+<tr>
+<td>19 MB</td>
+<td>+8.1% / +156</td>
+<td><strong>−9.1%</strong> / -2746</td>
+</tr>
+<tr>
+<td>28.5 MB</td>
+<td>+6.6% / -41</td>
+<td><strong>−14.2%</strong> / -4072</td>
+</tr>
+<tr>
+<td>57 MB</td>
+<td>−3.3% / -1435</td>
+<td><strong>−15.4%</strong> / -4052</td>
+</tr>
+</tbody></table>
+<p><strong>预言成立，而且两台机器共享同一条判据：过悬崖之后，<code>gap_ns</code> 一旦明显转负，<code>gain</code><br>就转负。</strong> H20 过悬崖时基本拒绝重叠（gap ≈ 0）所以优雅降级，只有 prolog 大到 57MB 才<br>开始漏一点重叠进来并随之转负；GB200 在 prolog 才 9.5MB 时就积极回填空出的 SM，于是<br>立刻退化。同一个机制，触发阈值差一个数量级。</p>
+<blockquote>
+<p><strong>实践含义</strong>：在 Blackwell 上把 smem/carveout 预算搞错，<strong>不只是丢掉 PDL 收益，而是<br>比不用 PDL 更差</strong>。K3 跑在 Blackwell 上，所以 <code>gemm_ar</code> 那套 113KB + 100% carveout<br>的纪律不是「尽量满足的优化建议」，是硬约束。</p>
+</blockquote>
+<h3 id="10-4-carveout"><a href="#10-4-carveout" class="headerlink" title="10.4 carveout"></a>10.4 carveout</h3><p>113KB + 113KB = 226KB，需要整块 228KB 池：</p>
+<table>
+<thead>
+<tr>
+<th>carveout (prod/cons)</th>
+<th>occ_cons</th>
+<th>H20 gain</th>
+<th>GB200 gain</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>100 / 100（都要 smem）</td>
+<td>2</td>
+<td><strong>20.3%</strong></td>
+<td><strong>24.3%</strong></td>
+</tr>
+<tr>
+<td>0 / 0（都偏 L1）</td>
+<td>1</td>
+<td>7.4%</td>
+<td>7.5%</td>
+</tr>
+<tr>
+<td>100 / 0（<strong>mismatch</strong>）</td>
+<td>1</td>
+<td>6.9%</td>
+<td><strong>−13.5%</strong></td>
+</tr>
+</tbody></table>
+<p>前两行定量复现了原文那句 “blocks dual residency and with it the whole tail-hiding<br>scheme”：一个 attribute 决定 20.3% 还是 7.4%。</p>
+<p><strong>第三行是原文没测的</strong>：producer 要 100% smem、consumer 偏 L1，<strong>即使容量算得过来也<br>一样死</strong>——两个 kernel 需要不同的 L1/smem 硬件配置，SM 无法同时满足，必须排空重配。</p>
+<p>而且在 GB200 上 <strong>mismatch 是三者里最差的</strong>（−13.5%），比「两边都偏 L1」还差 21 个<br>百分点。因为「都偏 L1」是干脆不重叠，而 mismatch 会造成 §10.3 那种最坏的涓流式部分重叠。<br>这条 H20 上看不出来（6.9% vs 7.4%，差别在噪声里）。</p>
+<p><strong>推论：PDL 链上相邻 kernel 的 carveout 必须一致</strong>——这比「各自 smem 够小」是更强的约束。</p>
+<h3 id="10-5-trigger-位置：什么时候才有最优点"><a href="#10-5-trigger-位置：什么时候才有最优点" class="headerlink" title="10.5 trigger 位置：什么时候才有最优点"></a>10.5 trigger 位置：什么时候才有最优点</h3><p><img src="/notes/imgs/cuda-cute-pdl-trigger-position.svg" alt="trigger 位置"></p>
+<p>两组对照，唯一变量是 consumer 的 prolog 用什么资源：</p>
+<p><strong>C：prolog = HBM 流式读</strong>（与 producer 的 FP32 mainloop 资源不重叠）</p>
+<table>
+<thead>
+<tr>
+<th>trig@</th>
+<th>H20 gain</th>
+<th>GB200 gain</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0%</td>
+<td>28.2%</td>
+<td>20.5%</td>
+</tr>
+<tr>
+<td>25%</td>
+<td>28.8%</td>
+<td>20.7%</td>
+</tr>
+<tr>
+<td>50%</td>
+<td>29.5%</td>
+<td>22.0%</td>
+</tr>
+<tr>
+<td>75%</td>
+<td>26.2%</td>
+<td>23.4%</td>
+</tr>
+<tr>
+<td>100%</td>
+<td>20.5%</td>
+<td>24.3%</td>
+</tr>
+</tbody></table>
+<p>→ <strong>越早越好，基本单调</strong>。producer 自身耗时几乎不变。没有「太早反而亏」。</p>
+<p><strong>C2：prolog = FP32 FMA</strong>（和 producer 抢同一批 CUDA core）</p>
+<table>
+<thead>
+<tr>
+<th>trig@</th>
+<th>H20 gain</th>
+<th>GB200 gain</th>
+<th>GB200 prod_ns</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0%</td>
+<td>19.3%</td>
+<td>16.6%</td>
+<td>13163</td>
+</tr>
+<tr>
+<td>25%</td>
+<td>23.0%</td>
+<td>20.8%</td>
+<td>12460</td>
+</tr>
+<tr>
+<td>50%</td>
+<td>25.8%</td>
+<td>24.4%</td>
+<td>11854</td>
+</tr>
+<tr>
+<td><strong>75%</strong></td>
+<td><strong>26.8%</strong></td>
+<td><strong>27.4%</strong></td>
+<td>11180</td>
+</tr>
+<tr>
+<td>100%</td>
+<td>23.7%</td>
+<td>24.3%</td>
+<td>10579</td>
+</tr>
+</tbody></table>
+<p>→ <strong>出现最优点（75%），两端都差</strong>。而且 producer 自己的耗时从 10.6μs 涨到 13.2μs<br>（GB200 **+24%**，H20 **+21%**）——这就是「与 FC1 争用执行资源」被量化出来的样子。</p>
+<p><strong>结论：原文图 2 的「太早反而亏」是有前提的，前提是 producer 和 consumer 的 prolog<br>争同一个硬件单元。</strong></p>
+<p>如果像 <code>gemm_ar</code> 那样，producer 尾部在等网络（不吃算力也不吃 HBM）、consumer prolog<br>在搬 HBM 权重，那就落在 C 这条曲线上——<strong>越早越好，几乎免费</strong>。所以 <code>gemm_ar</code> 把<br>trigger 放在 k-loop 结束不是折中，是几乎最优：它精确避开了唯一会争用的那一段。</p>
+<p>这也解释了为什么 <code>add3</code> 敢在 kernel 入口就 trigger（注释：Trigger early, so that the<br>next kernel gets a chance to prefetch）——它是个轻量 elementwise kernel，没有饱和任何<br>单元，没什么好保护的。</p>
+<h3 id="10-6-基准的局限"><a href="#10-6-基准的局限" class="headerlink" title="10.6 基准的局限"></a>10.6 基准的局限</h3><p><code>grid = SM 数</code>、每 CTA 工作量固定，所以 <strong>tail/prolog 的比例天生与机器无关</strong>，收益由<br>这个比例决定，两卡自然一样。</p>
+<p>这意味着本基准<strong>测不出</strong>「GB200 上非 GEMM 算子不变快、占比反而上升」那个效应（见<br><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/">11</a> 与 <a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-07-blackwell-gb200-lab/">07</a> 的 SM 单元吞吐<br>对比：TC/FP32 吞吐比从 3.9× 拉到 31×，而 FP32 与 SMEM 吞吐两卡持平）。要测那个，得<br>固定<strong>绝对</strong>问题规模而不是按 SM 数缩放。</p>
+<p>事前预测「GB200 相对收益更大」——<strong>实测证伪，两卡相同</strong>。原因就是上面这个构造上的缺陷。</p>
+<hr>
+<h2 id="11-引用与核实状态"><a href="#11-引用与核实状态" class="headerlink" title="11. 引用与核实状态"></a>11. 引用与核实状态</h2><p>诚实标注哪些核实过、哪些是转述：</p>
+<table>
+<thead>
+<tr>
+<th>内容</th>
+<th>状态</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>utils.cuh</code> 的 <code>PDLWaitPrimary</code> / <code>PDLTriggerSecondary</code></td>
+<td>✅ <strong>已核实</strong>：<code>python/sglang/kernels/jit/include/sgl_kernel/utils.cuh</code> 在 main 分支真实存在，代码与 §1.3 所引一致（真实代码用 <code>SGL_DEVICE</code> / <code>SGL_ARCH_HOPPER_OR_GREATER</code>；<code>wait</code> 带 <code>::: "memory"</code>、<code>trigger</code> 不带——这个细节是本文的补充观察）</td>
+</tr>
+<tr>
+<td><code>elementwise/add3.cuh</code> 的 <code>prefetch_bc</code></td>
+<td>⚠ <strong>未核实</strong>：按多种路径均 404，最可能是 PR #32890 尚未合入 main。§7 之外提到的该段代码为原文引用</td>
+</tr>
+<tr>
+<td><code>kimi_k3/comm/{gemm_ar,gemm_ag,ar_fusion}.cuh</code></td>
+<td>⚠ <strong>未核实</strong>：同上。§6、§7 的注释引文来自原文</td>
+</tr>
+<tr>
+<td>§6、§7 的机制推理</td>
+<td>本文基于引用注释的重建，逻辑自洽但未对源码验证</td>
+</tr>
+<tr>
+<td>§7.6 的死锁/单波推论</td>
+<td>本文推论，原文未提</td>
+</tr>
+<tr>
+<td>§10 全部性能数字</td>
+<td>✅ <strong>本文实测</strong>，<code>pdl_probe.cu</code> 可复现</td>
+</tr>
+</tbody></table>
+<p>参考资料：</p>
+<ul>
+<li>《PDL 在 SGLang Kimi K3 中的应用》 <a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/2068313701942293136">https://zhuanlan.zhihu.com/p/2068313701942293136</a></li>
+<li>SGLang PR #32541（K3 Day-0 支持）<a target="_blank" rel="noopener" href="https://github.com/sgl-project/sglang/pull/32541">https://github.com/sgl-project/sglang/pull/32541</a></li>
+<li>SGLang PR #32890（独立 K3 kernel 导出）<a target="_blank" rel="noopener" href="https://github.com/sgl-project/sglang/pull/32890">https://github.com/sgl-project/sglang/pull/32890</a></li>
+<li>Yifan Yang《使用 Programmatic Dependent Launch（PDL）降低端到端延迟》<br><a target="_blank" rel="noopener" href="https://yang-yifan.github.io/blogs/pdl/pdl_cn.html">https://yang-yifan.github.io/blogs/pdl/pdl_cn.html</a></li>
+<li>是小肖啊《PDL 遇上 <code>__ldg()</code>：Bug 还是 Feature？》<a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/2067263583239533156">https://zhuanlan.zhihu.com/p/2067263583239533156</a></li>
+<li>SGLang Kimi K3 Day-0 博客 <a target="_blank" rel="noopener" href="https://www.lmsys.org/blog/2026-07-27-kimi-k3-day0-support">https://www.lmsys.org/blog/2026-07-27-kimi-k3-day0-support</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#programmatic-dependent-launch-and-synchronization">CUDA C++ Programming Guide — Programmatic Dependent Launch</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-griddepcontrol">PTX ISA — griddepcontrol</a></li>
+</ul>
+<hr>
+<h2 id="12-实践清单"><a href="#12-实践清单" class="headerlink" title="12. 实践清单"></a>12. 实践清单</h2><p>要判断某对真实 kernel 值不值得上 PDL，按顺序问四个问题：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">1. 能共驻吗？        smem_p + smem_c ≤ 228KB ？（别信 occupancy API）</span><br><span class="line">                     两个 kernel 的 carveout 一致吗？</span><br><span class="line">                     ↓ 不能 → Hopper 上只剩 ~7%，Blackwell 上可能倒亏 15%</span><br><span class="line"></span><br><span class="line">2. 窗口有多大？      producer 尾部（等 peer / membar / 最后一波）有多长？</span><br><span class="line">                     那就是收益上限，prolog 预取超过它的部分白搭</span><br><span class="line"></span><br><span class="line">3. 争同一单元吗？    争 → trigger 有最优点，别放太早，实测 75% 附近</span><br><span class="line">                     不争 → 越早越好，放心塞到 mainloop 前面</span><br><span class="line"></span><br><span class="line">4. 正确性谁管？      要读前驱的最终输出 → PDL wait 不够，得上 phase counter</span><br><span class="line">                     trigger 之后还有 consumer 会读的写吗？→ 有就是竞态</span><br><span class="line">                     consumer 用 __ldg() 读 producer 输出吗？→ 查 SASS</span><br></pre></td></tr></table></figure>
+
+<p>测量时：</p>
+<ul>
+<li>e2e 指标（ITL / tok/s）+ NCU cycle 为准，<strong>不要看 per-kernel duration</strong></li>
+<li>trace 用来检查链是否连续：<strong>负 gap = 正常，正 gap 重新出现 = 链断了</strong></li>
+<li>断链常见于不支持 PDL 的小 kernel（dtype copy、reshape），它们在 Python 层不显眼</li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉</p><p><a href="https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/">https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-08-26</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-08-26</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUDA/">CUDA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CuTe-DSL/">CuTe DSL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUTLASS/">CUTLASS</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/GPU/">GPU</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Tensor-Core/">Tensor Core</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NVIDIA/">NVIDIA</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/"><span class="level-item">13. CUDA context 与 stream：执行模型的进程视角</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">102</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">5</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">28</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/"><span class="level-start"><span class="level-item">Mooncake Store 与 cache-aware 调度</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">17</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/"><span class="level-start"><span class="level-item">vllm、Blade-kvt与PD分离</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/">11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/">12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/">13. CUDA context 与 stream：执行模型的进程视角</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-07-partitioning-measured/">07 · 多 master 分区：从设计到实测</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-08-internal-mooncake-rldev-alignment/">从统一内存池到多 Master：内部 Mooncake rldev 对我们的启示</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/08/"><span class="level-start"><span class="level-item">八月 2026</span></span><span class="level-end"><span class="level-item tag">20</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">54</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Attention/"><span class="tag">Attention</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">30</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Blade-KVT/"><span class="tag">Blade-KVT</span><span class="tag">13</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/DCP/"><span class="tag">DCP</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Hybrid-Connector/"><span class="tag">Hybrid Connector</span><span class="tag">13</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/KV-Cache/"><span class="tag">KV Cache</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MLA/"><span class="tag">MLA</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Mooncake/"><span class="tag">Mooncake</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/"><span class="tag">PD 分离</span><span class="tag">23</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/cache-aware-%E8%B0%83%E5%BA%A6/"><span class="tag">cache-aware 调度</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">28</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">67</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%A9%B1%E9%80%90%E7%AD%96%E7%95%A5/"><span class="tag">驱逐策略</span><span class="tag">10</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

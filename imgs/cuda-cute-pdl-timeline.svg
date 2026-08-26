@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">PDL 时间线：串行 vs 重叠，以及 wait/trigger 位置的作用</title>
+  <desc id="desc">对比默认串行执行与 PDL 下的 kernel 重叠，标出 trigger 打开的重叠窗口、负 launch gap，以及 wait 位置如何决定可重叠的 prolog 数量。</desc>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8fb8d6"/></marker><marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ff9b9b"/></marker><marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7ee6a8"/></marker></defs>
+  <rect x="0" y="0" width="1200" height="700" rx="26" fill="#071522"/>
+  <text x="600.0" y="46" fill="white" font-family="sans-serif" font-size="27" text-anchor="middle" font-weight="700">PDL：把 consumer 的 launch 和 prolog 塞进 producer 的尾部</text><text x="600.0" y="74" fill="#7e9fb8" font-family="sans-serif" font-size="14" text-anchor="middle">wait 是一条屏障线，它把 consumer 切成「可重叠」和「必须等」两段；trigger 决定这条窗口何时打开</text>
+  <text x="90" y="106" fill="#cfe6f3" font-family="sans-serif" font-size="14.5" font-weight="700">（a）默认串行：后继 grid 必须等前驱全部 CTA 退出并完成全局内存可见性刷新</text>
+  <text x="78" y="142" fill="#7e9fb8" font-family="sans-serif" font-size="13" text-anchor="end">FC1</text>
+  <line x1="90" y1="154" x2="1130" y2="154" stroke="#1b3346" stroke-width="1"/>
+  <rect x="90" y="120" width="300" height="34" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/><text x="240.0" y="142.0" fill="#82dcff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">mainloop</text>
+  <rect x="390" y="120" width="90" height="34" rx="8" fill="#122636" stroke="#33566f" stroke-width="1.2"/><text x="435.0" y="142.0" fill="#8fb8d6" font-family="sans-serif" font-size="10.5" text-anchor="middle" font-weight="700">drain+membar</text>
+  <text x="78" y="186" fill="#7e9fb8" font-family="sans-serif" font-size="13" text-anchor="end">FC2</text>
+  <line x1="90" y1="198" x2="1130" y2="198" stroke="#1b3346" stroke-width="1"/>
+  <rect x="520" y="164" width="60" height="34" rx="8" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/><text x="550.0" y="186.0" fill="#ffd76a" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">launch</text>
+  <rect x="580" y="164" width="140" height="34" rx="8" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/><text x="650.0" y="186.0" fill="#c9b0ff" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">prolog</text>
+  <rect x="720" y="164" width="300" height="34" rx="8" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/><text x="870.0" y="186.0" fill="#c9b0ff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">mainloop</text>
+  <line x1="480" y1="120" x2="480" y2="204" stroke="#ff7b7b" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <line x1="520" y1="120" x2="520" y2="204" stroke="#ff7b7b" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <text x="500" y="222" fill="#ff9b9b" font-family="sans-serif" font-size="12" text-anchor="middle">launch gap（正）</text>
+  <text x="90" y="286" fill="#cfe6f3" font-family="sans-serif" font-size="14.5" font-weight="700">（b）PDL：producer 在输出写回后 trigger，后继 grid 立刻被放行</text>
+  <text x="78" y="322" fill="#7e9fb8" font-family="sans-serif" font-size="13" text-anchor="end">FC1</text>
+  <line x1="90" y1="334" x2="1130" y2="334" stroke="#1b3346" stroke-width="1"/>
+  <rect x="90" y="300" width="210" height="34" rx="8" fill="#173f59" stroke="#65d0ff" stroke-width="1.2"/><text x="195.0" y="322.0" fill="#82dcff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">mainloop</text>
+  <rect x="300" y="300" width="90" height="34" rx="8" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/><text x="345.0" y="322.0" fill="#ffd76a" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">尾部</text>
+  <rect x="390" y="300" width="90" height="34" rx="8" fill="#122636" stroke="#33566f" stroke-width="1.2"/><text x="435.0" y="322.0" fill="#8fb8d6" font-family="sans-serif" font-size="10.5" text-anchor="middle" font-weight="700">drain+membar</text>
+  <line x1="300" y1="294" x2="300" y2="342" stroke="#f0c040" stroke-width="2"/>
+  <text x="300" y="288" fill="#ffd76a" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="700">trigger</text>
+  <text x="78" y="366" fill="#7e9fb8" font-family="sans-serif" font-size="13" text-anchor="end">FC2</text>
+  <line x1="90" y1="378" x2="1130" y2="378" stroke="#1b3346" stroke-width="1"/>
+  <rect x="300" y="344" width="60" height="34" rx="8" fill="#4a3a12" stroke="#f0c040" stroke-width="1.2"/><text x="330.0" y="366.0" fill="#ffd76a" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">launch</text>
+  <rect x="360" y="344" width="140" height="34" rx="8" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/><text x="430.0" y="366.0" fill="#c9b0ff" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">prolog</text>
+  <rect x="500" y="344" width="26" height="34" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="513.0" y="366.0" fill="#ff9b9b" font-family="sans-serif" font-size="11" text-anchor="middle" font-weight="700">w</text>
+  <rect x="526" y="344" width="300" height="34" rx="8" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/><text x="676.0" y="366.0" fill="#c9b0ff" font-family="sans-serif" font-size="13.5" text-anchor="middle" font-weight="700">mainloop</text>
+  <text x="513" y="400" fill="#ff9b9b" font-family="sans-serif" font-size="11.5" text-anchor="middle">wait</text>
+  <rect x="300" y="292" width="180" height="96" rx="8" fill="#65d0ff" opacity="0.1"/>
+  <text x="390" y="400" fill="#82dcff" font-family="sans-serif" font-size="13" text-anchor="middle" font-weight="700">重叠窗口</text>
+  <line x1="480" y1="300" x2="480" y2="384" stroke="#58d68d" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <line x1="480" y1="418" x2="360" y2="418" stroke="#58d68d" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="490" y="422" fill="#7ee6a8" font-family="sans-serif" font-size="12.5">launch gap 变为负数（consumer 先于 producer 结束而开始）</text>
+  <text x="838" y="366" fill="#7ee6a8" font-family="sans-serif" font-size="13">→ 总时间缩短</text>
+  <text x="90" y="486" fill="#cfe6f3" font-family="sans-serif" font-size="14.5" font-weight="700">（c）wait 放得越后，重叠窗口里能装的代码越多——但越过依赖数据的读取就是竞态</text>
+  <text x="78" y="522" fill="#7e9fb8" font-family="sans-serif" font-size="12.5" text-anchor="end">wait 很早</text>
+  <rect x="90" y="500" width="40" height="34" rx="8" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/><text x="110.0" y="522.0" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle" font-weight="700">可重叠</text>
+  <rect x="130" y="500" width="24" height="34" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="142.0" y="522.0" fill="#ff9b9b" font-family="sans-serif" font-size="10.5" text-anchor="middle" font-weight="700">w</text>
+  <rect x="154" y="500" width="290" height="34" rx="8" fill="#122636" stroke="#33566f" stroke-width="1.2"/><text x="299.0" y="522.0" fill="#8fb8d6" font-family="sans-serif" font-size="11.5" text-anchor="middle" font-weight="700">必须等 producer</text>
+  <text x="470" y="522" fill="#ff9b9b" font-family="sans-serif" font-size="12.5">← 大量与 producer 无关的初始化/预取被白白留在屏障后</text>
+  <text x="78" y="568" fill="#7e9fb8" font-family="sans-serif" font-size="12.5" text-anchor="end">wait 靠后</text>
+  <rect x="90" y="546" width="150" height="34" rx="8" fill="#2e2350" stroke="#b18cff" stroke-width="1.2"/><text x="165.0" y="568.0" fill="#c9b0ff" font-family="sans-serif" font-size="11.5" text-anchor="middle" font-weight="700">可重叠</text>
+  <rect x="240" y="546" width="24" height="34" rx="8" fill="#4d1f22" stroke="#ff7b7b" stroke-width="1.2"/><text x="252.0" y="568.0" fill="#ff9b9b" font-family="sans-serif" font-size="10.5" text-anchor="middle" font-weight="700">w</text>
+  <rect x="264" y="546" width="180" height="34" rx="8" fill="#122636" stroke="#33566f" stroke-width="1.2"/><text x="354.0" y="568.0" fill="#8fb8d6" font-family="sans-serif" font-size="11.5" text-anchor="middle" font-weight="700">必须等 producer</text>
+  <text x="470" y="568" fill="#7ee6a8" font-family="sans-serif" font-size="12.5">← 只有真正读 producer 输出的那条 load 必须在 wait 之后</text>
+  <text x="90" y="664" fill="#9fc4dc" font-family="sans-serif" font-size="13">T ≈ max(wait 前的工作, producer 剩余时间) + wait 后的工作　→ 把指令从 wait 后搬到 wait 前，只要窗口没填满就净赚</text>
+</svg>

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="780" viewBox="0 0 1440 780">
+  <defs>
+    <style>
+      .bg{fill:#f8fafc}.title{font:700 30px system-ui;fill:#0f172a}.sub{font:15px system-ui;fill:#475569}
+      .label{font:700 16px system-ui;fill:#0f172a}.value{font:15px ui-monospace,monospace;fill:#0f172a}
+      .small{font:13px system-ui;fill:#475569}.axis{stroke:#94a3b8;stroke-width:2}.grid{stroke:#e2e8f0;stroke-width:1}
+    </style>
+  </defs>
+  <rect class="bg" width="1440" height="780"/>
+  <text class="title" x="60" y="58">128 B 级 RDMA 小包：优化前后的平均耗时</text>
+  <text class="sub" x="60" y="87">数据来自 ATA 原文实验；条长按相同线性比例绘制，越短越好</text>
+
+  <line class="axis" x1="360" y1="145" x2="1360" y2="145"/>
+  <line class="grid" x1="360" y1="135" x2="360" y2="650"/>
+  <line class="grid" x1="605" y1="135" x2="605" y2="650"/>
+  <line class="grid" x1="850" y1="135" x2="850" y2="650"/>
+  <line class="grid" x1="1095" y1="135" x2="1095" y2="650"/>
+  <line class="grid" x1="1340" y1="135" x2="1340" y2="650"/>
+  <text class="small" x="350" y="127">0</text><text class="small" x="582" y="127">50k</text>
+  <text class="small" x="820" y="127">100k</text><text class="small" x="1060" y="127">150k</text>
+  <text class="small" x="1302" y="127">200k us</text>
+
+  <text class="label" x="60" y="225">Baseline</text>
+  <text class="small" x="60" y="250">每个 WR 都 signaled；逐个完成再提交</text>
+  <rect x="360" y="195" width="980" height="64" rx="10" fill="#ef4444"/>
+  <text class="value" x="1120" y="234" fill="#fff">204508 us</text>
+
+  <text class="label" x="60" y="350">批量 + Unsignaled</text>
+  <text class="small" x="60" y="375">一批 WR 只让末尾 WR 产生必要 CQE</text>
+  <rect x="360" y="320" width="270" height="64" rx="10" fill="#f59e0b"/>
+  <text class="value" x="650" y="359">56368 us · 3.62×</text>
+
+  <text class="label" x="60" y="475">精简热路径</text>
+  <text class="small" x="60" y="500">直接使用 QP/ibverbs，剥离额外软件开销</text>
+  <rect x="360" y="445" width="38" height="64" rx="8" fill="#3b82f6"/>
+  <text class="value" x="420" y="484">7843 us · 相对上一阶段 7.19×</text>
+
+  <text class="label" x="60" y="600">精简路径 + 2× QP</text>
+  <text class="small" x="60" y="625">软件栈不再主导后，多 QP 才暴露收益</text>
+  <rect x="360" y="570" width="22" height="64" rx="7" fill="#10b981"/>
+  <text class="value" x="404" y="609">4478 us · 耗时再降 42.9%</text>
+
+  <rect x="60" y="690" width="1320" height="52" rx="10" fill="#e2e8f0"/>
+  <text class="small" x="82" y="721">解读：小包场景先消除 post/CQE/callback 的软件往返；在热路径变短、in-flight WR 足够后，再增加 QP 才可能有效。</text>
+</svg>

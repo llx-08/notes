@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio 本章把盏一的五篇 ATA 文章放进同一条技术主线：PD 分离的数据面如何从 KVT 1.0 演进到 Hybrid Connector 与 KVT 2.0，GDR&amp;#x2F;RDMA 如何保证正确性并优化小包性能，以及 Python asyncio 的调度与 Task 生命周期为什么会直接影响控制面的可靠性。 这不是五篇文章的逐段转录，而"><meta property="og:type" content="blog"><meta property="og:title" content="10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio"><meta property="og:url" content="https://llx-08.github.io/notes/2026/08/26/2026-08-26-vllm-blade-kvt-pd-learning-10-ata-pd-gdr-asyncio-synthesis/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio 本章把盏一的五篇 ATA 文章放进同一条技术主线：PD 分离的数据面如何从 KVT 1.0 演进到 Hybrid Connector 与 KVT 2.0，GDR&amp;#x2F;RDMA 如何保证正确性并优化小包性能，以及 Python asyncio 的调度与 Task 生命周期为什么会直接影响控制面的可靠性。 这不是五篇文章的逐段转录，而"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/vllm-pd-ata-architecture-evolution.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/vllm-pd-rdma-small-message-optimization.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/vllm-pd-asyncio-task-reference.svg"><meta property="article:published_time" content="2026-08-26T00:00:00.000Z"><meta property="article:modified_time" content="2026-08-26T14:17:27.008Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="vLLM"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="Barex"><meta property="article:tag" content="Blade-KVT"><meta property="article:tag" content="PD 分离"><meta property="article:tag" content="KV Cache"><meta property="article:tag" content="Hybrid Connector"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/vllm-pd-ata-architecture-evolution.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/08/26/2026-08-26-vllm-blade-kvt-pd-learning-10-ata-pd-gdr-asyncio-synthesis/"},"headline":"10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio","image":[],"datePublished":"2026-08-26T00:00:00.000Z","dateModified":"2026-08-26T14:17:27.008Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio 本章把盏一的五篇 ATA 文章放进同一条技术主线：PD 分离的数据面如何从 KVT 1.0 演进到 Hybrid Connector 与 KVT 2.0，GDR&#x2F;RDMA 如何保证正确性并优化小包性能，以及 Python asyncio 的调度与 Task 生命周期为什么会直接影响控制面的可靠性。 这不是五篇文章的逐段转录，而"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/08/26/2026-08-26-vllm-blade-kvt-pd-learning-10-ata-pd-gdr-asyncio-synthesis/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-08-26T00:00:00.000Z" title="8/26/2026, 12:00:00 AM">2026-08-26</time>发表</span><span class="level-item"><time dateTime="2026-08-26T14:17:27.008Z" title="8/26/2026, 2:17:27 PM">2026-08-26</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/">vllm、Blade-kvt与PD分离</a></span><span class="level-item">1 小时读完 (大约7635个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio</h1><div class="content"><h1 id="10-ATA-五篇串讲：PD-分离、GDR、传输优化与-asyncio"><a href="#10-ATA-五篇串讲：PD-分离、GDR、传输优化与-asyncio" class="headerlink" title="10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio"></a>10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio</h1><blockquote>
+<p>本章把盏一的五篇 ATA 文章放进同一条技术主线：PD 分离的数据面如何从 KVT 1.0<br>演进到 Hybrid Connector 与 KVT 2.0，GDR/RDMA 如何保证正确性并优化小包性能，以及<br>Python asyncio 的调度与 Task 生命周期为什么会直接影响控制面的可靠性。</p>
+<p>这不是五篇文章的逐段转录，而是结合本系列 00–09 章得到的结构化学习笔记。文中的<br>“文章实验”只代表原文给定软硬件、模型和配置下的结果，不能直接外推为所有环境的结论。</p>
+</blockquote>
+<h2 id="1-五篇文章在整套系统中的位置"><a href="#1-五篇文章在整套系统中的位置" class="headerlink" title="1. 五篇文章在整套系统中的位置"></a>1. 五篇文章在整套系统中的位置</h2><table>
+<thead>
+<tr>
+<th>文章</th>
+<th>主题</th>
+<th>对本系列的补充</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>《转折中的 PD 分离》</td>
+<td>KVT 1.0、Hybrid Connector、KVT 2.0 的设计演进</td>
+<td>解释架构为什么从“传输组件”走向“connector + backend”</td>
+</tr>
+<tr>
+<td>《PD 分离中的 kvcache 传输优化》</td>
+<td>RDMA 小包、Unsignaled WR、批量 post、QP 并行</td>
+<td>补充 <a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-04-kv-send-path/">04 KV 发送路径</a> 的性能动机</td>
+</tr>
+<tr>
+<td>《PD 分离中的 GDR》</td>
+<td>P→D GPU Direct RDMA、内存序、Decode 干扰实验</td>
+<td>补充 <a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-05-kv-receive-and-completion/">05 KV 接收与完成</a> 的硬件语义</td>
+</tr>
+<tr>
+<td>《一定要保存 asyncio.Task 对象啊!》</td>
+<td>Task 弱引用、GC、后台任务可靠性</td>
+<td>解释 <a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-07-hybrid-asyncio-and-no-hang/">07 Python 协程</a> 中强引用集合的由来</td>
+</tr>
+<tr>
+<td>《为什么协程》</td>
+<td>1:1、M:1、M:N，协作式调度和运行时可观测性</td>
+<td>为 Hybrid Connector 的异步控制面建立基础模型</td>
+</tr>
+</tbody></table>
+<p>五篇文章不是彼此独立的知识点。它们共同回答一个问题：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">怎样把 KV Cache 搬运做成调度主链路之外的异步旁路，</span><br><span class="line">同时保证数据正确、性能足够高、异常不会静默 hang？</span><br></pre></td></tr></table></figure>
+
+<p><img src="/notes/imgs/vllm-pd-ata-architecture-evolution.svg" alt="五篇文章对应的系统演进"></p>
+<h2 id="2-PD-分离的基本请求链路"><a href="#2-PD-分离的基本请求链路" class="headerlink" title="2. PD 分离的基本请求链路"></a>2. PD 分离的基本请求链路</h2><p>文章中的典型单请求模式可以抽象为：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">1. 请求 R 先到 D。</span><br><span class="line">2. D 为 R 分配目标 KV Block：R.d_kv_blocks。</span><br><span class="line">3. D 选择一个 P，调用 do_prefill(R, R.d_kv_blocks)。</span><br><span class="line">4. P 执行 Prefill；每算完一层，就把该层 KV 通过 RDMA Write 写入 D。</span><br><span class="line">5. P 产生 first token，并等待所有必要 KV 传输完成。</span><br><span class="line">6. P 的 RPC 返回 first token 与传输结果。</span><br><span class="line">7. D 把 transferred token 数记为已计算 token，开始 Decode。</span><br></pre></td></tr></table></figure>
+
+<p>这里最重要的不是“P 把一段连续内存复制到 D”，而是 D <strong>先决定目标位置</strong>，P 再把<br>每个源 Block 的一部分写到指定的目标 Block/offset。其效果类似于 D 命中了 prefix<br>cache：对普通 Scheduler 而言，前面的 prompt token 已有 KV，不需要了解 KV 是由远端<br>P 生成的。</p>
+<p>控制面与数据面必须分开：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">控制面：request ID、P/D 实例、TP rank、Block ID、token 范围、完成和错误码</span><br><span class="line">数据面：GPU 地址、offset、length、MR、QP、WQE、CQE、实际 KV 字节</span><br></pre></td></tr></table></figure>
+
+<p>这也是“零侵入”的核心：Scheduler 主要处理正常的 request/token/block 状态，Connector<br>负责把远端传输伪装成一次异步的 cache hit。</p>
+<h2 id="3-KVT-1-0：把传输拆成四层"><a href="#3-KVT-1-0：把传输拆成四层" class="headerlink" title="3. KVT 1.0：把传输拆成四层"></a>3. KVT 1.0：把传输拆成四层</h2><p>早期 KVT 的目标是：</p>
+<ul>
+<li>尽量不改 vLLM step 主流程；</li>
+<li>KV 传输与模型计算按 layer 重叠；</li>
+<li>P、D 都尽可能兼容 full CUDA Graph；</li>
+<li>传输故障不能导致 Block 被提前复用。</li>
+</ul>
+<h3 id="3-1-接入层：把模型内存变成可传输元数据"><a href="#3-1-接入层：把模型内存变成可传输元数据" class="headerlink" title="3.1 接入层：把模型内存变成可传输元数据"></a>3.1 接入层：把模型内存变成可传输元数据</h3><p>实例启动时注册每层 KV Cache 的：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">layer base address</span><br><span class="line">cache shape / stride</span><br><span class="line">block_size_bytes</span><br><span class="line">token_size_bytes</span><br><span class="line">num_blocks</span><br></pre></td></tr></table></figure>
+
+<p>每个 step 根据 <code>SchedulerOutput</code> 生成 <code>KVTMeta</code>，记录：</p>
+<ul>
+<li>request 与源/目标实例；</li>
+<li>源 Block 和目标 Block；</li>
+<li>本 step 需要传输的 token 范围；</li>
+<li>TP worker/rank；</li>
+<li>完成信号应该归属哪个请求。</li>
+</ul>
+<p>Attention layer 计算完成后，Python 侧只在 CUDA stream 上 <code>record</code> 一个固定 Event。<br>它表示此前提交到该 stream 的本层计算已经排在 Event 之前，并不要求 Python 同步等待<br>GPU。</p>
+<h3 id="3-2-ParseBlock：把逻辑-token-映射为字节区间"><a href="#3-2-ParseBlock：把逻辑-token-映射为字节区间" class="headerlink" title="3.2 ParseBlock：把逻辑 token 映射为字节区间"></a>3.2 ParseBlock：把逻辑 token 映射为字节区间</h3><p>传输层最终消费：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">struct</span> <span class="title class_">IpcBlock</span> {</span><br><span class="line">    <span class="type">size_t</span> src_off;</span><br><span class="line">    <span class="type">size_t</span> dst_off;</span><br><span class="line">    <span class="type">size_t</span> len;</span><br><span class="line">};</span><br></pre></td></tr></table></figure>
+
+<p>语义是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">把源 layer 的 [src_off, src_off + len)</span><br><span class="line">写到目标 layer 的 [dst_off, dst_off + len)</span><br></pre></td></tr></table></figure>
+
+<p>ParseBlock 的价值在于隔离“模型 KV layout”与“网络传输”。例如：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">早期 layout：</span><br><span class="line">(num_blocks, block_size, 2, num_heads, head_dim)</span><br><span class="line"></span><br><span class="line">vLLM FA layout：</span><br><span class="line">(2, num_blocks, block_size, num_kv_heads, head_size)</span><br></pre></td></tr></table></figure>
+
+<p>第一种布局中，一个 token 的 K/V 在 Block 内相邻；第二种布局中 K 与 V 可能位于两个<br>大分区。网络层不应该理解这些差别，ParseBlock 只需把一个逻辑 token 展开成两段或多段<br><code>IpcBlock</code>。</p>
+<h4 id="示例：同一个-token-的两种解析"><a href="#示例：同一个-token-的两种解析" class="headerlink" title="示例：同一个 token 的两种解析"></a>示例：同一个 token 的两种解析</h4><p>假设每个 K 或 V token 占 128 B：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">布局 A：KV 相邻</span><br><span class="line">token 7 → [src + 7×256, len=256]</span><br><span class="line"></span><br><span class="line">布局 B：K/V 分区</span><br><span class="line">token 7 → [K_base + 7×128, len=128]</span><br><span class="line">          [V_base + 7×128, len=128]</span><br></pre></td></tr></table></figure>
+
+<p>上层仍然说“传 token 7”，Barex 仍然只看到地址和长度，只有 ParseBlock 需要变化。<br>这使 Qwen3-Next GDN 等新型 state/cache layout 可以通过新增 parser 接入，而不是重写<br>控制面与传输层。</p>
+<h3 id="3-3-控制层：按-layer-等待、提交与容错"><a href="#3-3-控制层：按-layer-等待、提交与容错" class="headerlink" title="3.3 控制层：按 layer 等待、提交与容错"></a>3.3 控制层：按 layer 等待、提交与容错</h3><p>控制层负责：</p>
+<ul>
+<li>维护目标端连接；</li>
+<li>等待每层 CUDA Event；</li>
+<li>该层 ready 后调用传输层；</li>
+<li>聚合每个 worker/rank 的完成；</li>
+<li>在错误或 abort 时终止剩余任务并上报实际完成 token 数。</li>
+</ul>
+<p>逐层发送形成流水线：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">GPU:      layer0 compute ─ layer1 compute ─ layer2 compute ─ ...</span><br><span class="line">Network:          layer0 send ─── layer1 send ─── layer2 send</span><br></pre></td></tr></table></figure>
+
+<p>这比“整个 Prefill 完成后再一次性传 KV”更早暴露传输并减少 TTFT，但也增加了 completion<br>和资源生命周期管理的复杂度。</p>
+<h3 id="3-4-传输层：只负责-Vec"><a href="#3-4-传输层：只负责-Vec" class="headerlink" title="3.4 传输层：只负责 Vec<IpcBlock>"></a>3.4 传输层：只负责 <code>Vec&lt;IpcBlock&gt;</code></h3><p>传输层不关心 request、token 或模型结构，只负责：</p>
+<ul>
+<li>为目标建立 TCP/RDMA channel；</li>
+<li>注册内存并管理 local/remote key；</li>
+<li>把若干 IpcBlock 组织成 WR；</li>
+<li>报告 transport completion 或错误。</li>
+</ul>
+<p>这条边界必须牢记：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">CQE / transport completion</span><br><span class="line">    ≠ 一个 TP worker 的 SEND_DONE</span><br><span class="line">    ≠ 所有 TP worker 完成</span><br><span class="line">    ≠ D 请求可以 Decode</span><br></pre></td></tr></table></figure>
+
+<h2 id="4-Hybrid-Connector：把计算与-KV-load-save-解耦"><a href="#4-Hybrid-Connector：把计算与-KV-load-save-解耦" class="headerlink" title="4. Hybrid Connector：把计算与 KV load/save 解耦"></a>4. Hybrid Connector：把计算与 KV load/save 解耦</h2><p>文章认为早期社区 Connector 容易把未完成 load/save 的请求仍留在 Scheduler waiting<br>队列，并依赖“空 step”轮询状态。问题包括：</p>
+<ul>
+<li>KV I/O 与计算请求混在同一状态机；</li>
+<li>同步查询外部 cache service 可能阻塞 step；</li>
+<li>Scheduler 主链路充斥 PD 特有分支；</li>
+<li>abort、断连和部分完成路径难以闭环。</li>
+</ul>
+<p>Hybrid Connector 因此拆成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">Connector</span><br><span class="line">  - 对接 vLLM Scheduler/Worker</span><br><span class="line">  - 请求生命周期和状态机</span><br><span class="line">  - 动态扩缩容、对端发现、RPC、容错</span><br><span class="line">  - Block 引用、完成聚合、mark_loaded/mark_saved</span><br><span class="line"></span><br><span class="line">Backend</span><br><span class="line">  - 理解某一种 cache/storage/transfer 机制</span><br><span class="line">  - PD Backend、Migration Backend、KVS Backend 可并存</span><br><span class="line">  - 不要求实现者理解 Scheduler 的全部细节</span><br></pre></td></tr></table></figure>
+
+<h3 id="4-1-为什么-Block-引用计数是关键"><a href="#4-1-为什么-Block-引用计数是关键" class="headerlink" title="4.1 为什么 Block 引用计数是关键"></a>4.1 为什么 Block 引用计数是关键</h3><p>请求可能已经被 abort 或从普通 Scheduler 结束，但 RNIC 仍在往 Block 写。若此时 Block<br>进入 free list 并被新请求复用，就会出现“晚到的 RDMA Write 覆盖新请求 KV”的灾难。</p>
+<p>安全做法是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">传输开始：给相关 Block 增加 transfer ref</span><br><span class="line">请求结束：释放 scheduler ref，但 transfer ref 仍在</span><br><span class="line">传输/失败收尾：释放 transfer ref</span><br><span class="line">ref_cnt == 0：Block 才能真正进入 free list</span><br></pre></td></tr></table></figure>
+
+<p>引用计数让“请求生命周期”和“传输生命周期”解耦，而不是要求 Scheduler 为每一种传输<br>状态新增特殊分支。</p>
+<h3 id="4-2-单请求模式"><a href="#4-2-单请求模式" class="headerlink" title="4.2 单请求模式"></a>4.2 单请求模式</h3><p>请求只先发给 D：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">D allocate blocks</span><br><span class="line">  → DBackend 暂时劫持请求</span><br><span class="line">  → 选择 P 并调用 PREFILL_REQ</span><br><span class="line">  → P Prefill + 传输</span><br><span class="line">  → RPC 返回</span><br><span class="line">  → D 设置 num_computed_tokens</span><br><span class="line">  → 请求进入普通 Scheduler</span><br></pre></td></tr></table></figure>
+
+<p>优点是 rendezvous 简单；缺点是 P 必须等 D 完成分配、选择和 RPC 后才能开工。</p>
+<h3 id="4-3-双请求模式"><a href="#4-3-双请求模式" class="headerlink" title="4.3 双请求模式"></a>4.3 双请求模式</h3><p>路由层同时把同一请求发给 P、D：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">P 先开始 Prefill，但暂时不知道 DInfo</span><br><span class="line">D 分配 Block 后向 P 发 TRANSFER_KV_REQ</span><br><span class="line">P 在后续 step 获得 DInfo，开始传输</span><br></pre></td></tr></table></figure>
+
+<p>这样可让 Prefill 与 D 侧准备并行。<code>TRANSFER_KV_REQ</code> 后来还能复用于请求迁移：只要告诉<br>已有 KV 的源端“把这些 Block 传到新目标”即可。</p>
+<h3 id="4-4-Abort-不是“把请求从队列删掉”"><a href="#4-4-Abort-不是“把请求从队列删掉”" class="headerlink" title="4.4 Abort 不是“把请求从队列删掉”"></a>4.4 Abort 不是“把请求从队列删掉”</h3><p>一个稳健的 abort 至少涉及：</p>
+<ol>
+<li>Connector 通知对应 Backend；</li>
+<li>PBackend 通知 KVT 停止尚未提交的传输；</li>
+<li>KVT 仍返回 <code>SEND_DONE</code>，但携带实际 <code>cached_token</code>；</li>
+<li>Connector 发现 <code>cached_token &lt; num_prompt_tokens</code>，把本次传输判为失败；</li>
+<li>DBackend 让请求结束并向 P 发 <code>ABORT_REQS_REQ</code>；</li>
+<li>Block 依靠 transfer ref 延迟释放，直到在途 RDMA 不再可能写入。</li>
+</ol>
+<h4 id="示例：为什么-abort-后不能立刻-free"><a href="#示例：为什么-abort-后不能立刻-free" class="headerlink" title="示例：为什么 abort 后不能立刻 free"></a>示例：为什么 abort 后不能立刻 free</h4><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">t0  D 分配 block 42，P 开始 RDMA Write</span><br><span class="line">t1  用户取消请求，D Scheduler 想释放 block 42</span><br><span class="line">t2  block 42 被新请求复用</span><br><span class="line">t3  旧 WR 晚到，覆盖新请求数据       ← 若没有 transfer ref</span><br></pre></td></tr></table></figure>
+
+<p>正确状态应是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">t1 scheduler_ref--</span><br><span class="line">t1 transfer_ref 仍为 1</span><br><span class="line">t3 WR completion / error cleanup</span><br><span class="line">t3 transfer_ref--</span><br><span class="line">t4 ref_cnt==0，block 42 才可复用</span><br></pre></td></tr></table></figure>
+
+<h2 id="5-GDR：数据怎样直接进入-D-的-GPU"><a href="#5-GDR：数据怎样直接进入-D-的-GPU" class="headerlink" title="5. GDR：数据怎样直接进入 D 的 GPU"></a>5. GDR：数据怎样直接进入 D 的 GPU</h2><p>GDR（GPU Direct RDMA）允许 RNIC 通过 PCIe 直接访问 GPU 显存，避免：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">P GPU → P host staging → network</span><br><span class="line">       → D host staging → D GPU</span><br></pre></td></tr></table></figure>
+
+<p>理想路径变成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">P GPU HBM → P RNIC → network → D RNIC → D GPU HBM</span><br></pre></td></tr></table></figure>
+
+<p>在文中的实现里，P 对 D 已注册的 KV Cache memory region 发起单边 RDMA Write。D<br>不需要为每一层运行一段 Python/CUDA copy 逻辑，因此更容易保持 Decode worker 的<br>full CUDA Graph 路径。</p>
+<h3 id="5-1-内存序与同步"><a href="#5-1-内存序与同步" class="headerlink" title="5.1 内存序与同步"></a>5.1 内存序与同步</h3><p>“RDMA Write completion 了”只说明 provider 定义的传输完成边界，不能凭直觉推导 GPU<br>一定可以安全消费数据。正确性需要同时满足：</p>
+<ul>
+<li>P 的 forward 写 KV 必须先于 RNIC 读取源显存；</li>
+<li>D 的 GPU attention 读取 KV 必须晚于远端写入完成；</li>
+<li>CPU、GPU、RNIC 三方使用文档规定的同步原语和 memory-order contract；</li>
+<li>completion 的发布不能早于数据真正达到协议要求的可见性边界。</li>
+</ul>
+<p>可以把它看作两条 happens-before：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">P GPU 产生 KV</span><br><span class="line">  happens-before</span><br><span class="line">P RNIC 读取并发起 RDMA Write</span><br><span class="line"></span><br><span class="line">D RNIC 完成写入</span><br><span class="line">  happens-before</span><br><span class="line">D GPU Decode 读取该 KV</span><br></pre></td></tr></table></figure>
+
+<p>CUDA Event、RDMA completion 和应用层 RPC 各自只覆盖其中一部分，不能相互替代。</p>
+<h3 id="5-2-GDR-会不会抢-Decode-的-HBM-带宽"><a href="#5-2-GDR-会不会抢-Decode-的-HBM-带宽" class="headerlink" title="5.2 GDR 会不会抢 Decode 的 HBM 带宽"></a>5.2 GDR 会不会抢 Decode 的 HBM 带宽</h3><p>担忧是合理的：Decode 常常受 HBM 带宽限制，P 的 RDMA Write 同样会写 D HBM。</p>
+<p>原文使用 Qwen2 72B、TP=4，在 D forward 前后采集：</p>
+<ul>
+<li>forward latency；</li>
+<li>RDMA RX bytes/packets；</li>
+<li>当前 batch/request/context 信息。</li>
+</ul>
+<p>同时通过限制 Scheduler，使额外压测请求只在 P 做 Prefill、向 D 产生 GDR 流量，却不<br>进入 D 的 Decode 计算队列。这样尽量隔离“GDR 写流量”与“额外请求调度/计算”的影响。</p>
+<p>文章给出的不同 QPS 下 DecodeLatency 相对基线变化约在千分之一量级，并且正负都有，<br>因此在该实验条件下可视为测量噪声，没有观察到明显退化。</p>
+<h4 id="实验怎样只改变-GDR-流量"><a href="#实验怎样只改变-GDR-流量" class="headerlink" title="实验怎样只改变 GDR 流量"></a>实验怎样只改变 GDR 流量</h4><p>实验先在 D 上注入固定 batch size 的长 Decode 请求：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">input_len = 1</span><br><span class="line">ignore_eos = True</span><br><span class="line">max_tokens = 2000</span><br></pre></td></tr></table></figure>
+
+<p>短 prompt 会在 D 本地 Prefill，随后持续 Decode。再把<br><code>scheduler.max_num_scheduled_tokens</code> 固定为该 batch size，使 D 每个 step 只处理这批<br>基准请求。作者选择 <code>context_len &gt; 1500</code> 后的 500 个 step 作为 DecodeLatency；此时<br>attention 要扫描较长 KV Cache，对 memory subsystem 的干扰更敏感。</p>
+<p>当基准请求运行到 <code>context_len ≈ 500</code> 时，另用 <code>benchmark_serving</code> 按不同 QPS 提交：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">input_len = 2000</span><br><span class="line">output_len = 7</span><br></pre></td></tr></table></figure>
+
+<p>这些请求在 P 做 Prefill，并通过 GDR RDMA Write 向 D GPU 写 KV；但 D 的 token budget<br>已由基准 batch 占满，新请求暂不进入 D forward。于是实验近似得到：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">qps0：固定 D Decode</span><br><span class="line">qpsN：相同 D Decode + P→D GDR RDMA Write</span><br></pre></td></tr></table></figure>
+
+<p>在每次 D forward 前后，代码同时读取 RNIC 的 RX bytes/packets，forward 后执行<br><code>torch.cuda.synchronize()</code> 再停止计时。同步是必要的，否则 CPU 只测到异步 kernel<br>launch，不是 GPU forward 的实际完成时间。</p>
+<h4 id="rdma-rx-bps-不是-HBM-带宽"><a href="#rdma-rx-bps-不是-HBM-带宽" class="headerlink" title="rdma_rx_bps 不是 HBM 带宽"></a><code>rdma_rx_bps</code> 不是 HBM 带宽</h4><p>文章通过 RDMA netlink 读取的 <code>hw_rx_bytes_cnt/hw_rx_packets</code> 是 <strong>D RNIC 的网络入口<br>计数器</strong>。它既不是 GPU PCIe RX counter，也不是 HBM read/write counter。</p>
+<p>D 侧 GDR Write 的数据路径是串联的：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">network</span><br><span class="line">  → D RNIC</span><br><span class="line">  → PCIe peer-to-peer transaction</span><br><span class="line">  → GPU I/O / L2 / memory partitions</span><br><span class="line">  → D HBM 中的 KV Cache</span><br></pre></td></tr></table></figure>
+
+<p>所以问题不是“PCIe 还是 HBM”二选一：</p>
+<ul>
+<li>RNIC 向 GPU 发 peer DMA transaction，会占 PCIe/P2P 入站带宽；</li>
+<li>数据最终成为显存内容，会消耗 GPU memory controller/HBM 写资源；</li>
+<li>Decode 同时读权重和 KV，可能在 L2、memory partition、HBM 等处与 GDR 写发生竞争。</li>
+</ul>
+<p>端到端 GDR 吞吐受最窄环节限制：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">min(network, RNIC, PCIe P2P, GPU inbound path, HBM available write bandwidth)</span><br></pre></td></tr></table></figure>
+
+<p>这篇文章做的是<strong>应用级干扰测试</strong>：观察 RNIC 流量存在时 Decode latency 是否恶化，<br>而不是直接量化 HBM 被占用了多少。若要定位具体瓶颈，还应同时采集：</p>
+<table>
+<thead>
+<tr>
+<th>层次</th>
+<th>应观察的量</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>网络/RNIC</td>
+<td>RX bytes/s、packets/s、拥塞与丢包</td>
+</tr>
+<tr>
+<td>PCIe</td>
+<td>GPU PCIe RX throughput、拓扑与 root complex</td>
+</tr>
+<tr>
+<td>GPU memory subsystem</td>
+<td>HBM read/write throughput、L2 traffic、memory partition 利用率</td>
+</tr>
+<tr>
+<td>应用</td>
+<td>forward latency、ITL/TPOT、batch/context length</td>
+</tr>
+</tbody></table>
+<p>但结论边界很重要：</p>
+<ul>
+<li>只说明该模型、GPU、ERDMA、batch token 配置；</li>
+<li>QPS 已足以跑满 Prefill 后，流量主要由每 step 的 chunked-prefill token 数决定；</li>
+<li>更大 KV、不同 GPU/RNIC/NUMA/PCIe 拓扑可能得到不同结果；</li>
+<li>线上仍应同时观察 Decode latency、HBM/PCIe/RDMA throughput 和 tail latency。</li>
+</ul>
+<h2 id="6-大量-128-B-小包为什么慢"><a href="#6-大量-128-B-小包为什么慢" class="headerlink" title="6. 大量 128 B 小包为什么慢"></a>6. 大量 128 B 小包为什么慢</h2><p>当 P 的 attention TP 大于 D 的 attention TP 时，一个 P worker 每次可能只能为目标<br>worker 提供某一小部分 KV head。原文场景中，一个 WR 对应的数据可小到 128 B。</p>
+<p>小包下瓶颈往往不是链路带宽，而是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">构造 WR</span><br><span class="line">→ ibv_post_send</span><br><span class="line">→ NIC 生成 CQE</span><br><span class="line">→ 软件 poll CQ</span><br><span class="line">→ callback/future</span><br><span class="line">→ 再取下一块并 post</span><br></pre></td></tr></table></figure>
+
+<p>若每个 128 B WR 都设置 <code>IBV_SEND_SIGNALED</code>，CQE 频率和软件栈开销会极高，NIC 甚至<br>可能在两次 post 之间空闲。</p>
+<p><img src="/notes/imgs/vllm-pd-rdma-small-message-optimization.svg" alt="RDMA 小包优化实验"></p>
+<h3 id="6-1-优化一：Unsignaled-批量提交"><a href="#6-1-优化一：Unsignaled-批量提交" class="headerlink" title="6.1 优化一：Unsignaled + 批量提交"></a>6.1 优化一：Unsignaled + 批量提交</h3><p>把一批 WR 连成链，只给最后一个 WR 设置 <code>IBV_SEND_SIGNALED</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">WR0 unsignaled ─┐</span><br><span class="line">WR1 unsignaled  ├─ 一次/少次 post</span><br><span class="line">...             │</span><br><span class="line">WRn signaled ───┘ → 只为批次生成必要 CQE</span><br></pre></td></tr></table></figure>
+
+<p>收益不只是减少 CQE；它还把发送行为从“一个完成后再提交下一个”改成“预先给 NIC 一批<br>工作”，降低软件往返并让 NIC 保持繁忙。</p>
+<p>文章平均耗时从约 <code>204508 us</code> 降到 <code>56368 us</code>，约为原来的 27.6%，即约 3.62 倍加速。</p>
+<h3 id="6-2-优化二：缩短热路径，直接使用-QP-ibverbs"><a href="#6-2-优化二：缩短热路径，直接使用-QP-ibverbs" class="headerlink" title="6.2 优化二：缩短热路径，直接使用 QP/ibverbs"></a>6.2 优化二：缩短热路径，直接使用 QP/ibverbs</h3><p>在实验中进一步剥离与传输无关的抽象和调度开销，直接使用 QP 与 ibverbs 接口，平均<br>耗时从约 <code>56368 us</code> 降到 <code>7843 us</code>，相对上一阶段约 7.19 倍加速。</p>
+<p>这不意味着生产代码一定要丢弃抽象层，而是说明：</p>
+<ul>
+<li>当前主要瓶颈可能在 host 软件路径，不在 wire bandwidth；</li>
+<li>profiling 应拆分 enqueue、post、poll、callback、batch formation；</li>
+<li>通用网络库若按大包优化，未必适合 128 B 级密集 KV 分片。</li>
+</ul>
+<h3 id="6-3-优化三：增加-QP-并行"><a href="#6-3-优化三：增加-QP-并行" class="headerlink" title="6.3 优化三：增加 QP 并行"></a>6.3 优化三：增加 QP 并行</h3><p>在未优化的软件栈上，QP 数量翻倍只提升约 2%；在精简后的热路径上，QP 翻倍又让平均<br>耗时从约 <code>7843 us</code> 降到 <code>4478 us</code>，耗时降低约 42.9%。</p>
+<p>这不是“多 QP 突然产生了神奇效果”，而是主瓶颈发生了迁移。</p>
+<p>未精简时，两个 QP 仍共享前面的软件路径：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">task/queue/lock/state machine/future/callback</span><br><span class="line">                     ├─ QP0</span><br><span class="line">                     └─ QP1</span><br></pre></td></tr></table></figure>
+
+<p>若 CPU 不能及时构造并 post WQE，两个 QP 都处于“吃不饱”的状态。增加 QP 只并行了<br>总耗时中的很小一部分，共享的软件串行段完全没有缩短，因此只有约 2%。</p>
+<p>裸用 QP/ibverbs 后，热路径变成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">prepare WR → post SQ → RNIC execute → necessary CQ poll</span><br></pre></td></tr></table></figure>
+
+<p>此时 CPU 能持续给 RNIC 喂 WQE，单 QP 的有序队列、outstanding WR、doorbell/WQE 获取<br>或 credit 等限制才可能成为显著部分。第二个 QP 提供独立 Send Queue，使 RNIC 可以：</p>
+<ul>
+<li>保持更多 WR in flight；</li>
+<li>一个 QP 暂时受顺序或 credit 限制时继续推进另一个；</li>
+<li>降低单 QP head-of-line blocking；</li>
+<li>更充分填充 RNIC/PCIe pipeline。</li>
+</ul>
+<p>注意文章所谓“提升 42.90%”按耗时降低计算：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">1 - 4477.67 / 7843.14 ≈ 42.90%</span><br></pre></td></tr></table></figure>
+
+<p>若换成速度/吞吐提升，则：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">7843.14 / 4477.67 ≈ 1.75×</span><br></pre></td></tr></table></figure>
+
+<p>可用 Amdahl 定律建立直觉。假设增加一倍 QP 最多让 QP 可并行部分加速 2 倍：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">speedup = 1 / ((1 - p) + p / 2)</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>只加速约 1.02× 时，反推 QP 可并行部分约占 4%；</li>
+<li>裸接口后加速约 1.75× 时，反推可并行部分约占 86%。</li>
+</ul>
+<p>这只是依据总耗时的近似分解，不是文章提供的 profiler 结果，但清晰说明：先去掉共享<br>串行开销，多 QP 才会成为有效的优化旋钮。</p>
+<p>因此不能孤立地问“QP 越多是否越快”。还要检查：</p>
+<ul>
+<li>是否已有足够 in-flight WR；</li>
+<li>CQ/QP poller 是否成为 CPU 瓶颈；</li>
+<li>同一 target 的有序性要求；</li>
+<li>RNIC 资源、doorbell、cache locality；</li>
+<li>多 QP 是否引入完成乱序与更复杂的聚合。</li>
+</ul>
+<p>增加 QP 不会增加物理链路的额定带宽；它主要提高并发度，并减少单 QP 串行化造成的<br>流水线空洞。若瓶颈仍在 CPU 软件栈、PCIe 或 wire bandwidth，继续加 QP 仍不会有效。</p>
+<h2 id="7-KVT-2-0-为什么还要继续演进"><a href="#7-KVT-2-0-为什么还要继续演进" class="headerlink" title="7. KVT 2.0 为什么还要继续演进"></a>7. KVT 2.0 为什么还要继续演进</h2><p>KVT 1.0 隐含了比较规则的 Block/Token/Layers：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">每层一块大显存</span><br><span class="line">→ 划分为等大 block</span><br><span class="line">→ block 内划分为等大 token</span><br></pre></td></tr></table></figure>
+
+<p>但新模型和新引擎引入：</p>
+<ul>
+<li>Qwen3-Next GDN；</li>
+<li>DeepSeek DSA；</li>
+<li>vLLM Hybrid KVCache Manager 的多种 <code>KVCacheSpec</code>；</li>
+<li>不同 layer 可能有不同 state/cache 形态；</li>
+<li>MoE EP all-to-all 与 KV 传输共享 GPU/RDMA 通路。</li>
+</ul>
+<p>所以 KVT 2.0 的方向不是再给旧结构堆条件分支，而是：</p>
+<ol>
+<li>把 layout/parser 抽象做得更通用；</li>
+<li>允许多种 cache spec 和不规则区间；</li>
+<li>让 backend/transport 可替换；</li>
+<li>对不同流量提供真正的资源隔离。</li>
+</ol>
+<p>文章还提出考虑用 TCP 绕开现有 GPU/GDR 通路，使 KV traffic 与 EP all-to-all 的 RDMA<br>traffic 隔离。这里的重点不是“TCP 一定更快”，而是<strong>端到端性能可能受共享资源干扰<br>主导</strong>：一条理论带宽更低但隔离良好的路径，可能比与 EP 抢 RNIC/QP/CQ/PCIe 的路径<br>提供更稳定的 tail latency。</p>
+<h2 id="8-为什么协程适合-Hybrid-Connector"><a href="#8-为什么协程适合-Hybrid-Connector" class="headerlink" title="8. 为什么协程适合 Hybrid Connector"></a>8. 为什么协程适合 Hybrid Connector</h2><h3 id="8-1-线程、协程与执行流"><a href="#8-1-线程、协程与执行流" class="headerlink" title="8.1 线程、协程与执行流"></a>8.1 线程、协程与执行流</h3><p>文章把并发抽象为“逻辑执行流”与“运行载体”的映射：</p>
+<table>
+<thead>
+<tr>
+<th>模型</th>
+<th>映射</th>
+<th>特点</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>线程 1:1</td>
+<td>一个逻辑流对应一个 OS 线程</td>
+<td>内核抢占、公平调度；大量 I/O 等待时切换成本高</td>
+</tr>
+<tr>
+<td>协程 M:1</td>
+<td>多个逻辑流共享一个线程</td>
+<td>用户态切换轻；一个协程阻塞可拖住整个 loop</td>
+</tr>
+<tr>
+<td>协程 M:N</td>
+<td>多个协程运行在多个工作线程</td>
+<td>可 work stealing；运行时与线程安全更复杂</td>
+</tr>
+</tbody></table>
+<p>Python asyncio 通常是 M:1：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">一个 event-loop thread</span><br><span class="line">  ├─ Task A：等 P RPC</span><br><span class="line">  ├─ Task B：等 worker SEND_DONE</span><br><span class="line">  ├─ Task C：等 timeout/retry</span><br><span class="line">  └─ Task D：处理 abort</span><br></pre></td></tr></table></figure>
+
+<p>当 A <code>await reader.readexactly()</code> 时，如果数据尚未就绪，A 挂起，loop 可以执行 B/C/D。<br>这很适合连接多、单次 CPU 工作少的 Hybrid Connector 控制面。</p>
+<h3 id="8-2-await-不保证让出线程"><a href="#8-2-await-不保证让出线程" class="headerlink" title="8.2 await 不保证让出线程"></a>8.2 <code>await</code> 不保证让出线程</h3><p>如果 awaitable 已经 ready，<code>await</code> 可以立即返回：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">await</span> queue.put(req)  <span class="comment"># 无界 queue 未满，可能立即完成</span></span><br></pre></td></tr></table></figure>
+
+<p>若循环中的所有 await 都立即完成，一个 Task 仍可能长期霸占 loop：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">async</span> <span class="keyword">def</span> <span class="title function_">producer</span>():</span><br><span class="line">    <span class="keyword">while</span> <span class="literal">True</span>:</span><br><span class="line">        req = <span class="keyword">await</span> get_ready_req()  <span class="comment"># 压测时总是 ready</span></span><br><span class="line">        <span class="keyword">await</span> unbounded_q.put(req)   <span class="comment"># 总是 ready</span></span><br></pre></td></tr></table></figure>
+
+<p>其他 Task 可能长期拿不到调度机会。必要时显式：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">await</span> asyncio.sleep(<span class="number">0</span>)</span><br></pre></td></tr></table></figure>
+
+<p>但这只是局部补丁。更成熟的运行时会有 cooperative budget，例如资源操作消耗 budget，<br>耗尽后迫使 Task yield。asyncio 没有同等的统一机制，因此更依赖代码规范、lint、压测<br>和 event-loop latency 指标。</p>
+<h3 id="8-3-同步-异步边界"><a href="#8-3-同步-异步边界" class="headerlink" title="8.3 同步/异步边界"></a>8.3 同步/异步边界</h3><p>同步函数调用异步库，可在真正的边界使用：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">loop.run_until_complete(coro())</span><br></pre></td></tr></table></figure>
+
+<p>但不能在已经运行的 event loop 内再次 <code>run_until_complete</code>，否则会得到<br><code>RuntimeError: This event loop is already running</code>。</p>
+<p>异步函数若必须调用阻塞 I/O 或 CPU-heavy 逻辑，应放入 executor：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">result = <span class="keyword">await</span> loop.run_in_executor(<span class="literal">None</span>, blocking_io)</span><br></pre></td></tr></table></figure>
+
+<p>否则一次日志 flush、DNS、文件 I/O、锁等待或长循环，都可能冻结 P/D 控制面上的所有<br>coroutine。</p>
+<h3 id="8-4-跨线程提交必须使用线程安全入口"><a href="#8-4-跨线程提交必须使用线程安全入口" class="headerlink" title="8.4 跨线程提交必须使用线程安全入口"></a>8.4 跨线程提交必须使用线程安全入口</h3><p>asyncio 的大多数对象不是线程安全的。从 EngineCore/worker thread 向 Hybrid loop 提交<br>任务，应使用：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">future = asyncio.run_coroutine_threadsafe(coro(), loop)</span><br></pre></td></tr></table></figure>
+
+<p>或者通过 <code>loop.call_soon_threadsafe()</code> 把 callback 放入 loop。不能从任意线程直接修改<br>loop 内部 Task/Future 状态。</p>
+<h2 id="9-一定要保存-asyncio-Task"><a href="#9-一定要保存-asyncio-Task" class="headerlink" title="9. 一定要保存 asyncio.Task"></a>9. 一定要保存 <code>asyncio.Task</code></h2><p>event loop 对 Task 只保留弱引用。典型错误是：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">asyncio.create_task(background_rpc())</span><br><span class="line"><span class="comment"># 返回值无人保存</span></span><br></pre></td></tr></table></figure>
+
+<p>如果没有其他对象形成强引用，GC 可以在 Task 尚未完成时回收它，出现：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Task was destroyed but it is pending!</span><br></pre></td></tr></table></figure>
+
+<p><img src="/notes/imgs/vllm-pd-asyncio-task-reference.svg" alt="asyncio Task 的引用链"></p>
+<h3 id="9-1-为什么有些代码“从来没出过问题”"><a href="#9-1-为什么有些代码“从来没出过问题”" class="headerlink" title="9.1 为什么有些代码“从来没出过问题”"></a>9.1 为什么有些代码“从来没出过问题”</h3><p>Task 是否被意外保活可能依赖 awaitable 的实现细节。</p>
+<p>例如 <code>asyncio.sleep()</code> 会建立类似的引用链：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">event loop._scheduled</span><br><span class="line">  → TimerHandle</span><br><span class="line">  → Future</span><br><span class="line">  → callback(Task.__wakeup)</span><br><span class="line">  → Task</span><br></pre></td></tr></table></figure>
+
+<p>于是一个 <code>while True: await asyncio.sleep(...)</code> 的后台 Task 可能一直有强引用，让人误以为<br>不保存 <code>create_task()</code> 返回值也安全。</p>
+<p>但等待 <code>StreamReader.readexactly()</code> 等路径时，不应假设存在同样的强引用链。原文中的<br>长稳测试正是在这种路径上暴露了 pending Task 被 GC 的问题。</p>
+<p>工程结论不是“判断哪一种 awaitable 会保活 Task”，而是：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">所有 fire-and-forget Task 都显式保存；</span><br><span class="line">Task 完成后再从集合删除。</span><br></pre></td></tr></table></figure>
+
+<h3 id="9-2-推荐写法"><a href="#9-2-推荐写法" class="headerlink" title="9.2 推荐写法"></a>9.2 推荐写法</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">running_tasks: <span class="built_in">set</span>[asyncio.Task] = <span class="built_in">set</span>()</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">spawn</span>(<span class="params">coro</span>) -&gt; asyncio.Task:</span><br><span class="line">    task = asyncio.create_task(coro)</span><br><span class="line">    running_tasks.add(task)</span><br><span class="line">    task.add_done_callback(running_tasks.discard)</span><br><span class="line">    <span class="keyword">return</span> task</span><br></pre></td></tr></table></figure>
+
+<p>如果后台 Task 对进程存活至关重要，还要处理未观察异常：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">on_done</span>(<span class="params">task: asyncio.Task</span>) -&gt; <span class="literal">None</span>:</span><br><span class="line">    running_tasks.discard(task)</span><br><span class="line">    <span class="keyword">try</span>:</span><br><span class="line">        task.result()</span><br><span class="line">    <span class="keyword">except</span> asyncio.CancelledError:</span><br><span class="line">        <span class="keyword">pass</span></span><br><span class="line">    <span class="keyword">except</span> Exception:</span><br><span class="line">        logger.exception(<span class="string">"critical background task failed"</span>)</span><br><span class="line">        os.abort()  <span class="comment"># 是否 fail-fast 取决于系统策略</span></span><br></pre></td></tr></table></figure>
+
+<p>原文采用 <code>kill_me_if_exception</code> 装饰器和 loop exception handler 直接 abort，目标是避免<br>控制面后台 Task 静默死亡后进程表面健康、请求却永久等待。其权衡是：局部可恢复错误也<br>可能升级为进程退出。因此生产设计还需区分：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">request-scoped error → 失败当前请求并清理资源</span><br><span class="line">peer-scoped error    → 断开/摘除对端并重试或重路由</span><br><span class="line">process invariant    → fail-fast，由上层拉起新实例</span><br></pre></td></tr></table></figure>
+
+<h2 id="10-把-asyncio-语义映射回-PD-控制面"><a href="#10-把-asyncio-语义映射回-PD-控制面" class="headerlink" title="10. 把 asyncio 语义映射回 PD 控制面"></a>10. 把 asyncio 语义映射回 PD 控制面</h2><table>
+<thead>
+<tr>
+<th>asyncio 风险</th>
+<th>PD/KVT 后果</th>
+<th>防御</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Task 没有强引用，被 GC</td>
+<td><code>SEND_DONE</code>/RPC reader 消失，请求永远等</td>
+<td>running task set + done callback</td>
+</tr>
+<tr>
+<td>coroutine 含同步阻塞</td>
+<td>整个 Hybrid loop 无法处理 completion/abort</td>
+<td>executor、拆分 CPU 工作、event-loop lag</td>
+</tr>
+<tr>
+<td>awaitable 总是 ready</td>
+<td>单 Task 饿死其他请求</td>
+<td>主动 yield、限额队列、budget/公平性测试</td>
+</tr>
+<tr>
+<td><code>readexactly</code> 无 deadline</td>
+<td>半开连接导致永久 pending</td>
+<td>单次 I/O timeout + request 总 deadline</td>
+</tr>
+<tr>
+<td>Task 异常无人观察</td>
+<td>进程存活但控制面已残缺</td>
+<td>done callback、loop exception handler、健康检查</td>
+</tr>
+<tr>
+<td>跨线程直接操作 Future</td>
+<td>状态竞态或非线程安全异常</td>
+<td><code>run_coroutine_threadsafe</code> / <code>call_soon_threadsafe</code></td>
+</tr>
+<tr>
+<td>cancellation 只取消 Python Task</td>
+<td>在途 RDMA 仍可能写 D Block</td>
+<td>transfer ref、底层 cancel/cleanup、late completion 去重</td>
+</tr>
+</tbody></table>
+<p>最后一行尤其重要：<code>asyncio.wait_for()</code> 超时并不能自动撤销已经 post 给 RNIC 的 WR。<br>Python 控制面、C++ KVT、Barex/provider 和 Block 生命周期必须共同定义 timeout/abort<br>协议。</p>
+<h2 id="11-运行时可观测性：事前防御与事后追踪"><a href="#11-运行时可观测性：事前防御与事后追踪" class="headerlink" title="11. 运行时可观测性：事前防御与事后追踪"></a>11. 运行时可观测性：事前防御与事后追踪</h2><h3 id="11-1-事前防御"><a href="#11-1-事前防御" class="headerlink" title="11.1 事前防御"></a>11.1 事前防御</h3><ul>
+<li>lint 禁止在 async 路径直接调用已知阻塞函数；</li>
+<li>所有后台 Task 通过统一 <code>spawn()</code> 创建；</li>
+<li>RPC read/write/handshake 有单次 timeout；</li>
+<li>request 有跨重试的总 deadline；</li>
+<li>无界 queue 改为限额、批处理或显式公平让出；</li>
+<li>fault injection 覆盖少一个 TP completion、对端半开、late completion、abort 竞态。</li>
+</ul>
+<h3 id="11-2-事后追踪"><a href="#11-2-事后追踪" class="headerlink" title="11.2 事后追踪"></a>11.2 事后追踪</h3><p>参考内核 Scheduler 指标，为用户态 loop 暴露：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">runnable task queue length</span><br><span class="line">task 从 ready 到真正运行的延迟</span><br><span class="line">event-loop lag</span><br><span class="line">当前 Task 连续运行时长</span><br><span class="line">最老的 waiting/loading/saving/sending age</span><br><span class="line">各请求缺失的 TP rank/source</span><br><span class="line">RPC read/write latency 与 timeout count</span><br><span class="line">running_tasks 数量及其 coroutine 名称</span><br></pre></td></tr></table></figure>
+
+<p>当某工作线程长期执行一个协程，可采样线程栈；更完善的工具还应展示 coroutine await<br>链、Future owner 和逻辑异步栈。信号处理函数中直接执行复杂 backtrace 要注意<br>async-signal-safety，不能为了诊断再引入新的 crash/deadlock。</p>
+<h2 id="12-一套端到端排查顺序"><a href="#12-一套端到端排查顺序" class="headerlink" title="12. 一套端到端排查顺序"></a>12. 一套端到端排查顺序</h2><h3 id="12-1-TTFT-变差"><a href="#12-1-TTFT-变差" class="headerlink" title="12.1 TTFT 变差"></a>12.1 TTFT 变差</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">先看请求时间线</span><br><span class="line">  → P Prefill 是否变慢</span><br><span class="line">  → 每层 Event→post 是否有空洞</span><br><span class="line">  → WR batch size / signaled 比例</span><br><span class="line">  → post→CQE</span><br><span class="line">  → TP SEND_DONE 聚合</span><br><span class="line">  → P RPC 返回</span><br><span class="line">  → D mark_loaded / 重新入队</span><br></pre></td></tr></table></figure>
+
+<p>小包场景优先看 WR/CQE/software overhead，而不是只看链路 GB/s。</p>
+<h3 id="12-2-Decode-ITL-TPOT-变差"><a href="#12-2-Decode-ITL-TPOT-变差" class="headerlink" title="12.2 Decode ITL/TPOT 变差"></a>12.2 Decode ITL/TPOT 变差</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">确认额外请求是否进入 D 计算队列</span><br><span class="line">  → 隔离纯 GDR 流量</span><br><span class="line">  → 对齐 forward latency 与 RDMA RX bytes/pps</span><br><span class="line">  → 检查 HBM、PCIe、RNIC、EP all-to-all 的时间相关性</span><br></pre></td></tr></table></figure>
+
+<p>不要仅凭“GDR 会写 HBM”推断一定退化，也不要用一次无退化实验推断所有拓扑都安全。</p>
+<h3 id="12-3-请求永久-hang"><a href="#12-3-请求永久-hang" class="headerlink" title="12.3 请求永久 hang"></a>12.3 请求永久 hang</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">检查 Hybrid event-loop lag / thread stack</span><br><span class="line">  → 后台 Task 是否仍在 running_tasks</span><br><span class="line">  → `_SendingReq`/IoState 缺哪个 rank/source</span><br><span class="line">  → socket 是否卡在无 timeout 的 readexactly</span><br><span class="line">  → transport future 是否无界等待</span><br><span class="line">  → completion 是否到达但 Core 未被唤醒</span><br></pre></td></tr></table></figure>
+
+<h3 id="12-4-Abort-后错-KV"><a href="#12-4-Abort-后错-KV" class="headerlink" title="12.4 Abort 后错 KV"></a>12.4 Abort 后错 KV</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">检查 D Block ref_cnt</span><br><span class="line">  → scheduler ref 与 transfer ref 是否分别释放</span><br><span class="line">  → 在途 WR 是否仍写旧地址</span><br><span class="line">  → late completion 是否按 generation/request 去重</span><br><span class="line">  → partial KV 是否被错误标成 loaded</span><br></pre></td></tr></table></figure>
+
+<h2 id="13-最终心智模型"><a href="#13-最终心智模型" class="headerlink" title="13. 最终心智模型"></a>13. 最终心智模型</h2><p>把整套系统压缩成四个互相咬合的原则：</p>
+<ol>
+<li><strong>布局隔离</strong>：上层使用 token/block 语义，ParseBlock 负责变成 byte ranges。</li>
+<li><strong>计算与 I/O 隔离</strong>：Scheduler 推进计算；Connector/Backend 异步处理 KV load/save。</li>
+<li><strong>完成边界分层</strong>：CUDA Event、CQE、worker completion、TP 聚合和请求完成不可混淆。</li>
+<li><strong>所有权显式化</strong>：Block、Task、connection、Future 和 timeout 都必须有明确 owner。</li>
+</ol>
+<p>性能优化和可靠性并非两条独立路线：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">批量 Unsignaled WR 提升性能</span><br><span class="line">  → completion 粒度变化</span><br><span class="line">  → 错误归属与回收逻辑也要变化</span><br><span class="line"></span><br><span class="line">双请求模式降低等待</span><br><span class="line">  → P/D rendezvous 更异步</span><br><span class="line">  → abort、超时、Task 生命周期更难</span><br><span class="line"></span><br><span class="line">GDR 去掉 host staging</span><br><span class="line">  → 数据路径更短</span><br><span class="line">  → GPU/RNIC memory ordering 与 Block 延迟释放更关键</span><br></pre></td></tr></table></figure>
+
+<p>真正成熟的 PD 分离系统，不只是“能把 KV 发过去”，而是同时做到：主调度链路足够轻、<br>小包传输足够快、每种 completion 有清晰语义，以及任何异常路径最终都能释放正确的<br>Request、Task、连接和 KV Block。</p>
+<h2 id="14-原始文章"><a href="#14-原始文章" class="headerlink" title="14. 原始文章"></a>14. 原始文章</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://ata.atatech.org/articles/11020518835">转折中的 PD 分离</a></li>
+<li><a target="_blank" rel="noopener" href="https://ata.atatech.org/articles/11020460403">PD 分离中的 kvcache 传输优化</a></li>
+<li><a target="_blank" rel="noopener" href="https://ata.atatech.org/articles/11020408441">PD 分离中的 GDR</a></li>
+<li><a target="_blank" rel="noopener" href="https://ata.atatech.org/articles/11020396051">一定要保存 asyncio.Task 对象啊!</a></li>
+<li><a target="_blank" rel="noopener" href="https://ata.atatech.org/articles/11020324515">为什么协程</a></li>
+</ul>
+<h2 id="15-自检题"><a href="#15-自检题" class="headerlink" title="15. 自检题"></a>15. 自检题</h2><ol>
+<li>为什么 D 必须先分配目标 Block，P 才能做单边 RDMA Write？</li>
+<li>ParseBlock 抽象如何同时适配 KV 相邻布局与 K/V 分区布局？</li>
+<li>为什么 CQE 到达不能直接等价为 D 请求可 Decode？</li>
+<li>每个 128 B WR 都 signaled 时，瓶颈为什么可能在 CPU/CQE 而不是网络带宽？</li>
+<li>为什么增加 QP 在优化前几乎无效、精简热路径后却明显有效？</li>
+<li>GDR 对 Decode 无明显影响的实验结论有哪些适用边界？</li>
+<li><code>await</code> 为什么不保证当前 Task 一定让出 event-loop thread？</li>
+<li>为什么 <code>while True: await asyncio.sleep()</code> 可能掩盖未保存 Task 的错误？</li>
+<li><code>asyncio.wait_for()</code> 超时后，为什么仍不能立即复用 D KV Block？</li>
+<li>一次 abort 需要哪些组件共同完成资源收尾？</li>
+</ol>
+</div><div class="article-licensing box"><div class="licensing-title"><p>10 ATA 五篇串讲：PD 分离、GDR、传输优化与 asyncio</p><p><a href="https://llx-08.github.io/notes/2026/08/26/2026-08-26-vllm-blade-kvt-pd-learning-10-ata-pd-gdr-asyncio-synthesis/">https://llx-08.github.io/notes/2026/08/26/2026-08-26-vllm-blade-kvt-pd-learning-10-ata-pd-gdr-asyncio-synthesis/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-08-26</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-08-26</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/vLLM/">vLLM</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Barex/">Barex</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Blade-KVT/">Blade-KVT</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/">PD 分离</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/KV-Cache/">KV Cache</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Hybrid-Connector/">Hybrid Connector</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/08/26/2026-08-26-nccl-pcie-barex-learning-06a-ata-barex-design-and-optimizations/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">06a. 从《RDMA 高性能点对点通信库的艺术》看 Barex 的工程设计</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/08/26/2026-08-26-vllm-blade-kvt-pd-learning-11-ata-nan-vllm-cuda-stream-thread-pollution/"><span class="level-item">11 无中生有的 NaN：vLLM 全局 CUDA Stream 污染</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">102</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">5</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">28</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/"><span class="level-start"><span class="level-item">Mooncake Store 与 cache-aware 调度</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">17</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/"><span class="level-start"><span class="level-item">vllm、Blade-kvt与PD分离</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/">11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/">12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/">13. CUDA context 与 stream：执行模型的进程视角</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-07-partitioning-measured/">07 · 多 master 分区：从设计到实测</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-08-internal-mooncake-rldev-alignment/">从统一内存池到多 Master：内部 Mooncake rldev 对我们的启示</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/08/"><span class="level-start"><span class="level-item">八月 2026</span></span><span class="level-end"><span class="level-item tag">20</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">54</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Attention/"><span class="tag">Attention</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">30</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Blade-KVT/"><span class="tag">Blade-KVT</span><span class="tag">13</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/DCP/"><span class="tag">DCP</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Hybrid-Connector/"><span class="tag">Hybrid Connector</span><span class="tag">13</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/KV-Cache/"><span class="tag">KV Cache</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MLA/"><span class="tag">MLA</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Mooncake/"><span class="tag">Mooncake</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/"><span class="tag">PD 分离</span><span class="tag">23</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/cache-aware-%E8%B0%83%E5%BA%A6/"><span class="tag">cache-aware 调度</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">28</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">67</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%A9%B1%E9%80%90%E7%AD%96%E7%95%A5/"><span class="tag">驱逐策略</span><span class="tag">10</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

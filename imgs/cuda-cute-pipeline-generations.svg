@@ -1,0 +1,190 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="990" viewBox="0 0 1280 990" role="img" aria-labelledby="title desc" data-series="cuda-cute-nvidia-learning">
+  <title id="title">GEMM 主循环流水线的四代演进</title>
+  <desc id="desc">对比 Volta/Turing 的 LDG+STS 双缓冲、Ampere 的 cp.async 多级循环缓冲、Hopper 的 TMA 加 warp specialization、Blackwell 的 tcgen05 加 TMEM 三级解耦，展示搬运与计算如何逐代解耦重叠。</desc>
+  <defs>
+    <marker id="ar" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#8fb8d6"/></marker>
+    <marker id="arg" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#6ee7a0"/></marker>
+    <marker id="arb" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#65d0ff"/></marker>
+    <marker id="arp" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L10 3 0 6Z" fill="#c39bff"/></marker>
+  </defs>
+  <rect width="1280" height="990" rx="26" fill="#071522"/>
+  <text x="640" y="48" text-anchor="middle" fill="white" font-family="sans-serif" font-size="29" font-weight="700">GEMM 主循环流水线：四代硬件的时间线</text>
+  <text x="640" y="78" text-anchor="middle" fill="#7e9fb8" font-family="sans-serif" font-size="15">横轴是时间。每一代解决的都是上一代流水线的一个具体漏洞：寄存器中转 → 地址生成 → 角色耦合 → 累加器占用</text>
+
+  <g font-family="sans-serif">
+
+    <!-- ============ Volta / Turing ============ -->
+    <rect x="32" y="100" width="222" height="176" rx="16" fill="#3a2430" stroke="#ff8fa3"/>
+    <text x="143" y="132" text-anchor="middle" fill="#ffb3c1" font-size="20" font-weight="700">Volta / Turing</text>
+    <text x="143" y="157" text-anchor="middle" fill="white" font-size="14">LDG + STS 双缓冲</text>
+    <text x="143" y="186" text-anchor="middle" fill="#e7b9c4" font-size="13">GMEM→RF→SMEM→RF</text>
+    <text x="143" y="214" text-anchor="middle" fill="#ff9bb0" font-size="13">数据中转占寄存器</text>
+    <text x="143" y="236" text-anchor="middle" fill="#ff9bb0" font-size="13">→ stage 上限 ≈ 2</text>
+    <text x="143" y="262" text-anchor="middle" fill="#ff9bb0" font-size="13">__syncthreads 锁死全 CTA</text>
+
+    <text x="272" y="156" fill="#8fb8d6" font-size="13">LSU</text>
+    <text x="272" y="212" fill="#8fb8d6" font-size="13">TC</text>
+
+    <g>
+      <rect x="340" y="136" width="130" height="30" rx="7" fill="#7c3b52"/><text x="405" y="156" text-anchor="middle" fill="white" font-size="12">LDG k+1 在途</text>
+      <rect x="478" y="136" width="58" height="30" rx="7" fill="#a85070"/><text x="507" y="156" text-anchor="middle" fill="white" font-size="12">STS</text>
+      <rect x="350" y="192" width="34" height="30" rx="7" fill="#2f5d78"/><text x="367" y="212" text-anchor="middle" fill="white" font-size="11">LDS</text>
+      <rect x="388" y="192" width="96" height="30" rx="7" fill="#3d7ea6"/><text x="436" y="212" text-anchor="middle" fill="white" font-size="12">HMMA k</text>
+      <line x1="545" y1="126" x2="545" y2="238" stroke="#ff8fa3" stroke-width="2" stroke-dasharray="5 4"/>
+    </g>
+    <g>
+      <rect x="560" y="136" width="130" height="30" rx="7" fill="#7c3b52"/><text x="625" y="156" text-anchor="middle" fill="white" font-size="12">LDG k+2 在途</text>
+      <rect x="698" y="136" width="58" height="30" rx="7" fill="#a85070"/><text x="727" y="156" text-anchor="middle" fill="white" font-size="12">STS</text>
+      <rect x="570" y="192" width="34" height="30" rx="7" fill="#2f5d78"/><text x="587" y="212" text-anchor="middle" fill="white" font-size="11">LDS</text>
+      <rect x="608" y="192" width="96" height="30" rx="7" fill="#3d7ea6"/><text x="656" y="212" text-anchor="middle" fill="white" font-size="12">HMMA k+1</text>
+      <line x1="765" y1="126" x2="765" y2="238" stroke="#ff8fa3" stroke-width="2" stroke-dasharray="5 4"/>
+    </g>
+    <g>
+      <rect x="780" y="136" width="130" height="30" rx="7" fill="#7c3b52"/><text x="845" y="156" text-anchor="middle" fill="white" font-size="12">LDG k+3 在途</text>
+      <rect x="918" y="136" width="58" height="30" rx="7" fill="#a85070"/><text x="947" y="156" text-anchor="middle" fill="white" font-size="12">STS</text>
+      <rect x="790" y="192" width="34" height="30" rx="7" fill="#2f5d78"/><text x="807" y="212" text-anchor="middle" fill="white" font-size="11">LDS</text>
+      <rect x="828" y="192" width="96" height="30" rx="7" fill="#3d7ea6"/><text x="876" y="212" text-anchor="middle" fill="white" font-size="12">HMMA k+2</text>
+      <line x1="985" y1="126" x2="985" y2="238" stroke="#ff8fa3" stroke-width="2" stroke-dasharray="5 4"/>
+    </g>
+    <rect x="1000" y="136" width="130" height="30" rx="7" fill="#7c3b52"/><text x="1065" y="156" text-anchor="middle" fill="white" font-size="12">LDG k+4 在途</text>
+    <rect x="1010" y="192" width="34" height="30" rx="7" fill="#2f5d78"/><text x="1027" y="212" text-anchor="middle" fill="white" font-size="11">LDS</text>
+    <rect x="1048" y="192" width="96" height="30" rx="7" fill="#3d7ea6"/><text x="1096" y="212" text-anchor="middle" fill="white" font-size="12">HMMA k+3</text>
+    <text x="740" y="262" text-anchor="middle" fill="#ff9bb0" font-size="13">虚线 = __syncthreads()：重叠存在，但每轮都要全 CTA 对齐一次</text>
+
+    <!-- ============ Ampere ============ -->
+    <rect x="32" y="296" width="222" height="176" rx="16" fill="#1e3b2a" stroke="#6ee7a0"/>
+    <text x="143" y="328" text-anchor="middle" fill="#9bf3c0" font-size="20" font-weight="700">Ampere (SM80)</text>
+    <text x="143" y="353" text-anchor="middle" fill="white" font-size="14">cp.async 多级循环缓冲</text>
+    <text x="143" y="382" text-anchor="middle" fill="#b6e8c9" font-size="13">GMEM ──→ SMEM 直达</text>
+    <text x="143" y="404" text-anchor="middle" fill="#b6e8c9" font-size="13">（绕过寄存器）</text>
+    <text x="143" y="432" text-anchor="middle" fill="#8de0ad" font-size="13">stage 由 SMEM 容量决定</text>
+    <text x="143" y="454" text-anchor="middle" fill="#8de0ad" font-size="13">commit_group / wait_group</text>
+
+    <text x="266" y="352" fill="#8fb8d6" font-size="13">cp.async</text>
+    <text x="272" y="408" fill="#8fb8d6" font-size="13">mma</text>
+
+    <rect x="340" y="386" width="252" height="46" rx="8" fill="#123322" stroke="#2f6b47" stroke-dasharray="4 3"/>
+    <text x="466" y="414" text-anchor="middle" fill="#69c78f" font-size="13">prologue：填流水线 (S-1) 次</text>
+
+    <g fill="#2f7a52">
+      <rect x="340" y="332" width="78" height="30" rx="7"/><rect x="424" y="332" width="78" height="30" rx="7"/>
+      <rect x="508" y="332" width="78" height="30" rx="7"/><rect x="592" y="332" width="78" height="30" rx="7"/>
+      <rect x="676" y="332" width="78" height="30" rx="7"/><rect x="760" y="332" width="78" height="30" rx="7"/>
+      <rect x="844" y="332" width="78" height="30" rx="7"/><rect x="928" y="332" width="78" height="30" rx="7"/>
+      <rect x="1012" y="332" width="78" height="30" rx="7"/><rect x="1096" y="332" width="78" height="30" rx="7"/>
+    </g>
+    <g fill="white" font-size="12" text-anchor="middle">
+      <text x="379" y="352">ld 0</text><text x="463" y="352">ld 1</text><text x="547" y="352">ld 2</text>
+      <text x="631" y="352">ld 3</text><text x="715" y="352">ld 4</text><text x="799" y="352">ld 5</text>
+      <text x="883" y="352">ld 6</text><text x="967" y="352">ld 7</text><text x="1051" y="352">ld 8</text><text x="1135" y="352">ld 9</text>
+    </g>
+    <g fill="#3d7ea6">
+      <rect x="592" y="388" width="78" height="30" rx="7"/><rect x="676" y="388" width="78" height="30" rx="7"/>
+      <rect x="760" y="388" width="78" height="30" rx="7"/><rect x="844" y="388" width="78" height="30" rx="7"/>
+      <rect x="928" y="388" width="78" height="30" rx="7"/><rect x="1012" y="388" width="78" height="30" rx="7"/>
+      <rect x="1096" y="388" width="78" height="30" rx="7"/>
+    </g>
+    <g fill="white" font-size="12" text-anchor="middle">
+      <text x="631" y="408">mma 0</text><text x="715" y="408">mma 1</text><text x="799" y="408">mma 2</text>
+      <text x="883" y="408">mma 3</text><text x="967" y="408">mma 4</text><text x="1051" y="408">mma 5</text><text x="1135" y="408">mma 6</text>
+    </g>
+    <line x1="592" y1="366" x2="592" y2="384" stroke="#6ee7a0" stroke-width="1.6" marker-end="url(#arg)"/>
+    <text x="880" y="452" text-anchor="middle" fill="#8de0ad" font-size="13">稳态：两条线同时满负荷，每轮耗时 max(t_load, t_mma)</text>
+
+    <!-- ============ Hopper ============ -->
+    <rect x="32" y="492" width="222" height="196" rx="16" fill="#173f59" stroke="#65d0ff"/>
+    <text x="143" y="524" text-anchor="middle" fill="#82dcff" font-size="20" font-weight="700">Hopper (SM90)</text>
+    <text x="143" y="549" text-anchor="middle" fill="white" font-size="14">TMA + warp specialization</text>
+    <text x="143" y="578" text-anchor="middle" fill="#bce7f7" font-size="13">单线程发 TMA，硬件</text>
+    <text x="143" y="600" text-anchor="middle" fill="#bce7f7" font-size="13">做多维地址生成</text>
+    <text x="143" y="628" text-anchor="middle" fill="#7fd4ff" font-size="13">producer / consumer 分离</text>
+    <text x="143" y="650" text-anchor="middle" fill="#7fd4ff" font-size="13">mbarrier + setmaxnreg</text>
+    <text x="143" y="672" text-anchor="middle" fill="#7fd4ff" font-size="13">pingpong 藏 epilogue</text>
+
+    <text x="258" y="546" fill="#8fb8d6" font-size="12">producer</text>
+    <text x="262" y="596" fill="#8fb8d6" font-size="12">consumer</text>
+    <text x="266" y="614" fill="#8fb8d6" font-size="12">WG0</text>
+    <text x="262" y="654" fill="#8fb8d6" font-size="12">consumer</text>
+    <text x="266" y="672" fill="#8fb8d6" font-size="12">WG1</text>
+
+    <g fill="#1f6a91">
+      <rect x="340" y="528" width="78" height="28" rx="7"/><rect x="424" y="528" width="78" height="28" rx="7"/>
+      <rect x="508" y="528" width="78" height="28" rx="7"/><rect x="592" y="528" width="78" height="28" rx="7"/>
+      <rect x="676" y="528" width="78" height="28" rx="7"/><rect x="760" y="528" width="78" height="28" rx="7"/>
+      <rect x="844" y="528" width="78" height="28" rx="7"/><rect x="928" y="528" width="78" height="28" rx="7"/>
+      <rect x="1012" y="528" width="78" height="28" rx="7"/><rect x="1096" y="528" width="78" height="28" rx="7"/>
+    </g>
+    <g fill="white" font-size="11.5" text-anchor="middle">
+      <text x="379" y="547">TMA 0</text><text x="463" y="547">TMA 1</text><text x="547" y="547">TMA 2</text>
+      <text x="631" y="547">TMA 3</text><text x="715" y="547">TMA 4</text><text x="799" y="547">TMA 5</text>
+      <text x="883" y="547">TMA 6</text><text x="967" y="547">TMA 7</text><text x="1051" y="547">TMA 8</text><text x="1135" y="547">TMA 9</text>
+    </g>
+    <g fill="#2f8fbd">
+      <rect x="508" y="584" width="162" height="28" rx="7"/><rect x="676" y="584" width="162" height="28" rx="7"/>
+      <rect x="844" y="584" width="162" height="28" rx="7"/><rect x="1012" y="584" width="162" height="28" rx="7"/>
+    </g>
+    <g fill="white" font-size="12" text-anchor="middle">
+      <text x="589" y="603">wgmma 0-1</text><text x="757" y="603">wgmma 2-3</text>
+      <text x="925" y="603">wgmma 4-5</text><text x="1093" y="603">wgmma 6-7</text>
+    </g>
+    <g fill="#48627a">
+      <rect x="592" y="640" width="162" height="28" rx="7"/><rect x="760" y="640" width="162" height="28" rx="7"/>
+      <rect x="928" y="640" width="162" height="28" rx="7"/>
+    </g>
+    <g fill="white" font-size="12" text-anchor="middle">
+      <text x="673" y="659">epilogue</text><text x="841" y="659">epilogue</text><text x="1009" y="659">epilogue</text>
+    </g>
+    <line x1="508" y1="560" x2="508" y2="580" stroke="#65d0ff" stroke-width="1.6" marker-end="url(#arb)"/>
+    <text x="524" y="574" fill="#7fd4ff" font-size="11">mbarrier full</text>
+    <line x1="670" y1="612" x2="670" y2="636" stroke="#65d0ff" stroke-width="1.6" marker-end="url(#arb)"/>
+
+    <!-- ============ Blackwell ============ -->
+    <rect x="32" y="708" width="222" height="196" rx="16" fill="#3a2b52" stroke="#c39bff"/>
+    <text x="143" y="740" text-anchor="middle" fill="#ddc6ff" font-size="20" font-weight="700">Blackwell (SM100)</text>
+    <text x="143" y="765" text-anchor="middle" fill="white" font-size="14">tcgen05 + TMEM</text>
+    <text x="143" y="794" text-anchor="middle" fill="#d3bdf0" font-size="13">累加器移出通用寄存器</text>
+    <text x="143" y="816" text-anchor="middle" fill="#d3bdf0" font-size="13">进入专用 Tensor Memory</text>
+    <text x="143" y="844" text-anchor="middle" fill="#c9a6ff" font-size="13">MMA 单线程 issue</text>
+    <text x="143" y="866" text-anchor="middle" fill="#c9a6ff" font-size="13">CTA pair 协作</text>
+    <text x="143" y="888" text-anchor="middle" fill="#c9a6ff" font-size="13">三段完全解耦</text>
+
+    <text x="272" y="746" fill="#8fb8d6" font-size="12">TMA</text>
+    <text x="258" y="802" fill="#8fb8d6" font-size="12">tcgen05</text>
+    <text x="262" y="858" fill="#8fb8d6" font-size="12">TMEM→</text>
+    <text x="262" y="876" fill="#8fb8d6" font-size="12">epilogue</text>
+
+    <g fill="#6d4a9c">
+      <rect x="340" y="728" width="78" height="28" rx="7"/><rect x="424" y="728" width="78" height="28" rx="7"/>
+      <rect x="508" y="728" width="78" height="28" rx="7"/><rect x="592" y="728" width="78" height="28" rx="7"/>
+      <rect x="676" y="728" width="78" height="28" rx="7"/><rect x="760" y="728" width="78" height="28" rx="7"/>
+      <rect x="844" y="728" width="78" height="28" rx="7"/><rect x="928" y="728" width="78" height="28" rx="7"/>
+      <rect x="1012" y="728" width="78" height="28" rx="7"/><rect x="1096" y="728" width="78" height="28" rx="7"/>
+    </g>
+    <g fill="white" font-size="11.5" text-anchor="middle">
+      <text x="379" y="747">A/B+scale</text><text x="463" y="747">A/B+scale</text><text x="547" y="747">A/B+scale</text>
+      <text x="631" y="747">A/B+scale</text><text x="715" y="747">A/B+scale</text><text x="799" y="747">A/B+scale</text>
+      <text x="883" y="747">A/B+scale</text><text x="967" y="747">A/B+scale</text><text x="1051" y="747">A/B+scale</text><text x="1135" y="747">A/B+scale</text>
+    </g>
+    <g fill="#8f5fd0">
+      <rect x="508" y="784" width="162" height="28" rx="7"/><rect x="676" y="784" width="162" height="28" rx="7"/>
+      <rect x="844" y="784" width="162" height="28" rx="7"/><rect x="1012" y="784" width="162" height="28" rx="7"/>
+    </g>
+    <g fill="white" font-size="12" text-anchor="middle">
+      <text x="589" y="803">tcgen05.mma</text><text x="757" y="803">tcgen05.mma</text>
+      <text x="925" y="803">tcgen05.mma</text><text x="1093" y="803">tcgen05.mma</text>
+    </g>
+    <g fill="#5c4880">
+      <rect x="676" y="840" width="162" height="28" rx="7"/><rect x="844" y="840" width="162" height="28" rx="7"/>
+      <rect x="1012" y="840" width="162" height="28" rx="7"/>
+    </g>
+    <g fill="white" font-size="12" text-anchor="middle">
+      <text x="757" y="859">tcgen05.ld</text><text x="925" y="859">tcgen05.ld</text><text x="1093" y="859">tcgen05.ld</text>
+    </g>
+    <line x1="508" y1="760" x2="508" y2="780" stroke="#c39bff" stroke-width="1.6" marker-end="url(#arp)"/>
+    <line x1="670" y1="812" x2="670" y2="836" stroke="#c39bff" stroke-width="1.6" marker-end="url(#arp)"/>
+    <text x="686" y="830" fill="#c9a6ff" font-size="11">accumulator 留在 TMEM，不占 RF</text>
+
+    <text x="640" y="944" text-anchor="middle" fill="#7e9fb8" font-size="14">四代的共同点：稳态下每轮耗时 = max(搬运, 计算)。差别在于「能开多深的流水线」和「多少角色可以独立推进」</text>
+    <text x="640" y="968" text-anchor="middle" fill="#5f7f96" font-size="12.5">块宽仅示意相对时序，不代表真实周期比例</text>
+  </g>
+</svg>

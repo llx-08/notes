@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max 前面几章已经分别讲过 tiling（ 04 ）、架构指令演进 （ 05 ）和 CuTe 的 pipeline 抽象 （ 09 ）。它们回答了「流水线长什么样」。 这一章回答另外三个问题： 1 2 3 为什么必须有流水线？——要藏的延迟到底多大 为什么 roofline 写 max 而不是 sum？——稳态怎么推出来的"><meta property="og:type" content="blog"><meta property="og:title" content="11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max"><meta property="og:url" content="https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max 前面几章已经分别讲过 tiling（ 04 ）、架构指令演进 （ 05 ）和 CuTe 的 pipeline 抽象 （ 09 ）。它们回答了「流水线长什么样」。 这一章回答另外三个问题： 1 2 3 为什么必须有流水线？——要藏的延迟到底多大 为什么 roofline 写 max 而不是 sum？——稳态怎么推出来的"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-latency-budget.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-pipeline-generations.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-staging-rf-vs-smem.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-pipeline-steady-state.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-intensity-tokens.svg"><meta property="article:published_time" content="2026-08-26T00:00:00.000Z"><meta property="article:modified_time" content="2026-08-26T14:17:26.961Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="CUDA"><meta property="article:tag" content="CuTe DSL"><meta property="article:tag" content="CUTLASS"><meta property="article:tag" content="GPU"><meta property="article:tag" content="Tensor Core"><meta property="article:tag" content="NVIDIA"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/cuda-cute-latency-budget.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/"},"headline":"11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max","image":[],"datePublished":"2026-08-26T00:00:00.000Z","dateModified":"2026-08-26T14:17:26.961Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max 前面几章已经分别讲过 tiling（ 04 ）、架构指令演进 （ 05 ）和 CuTe 的 pipeline 抽象 （ 09 ）。它们回答了「流水线长什么样」。 这一章回答另外三个问题： 1 2 3 为什么必须有流水线？——要藏的延迟到底多大 为什么 roofline 写 max 而不是 sum？——稳态怎么推出来的"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-08-26T00:00:00.000Z" title="8/26/2026, 12:00:00 AM">2026-08-26</time>发表</span><span class="level-item"><time dateTime="2026-08-26T14:17:26.961Z" title="8/26/2026, 2:17:26 PM">2026-08-26</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></span><span class="level-item">1 小时读完 (大约6978个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max</h1><div class="content"><h1 id="11-GEMM-软件流水线：从延迟隐藏到-roofline-里的那个-max"><a href="#11-GEMM-软件流水线：从延迟隐藏到-roofline-里的那个-max" class="headerlink" title="11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max"></a>11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max</h1><p>前面几章已经分别讲过 tiling（<a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-04-gemm-mma-tensor-core/">04</a>）、架构指令演进<br>（<a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-05-ampere-hopper-blackwell/">05</a>）和 CuTe 的 pipeline 抽象<br>（<a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-09-cute-dsl-gemm-pipeline/">09</a>）。它们回答了「流水线长什么样」。</p>
+<p>这一章回答另外三个问题：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">为什么必须有流水线？——要藏的延迟到底多大</span><br><span class="line">为什么 roofline 写 max 而不是 sum？——稳态怎么推出来的</span><br><span class="line">什么时候这套东西会失效？——prologue、小 K、GEMV</span><br></pre></td></tr></table></figure>
+
+<p>全部结论都在 <code>ecs</code>（8×H20，SM90）和 <code>target_p</code>（4×GB200，SM100）上实测过，<br>数据和复现代码见 §12。</p>
+<p>不熟悉微架构术语的读者可以先跳到 §3，那里有缩写表和几个容易混淆的概念。</p>
+<h2 id="1-实测：要藏的延迟有多大"><a href="#1-实测：要藏的延迟有多大" class="headerlink" title="1. 实测：要藏的延迟有多大"></a>1. 实测：要藏的延迟有多大</h2><p>用单线程 pointer chase 测裸访存延迟（每次 load 依赖上一次结果，无法被任何流水线<br>掩盖），1 GiB 随机环、512 B 步长以避开 prefetch 和同 cacheline：</p>
+<table>
+<thead>
+<tr>
+<th>层级</th>
+<th>H20 (1.98 GHz)</th>
+<th>GB200 (2.06 GHz)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>L1</td>
+<td>38.9 cycle / 19.7 ns</td>
+<td>38.9 cycle / 18.9 ns</td>
+</tr>
+<tr>
+<td>L2</td>
+<td>316.8 cycle / 160.0 ns</td>
+<td>381.8 cycle / 185.2 ns</td>
+</tr>
+<tr>
+<td><strong>HBM</strong></td>
+<td><strong>674.8 cycle / 340.8 ns</strong></td>
+<td><strong>826.0 cycle / 400.6 ns</strong></td>
+</tr>
+</tbody></table>
+<p>一次 HBM 往返要 700~800 个周期。如果 warp 每次都老老实实等 load 回来再算，Tensor<br>Core 会有 99% 的时间闲着。<strong>流水线存在的唯一理由就是把这几百个周期填满。</strong></p>
+<p>注意 HBM 延迟并没有随代际下降，反而略升。这一点在下一节会变得很关键。</p>
+<h2 id="2-能用来藏的计算有多少"><a href="#2-能用来藏的计算有多少" class="headerlink" title="2. 能用来藏的计算有多少"></a>2. 能用来藏的计算有多少</h2><p>取一个典型 CTA tile <code>128×256×64</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">FLOPs = 2 · 128 · 256 · 64 = 4.19 M</span><br></pre></td></tr></table></figure>
+
+<p>用实测峰值折算成每 SM 每周期吞吐：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>实测峰值 BF16</th>
+<th>SM 数</th>
+<th>频率</th>
+<th>FLOP/cycle/SM</th>
+<th>单 tile 计算</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>H20</td>
+<td>138.4 TFLOP/s</td>
+<td>78</td>
+<td>1.98 GHz</td>
+<td>896</td>
+<td><strong>4681 cycle</strong></td>
+</tr>
+<tr>
+<td>GB200</td>
+<td>2284.6 TFLOP/s</td>
+<td>152</td>
+<td>2.06 GHz</td>
+<td>7290</td>
+<td><strong>575 cycle</strong></td>
+</tr>
+</tbody></table>
+<p>把两节的数字放在一起看：</p>
+<p><img src="/notes/imgs/cuda-cute-latency-budget.svg" alt="延迟预算：H20 与 GB200 实测对比"></p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">H20    : 4681 cycle 计算  vs  675 cycle 延迟   →  比值 0.14，余量充足</span><br><span class="line">GB200  :  575 cycle 计算  vs  826 cycle 延迟   →  比值 1.44，已经不够</span><br></pre></td></tr></table></figure>
+
+<p><strong>这是理解 Blackwell 全部设计动机的一个数字。</strong> 两代之间 Tensor Core 每 SM 每周期<br>吞吐涨了 8.1 倍，HBM 延迟反升 1.22 倍，于是同一个 tile 能提供的「掩护时间」缩水<br>约 10 倍。</p>
+<p>所以 Blackwell 引入 TMEM、CTA pair、更大 tile，主要目的不是「算得更快」——算力<br>本来就已经有了——而是<strong>把 t_c 拉回到足以掩盖 t_m 的量级，让流水线还能成立</strong>。</p>
+<h2 id="3-先厘清几个概念"><a href="#3-先厘清几个概念" class="headerlink" title="3. 先厘清几个概念"></a>3. 先厘清几个概念</h2><h3 id="3-1-数据通路上的缩写"><a href="#3-1-数据通路上的缩写" class="headerlink" title="3.1 数据通路上的缩写"></a>3.1 数据通路上的缩写</h3><p>后文反复出现的这条链：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">GMEM --LDG--&gt; RF --STS--&gt; SMEM --LDS--&gt; RF --HMMA--&gt; TC</span><br></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>缩写</th>
+<th>全称</th>
+<th>是什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GMEM</td>
+<td>Global Memory</td>
+<td>显存（HBM），片外。容量大、延迟高（§1 测得 ~700 cycle）</td>
+</tr>
+<tr>
+<td>RF</td>
+<td>Register File</td>
+<td>寄存器堆。片上最快，每 SM 256 KB，静态切分给各线程，<strong>每线程最多 255 个 32-bit 寄存器</strong></td>
+</tr>
+<tr>
+<td>SMEM</td>
+<td>Shared Memory</td>
+<td>片上便签存储，CTA 内所有线程共享，与 L1 共用物理存储。H20/GB200 每 SM 最多 228 KB</td>
+</tr>
+<tr>
+<td>TC</td>
+<td>Tensor Core</td>
+<td>专做矩阵乘累加的硬件单元，和 CUDA Core 是并列的两套执行部件</td>
+</tr>
+<tr>
+<td>LDG</td>
+<td><strong>L</strong>oa<strong>D</strong> <strong>G</strong>lobal</td>
+<td>指令：GMEM → RF</td>
+</tr>
+<tr>
+<td>STS</td>
+<td><strong>ST</strong>ore <strong>S</strong>hared</td>
+<td>指令：RF → SMEM</td>
+</tr>
+<tr>
+<td>LDS</td>
+<td><strong>L</strong>oa<strong>D</strong> <strong>S</strong>hared</td>
+<td>指令：SMEM → RF</td>
+</tr>
+<tr>
+<td>LDSM</td>
+<td>LoaD Shared Matrix</td>
+<td>指令：SMEM → RF，且按 MMA 要求的 fragment 布局重排</td>
+</tr>
+<tr>
+<td>HMMA</td>
+<td><strong>H</strong>alf-precision <strong>MMA</strong></td>
+<td>指令：张量核矩阵乘累加</td>
+</tr>
+</tbody></table>
+<p>命名规律：<code>LD</code>/<code>ST</code> + 地址空间首字母（<strong>G</strong>lobal / <strong>S</strong>hared / <strong>L</strong>ocal）。<br>MMA 的前缀是数据类型：<code>H</code>alf、<code>I</code>nt、<code>D</code>ouble；Hopper 的 warpgroup 版本在 SASS<br>里对应带 <code>G</code> 的变体（<code>HGMMA</code> 等，G = warp<strong>G</strong>roup）。</p>
+<p>还要区分两套指令名，它们指的是同一件事的不同层次：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">PTX（虚拟 ISA，nvcc 输出）   ld.global   st.shared   ldmatrix   mma.sync</span><br><span class="line">SASS（真实机器码，ptxas 输出） LDG         STS         LDSM       HMMA</span><br></pre></td></tr></table></figure>
+
+<p>写 CUDA 时看到的是 PTX 层；用 <code>cuobjdump -sass</code> 或 Nsight 看到的是 SASS 层。<br>寄存器分配是 ptxas 在这一步做的。</p>
+<h3 id="3-2-累加器-C-在哪里，是谁决定的"><a href="#3-2-累加器-C-在哪里，是谁决定的" class="headerlink" title="3.2 累加器 C 在哪里，是谁决定的"></a>3.2 累加器 C 在哪里，是谁决定的</h3><p><strong>它是什么。</strong> <code>D = A×B + C</code> 里的 <code>C</code>。在 GEMM 主循环中它是沿 K 维一直累加的<br><strong>部分和</strong>：每处理完一个 k_tile，<code>acc += A_tile × B_tile</code>，K 走完了 <code>acc</code> 才是最终<br>结果。</p>
+<p><strong>它有多大。</strong> CTA tile 128×256、FP32 累加：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">128 · 256 · 4 B = 128 KiB</span><br><span class="line">摊到 CTA 的 256 个线程 = 512 B/线程 = 128 个寄存器/线程</span><br></pre></td></tr></table></figure>
+
+<p>每线程上限 255 个寄存器，<strong>光累加器就吃掉一半</strong>。这是后面所有寄存器压力讨论的<br>起点。</p>
+<p><strong>谁决定它待在寄存器里。</strong> 三层，要分开看：</p>
+<table>
+<thead>
+<tr>
+<th>层次</th>
+<th>决定了什么</th>
+<th>能不能改</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>ISA / 硬件</td>
+<td>累加器<strong>必须</strong>是寄存器操作数</td>
+<td>不能。Ampere 的 <code>mma.sync.aligned.m16n8k16.f32.f16.f16.f32 {d0..d3}, {a0..a3}, {b0,b1}, {c0..c3}</code> 里 <code>c</code>/<code>d</code> 就是寄存器；张量核没有直接累加进 SMEM 的通路</td>
+</tr>
+<tr>
+<td>编译器 (ptxas)</td>
+<td>具体分配哪几个物理寄存器、要不要 spill</td>
+<td>间接可控（<code>__launch_bounds__</code>、<code>maxrregcount</code>）</td>
+</tr>
+<tr>
+<td>算法</td>
+<td>整个 K 循环期间<strong>不落盘</strong></td>
+<td>可以改，但不该改</td>
+</tr>
+</tbody></table>
+<p>最后一层值得解释：理论上可以每个 k_tile 后把部分和写回 SMEM 甚至 GMEM，下一轮再<br>读回来。但那样引入的额外流量正好抵消掉 tiling 想省的东西——<strong>累加器常驻寄存器就是<br>tiling 的目的本身</strong>。</p>
+<p><strong>「不参与流水」是什么意思。</strong> 指它不需要双缓冲，因为它不流动：原地读-改-写，<br>主循环期间对 HBM 零流量，只在 epilogue 写出一次。流水线里换来换去的只有 A/B tile。</p>
+<p><strong>Blackwell 改的正是第一层。</strong> <code>tcgen05.mma</code> 的累加器落在 TMEM 而非 RF，等于把上面<br>那 128 个寄存器/线程还给了程序员。这不是锦上添花——结合 §2 的数字，Blackwell 必须<br>用更大的 tile 才能凑够掩护时间，而更大的 tile 意味着更大的累加器，寄存器根本放<br>不下。TMEM 是大 tile 的前提条件。</p>
+<h3 id="3-3-M-N-K-分别对应-Transformer-里的什么"><a href="#3-3-M-N-K-分别对应-Transformer-里的什么" class="headerlink" title="3.3 M / N / K 分别对应 Transformer 里的什么"></a>3.3 M / N / K 分别对应 Transformer 里的什么</h3><p>以 QKV 投影为例：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Q_input [S, d_model] × W_Q [d_model, d_q] → Q [S, d_q]</span><br></pre></td></tr></table></figure>
+
+<p>对上 GEMM 的 <code>C[M,N] = A[M,K] · B[K,N]</code>：</p>
+<table>
+<thead>
+<tr>
+<th>GEMM 维</th>
+<th>Transformer 里是</th>
+<th>典型值</th>
+<th>怎么切</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>M</strong></td>
+<td>token 数 S</td>
+<td>prefill 数千，decode = batch</td>
+<td>切成 BM（如 128），<strong>分给不同 CTA 并行做</strong></td>
+</tr>
+<tr>
+<td><strong>N</strong></td>
+<td>输出特征维 d_q</td>
+<td>数千</td>
+<td>切成 BN（如 256），<strong>分给不同 CTA 并行做</strong></td>
+</tr>
+<tr>
+<td><strong>K</strong></td>
+<td>输入特征维 d_model</td>
+<td>数千</td>
+<td>切成 k_tile（如 64），<strong>主循环里串行累加</strong></td>
+</tr>
+</tbody></table>
+<p>所以回答「prefill 是不是在 token 维切分、每次算一部分 token」：<strong>token 维确实被切<br>了，但它是 M 维的并行切分，不是 k_tile 那种串行切分。</strong> 两者性质完全不同：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">M / N 切分  → 产生多少个 CTA → 决定 GPU 填不填得满（并行度）</span><br><span class="line">K   切分   → 主循环迭代次数 T → 决定 prologue 占比（流水线深度所在的那个循环）</span><br></pre></td></tr></table></figure>
+
+<p>k_tile=64 切的是 <code>d_model</code> 这个<strong>归约维</strong>——64 个输入通道的部分和，不是 64 个 token。</p>
+<p>三个补充：</p>
+<ul>
+<li>实践中 <code>W_Q</code>/<code>W_K</code>/<code>W_V</code> 常拼成一个 <code>W_QKV</code> 做一次 GEMM，N 变成 <code>d_q+d_k+d_v</code>。<br>更大的 N 意味着 A tile 被更多输出复用，效率更好；</li>
+<li>prefill 时 M = S = 几千，CTA 数量充足，GPU 填得满；decode 时 M = batch，可能只有<br>几十，这正是 §8 的主题；</li>
+<li>vLLM 的 chunked prefill 是<strong>调度层</strong>按 token 切，和这里的 GEMM tiling 不是一个<br>层级，但都作用在 M 维——chunk 开太小会让每个 GEMM 的 M 掉进 §8 那条曲线的左半边。</li>
+</ul>
+<h2 id="4-四代流水线：每一代补上一个漏洞"><a href="#4-四代流水线：每一代补上一个漏洞" class="headerlink" title="4. 四代流水线：每一代补上一个漏洞"></a>4. 四代流水线：每一代补上一个漏洞</h2><p><img src="/notes/imgs/cuda-cute-pipeline-generations.svg" alt="GEMM 主循环流水线的四代演进"></p>
+<h3 id="4-1-Volta-Turing：LDG-STS-双缓冲"><a href="#4-1-Volta-Turing：LDG-STS-双缓冲" class="headerlink" title="4.1 Volta / Turing：LDG + STS 双缓冲"></a>4.1 Volta / Turing：LDG + STS 双缓冲</h3><p>数据必须绕道寄存器：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">GMEM --LDG--&gt; RF --STS--&gt; SMEM --LDS--&gt; RF --HMMA--&gt; TC</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">// prologue</span><br><span class="line">LDG  frag &lt;- gmem[0];</span><br><span class="line">STS  smem[0] &lt;- frag;</span><br><span class="line"></span><br><span class="line">for (k = 0; k &lt; K_TILES; ++k) {</span><br><span class="line">    LDG  frag &lt;- gmem[k+1];        // ① 提前发射下一块，不等</span><br><span class="line">    LDS  a_rf, b_rf &lt;- smem[k%2];  // ② 读当前块（已在 SMEM 里）</span><br><span class="line">    HMMA acc += a_rf * b_rf;       // ③ 算当前块</span><br><span class="line">    __syncthreads();</span><br><span class="line">    STS  smem[(k+1)%2] &lt;- frag;    // ④ ① 的结果此时才落地</span><br><span class="line">    __syncthreads();</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+
+<p>重叠来自 ① 和 ④ 之间隔了整个 MMA——scoreboard 让 LDG 在后台飞行，warp 不阻塞。</p>
+<h4 id="为什么这仍然限制了流水线深度"><a href="#为什么这仍然限制了流水线深度" class="headerlink" title="为什么这仍然限制了流水线深度"></a>为什么这仍然限制了流水线深度</h4><p>这里有个容易误解的点：「① 只是发起读取，② 才把数据读进寄存器，所以 ① 不占寄存器」。</p>
+<p><strong>不对。<code>frag</code> 就是寄存器。</strong> <code>LDG</code> 的目的操作数是寄存器，指令一发射，目标寄存器<br>就被 scoreboard 标记为「在途」，别的指令不能写它，直到数据从 HBM 回来。这段占用<br>时间正好横跨整个 MMA——<strong>这是设计意图</strong>（用 MMA 的时间掩盖延迟），但代价是那批<br>寄存器在整个 MMA 期间都被锁着。</p>
+<p>还要注意 ① 和 ② 读的不是同一份数据：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">①  下一块 (k+1)  GMEM → RF      在飞，占 frag</span><br><span class="line">②  当前块 (k)    SMEM → RF      马上要算，占 a_rf / b_rf</span><br></pre></td></tr></table></figure>
+
+<p>所以任一时刻<strong>三份数据同时在线</strong>：<code>acc</code>（全程）、<code>frag</code>（在途的下一块）、<br><code>a_rf</code>/<code>b_rf</code>（当前块的 MMA 操作数）。</p>
+<p><img src="/notes/imgs/cuda-cute-staging-rf-vs-smem.svg" alt="在途数据放哪里：寄存器 vs shared memory"></p>
+<p>算一下账，仍用 <code>128×256×64</code> BF16 tile、CTA 256 线程：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">每 stage 数据量 = (128·64 + 256·64) · 2 B = 48 KiB</span><br><span class="line">摊到 256 线程   = 192 B/线程 = 48 个寄存器/线程</span><br><span class="line"></span><br><span class="line">累加器          128 reg</span><br><span class="line">+ 在途 stage 0   48 reg</span><br><span class="line">+ 在途 stage 1   48 reg</span><br><span class="line">                ------</span><br><span class="line">                224 reg      （上限 255，已经很紧）</span><br><span class="line">再加一级         272 reg      ✗ 放不下</span><br></pre></td></tr></table></figure>
+
+<p><strong>这就是 stage 上限约等于 2 的来源。</strong> 而且它和累加器直接抢资源：想用更大的 tile<br>提高计算强度，累加器变大，能开的流水级反而更少。</p>
+<p>另一个硬伤是 <code>__syncthreads()</code> 锁死整个 CTA：所有 warp 每轮都要对齐一次，快的等<br>慢的。</p>
+<h3 id="4-2-Ampere（SM80）：cp-async-让数据不走寄存器"><a href="#4-2-Ampere（SM80）：cp-async-让数据不走寄存器" class="headerlink" title="4.2 Ampere（SM80）：cp.async 让数据不走寄存器"></a>4.2 Ampere（SM80）：<code>cp.async</code> 让数据不走寄存器</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">cp.async.cg.shared.global [smem_ptr], [gmem_ptr], 16;</span><br><span class="line">cp.async.commit_group;              // 把已发射的打包成一组</span><br><span class="line">cp.async.wait_group 2;              // 等到「未完成组数 ≤ 2」</span><br></pre></td></tr></table></figure>
+
+<p>关键变化只有一句：<strong>这条指令的目的地直接是 shared memory，没有寄存器目的操作数。</strong><br>硬件在后台把 GMEM 数据写进 SMEM，全程不经过 RF。</p>
+<p>于是 §4.1 那笔账变成：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">寄存器:  累加器 128 + 少量 MMA fragment    → 富余</span><br><span class="line">SMEM  :  48 KiB × 4 stage = 192 KiB        → 228 KB 放得下</span><br></pre></td></tr></table></figure>
+
+<p><strong>流水线深度的约束从「每线程 255 个寄存器」换成了「每 SM 228 KB shared memory」。</strong><br>这个转换之所以划算，有两个原因：</p>
+<ol>
+<li>SMEM 是<strong>本来就要花</strong>的钱——stage buffer 无论如何都得放在那；而寄存器是额外<br>占用，且要和累加器抢；</li>
+<li>寄存器压力还会压低 occupancy，反过来削弱跨 CTA 的相互掩盖，是双重惩罚。</li>
+</ol>
+<p>于是可以开<strong>多级循环缓冲</strong>而不只是双缓冲：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">SMEM:  [stage0][stage1][stage2][stage3]   ← 环形复用</span><br><span class="line"></span><br><span class="line">iter k:  cp.async → stage[(k+S-1)%S]     发射，不等</span><br><span class="line">         wait_group S-1                   确认 stage[k%S] 已到</span><br><span class="line">         mma on stage[k%S]</span><br></pre></td></tr></table></figure>
+
+<p>同期引入的 <strong>split arrive/wait barrier</strong> 把「我到了」和「我要等」拆开，比传统<br>barrier 更适合 producer-consumer。</p>
+<h3 id="4-3-Hopper（SM90）：TMA-warp-specialization"><a href="#4-3-Hopper（SM90）：TMA-warp-specialization" class="headerlink" title="4.3 Hopper（SM90）：TMA + warp specialization"></a>4.3 Hopper（SM90）：TMA + warp specialization</h3><p><code>cp.async</code> 仍要每个线程各自算地址、各自发指令，地址计算本身吃掉不少发射带宽。<br>Hopper 两个改动：</p>
+<p><strong>TMA</strong>——一个专用硬件单元，单线程一条指令搬整个多维 tile，地址生成、边界处理、<br>swizzle 全由硬件做，完成信号走 mbarrier：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">if (elect_one_sync()) {                     // 一个线程就够</span><br><span class="line">    cp.async.bulk.tensor.2d.shared::cluster.global</span><br><span class="line">        [smem], [tma_desc, {x, y}], [mbarrier];</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+
+<p><strong>Warp specialization</strong>——不再让所有 warp 干同样的事：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">CTA (例如 384 线程 = 3 个 warpgroup)</span><br><span class="line">  ├─ Producer warpgroup   wait(empty[i]) → 发 TMA → 硬件 arrive(full[i])</span><br><span class="line">  └─ Consumer warpgroup×2 wait(full[i])  → wgmma  → arrive(empty[i])</span><br></pre></td></tr></table></figure>
+
+<p>配合 <code>setmaxnreg</code> 做寄存器再分配：producer 只算地址，主动交出寄存器；consumer 要<br>放累加器，拿到更多。<strong>同一个 CTA 里两类 warp 的寄存器预算不同，这在 Hopper 之前<br>做不到。</strong></p>
+<p><code>wgmma</code> 本身也是异步的，而且可以通过 matrix descriptor <strong>直接从 SMEM 读操作数</strong>，<br>连 <code>ldmatrix</code> 到寄存器这一步都省了。</p>
+<p>CUTLASS 的 <strong>pingpong</strong> 调度让两个 consumer warpgroup 交替进入 mainloop 和<br>epilogue——一个做 MMA 时另一个写回 C，于是连 epilogue 也被藏进流水线。</p>
+<h3 id="4-4-Blackwell（SM100）：tcgen05-TMEM"><a href="#4-4-Blackwell（SM100）：tcgen05-TMEM" class="headerlink" title="4.4 Blackwell（SM100）：tcgen05 + TMEM"></a>4.4 Blackwell（SM100）：tcgen05 + TMEM</h3><p>累加器从通用寄存器搬进专用 Tensor Memory（见 §3.2）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">A/B/scale:  HBM --TMA--&gt; SMEM</span><br><span class="line">MMA:        tcgen05.mma 读 SMEM operand，累加器写 TMEM</span><br><span class="line">Epilogue:   tcgen05.ld → RF → cast/activation → HBM</span><br></pre></td></tr></table></figure>
+
+<p>收益是三段角色<strong>完全解耦</strong>：MMA 不再占着大片寄存器，epilogue 可以独立推进，大 tile<br>和 CTA pair 才有资源空间。结合 §2 的数字，这不是锦上添花而是必需品。</p>
+<h2 id="5-稳态数学：max-是怎么出来的"><a href="#5-稳态数学：max-是怎么出来的" class="headerlink" title="5. 稳态数学：max 是怎么出来的"></a>5. 稳态数学：max 是怎么出来的</h2><p><img src="/notes/imgs/cuda-cute-pipeline-steady-state.svg" alt="流水线稳态分解"></p>
+<p>设 k 循环 T 次，单次搬运 <code>t_m</code>、计算 <code>t_c</code>，流水线 S 级：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">T_total = (S-1)·t_m          ← prologue，填流水线</span><br><span class="line">        + T · max(t_m, t_c)  ← 稳态</span><br><span class="line">        + t_c                ← drain，排空</span><br></pre></td></tr></table></figure>
+
+<p><strong>为什么稳态是 max 而不是 sum？</strong> 因为加载和计算由两套独立硬件承担——HBM 控制器 /<br>TMA 引擎 vs Tensor Core——它们物理上并行工作。单个 tile 的「先加载后计算」确实是<br>串行的（那是<strong>延迟</strong>），但不同 tile 的加载和计算相互重叠（那是<strong>吞吐</strong>）。流水线<br>只填满一次，之后短的那条边被长的那条完全盖住。</p>
+<p>T ≫ S 时中间项主导：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">T_total ≈ T · max(t_m, t_c)     ← roofline 里那个 max</span><br></pre></td></tr></table></figure>
+
+<p>再叠加 GPU 的 occupancy 机制：一个 warp 卡在访存时调度器立刻切到另一个发射 MMA，<br>多个 resident CTA 之间也互相掩盖各自的 prologue。所以实测常常比单 CTA 分析更好。</p>
+<h2 id="6-stage-数：两级为什么往往不够"><a href="#6-stage-数：两级为什么往往不够" class="headerlink" title="6. stage 数：两级为什么往往不够"></a>6. stage 数：两级为什么往往不够</h2><h3 id="6-1-先把「访存时间」拆成两个量"><a href="#6-1-先把「访存时间」拆成两个量" class="headerlink" title="6.1 先把「访存时间」拆成两个量"></a>6.1 先把「访存时间」拆成两个量</h3><p>一个很自然的想法是：<strong>两级缓冲时，只要计算比访存慢，加载就总能按时完成，还要更多<br>级干什么？</strong> 这个推理在一个前提下成立，而那个前提经常不成立。关键是分清：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">带宽时间 t_m = 字节数 / 带宽   数据流起来之后，搬完这一块要多久</span><br><span class="line">延迟     L                     从发出请求到第一个字节到达要多久</span><br></pre></td></tr></table></figure>
+
+<p>两者可以差一个数量级，而<strong>两级缓冲要求计算时间盖住的是延迟 L，不是带宽时间 t_m</strong>。</p>
+<p>看时序就清楚了。S 级缓冲，稳态下开始计算某个 stage 时，刚被腾空的那个 buffer 才能<br>发起新加载，而这次加载要等 S-1 个计算槽之后才被用到：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">S = 2:   [算 stage0]              ← 同时只有 stage1 在途</span><br><span class="line">         加载 stage1 的可用时间 = 1 · t_c</span><br><span class="line"></span><br><span class="line">S = 4:   [算 stage0]              ← stage1 / 2 / 3 同时在途</span><br><span class="line">         每次加载的可用时间 = 3 · t_c</span><br></pre></td></tr></table></figure>
+
+<p>于是有两条彼此独立的约束：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">带宽约束（稳态不被搬运卡住）:   t_m ≤ t_c</span><br><span class="line">延迟约束（每轮不用停下来等）:   L  ≤ (S-1) · t_c</span><br></pre></td></tr></table></figure>
+
+<p><strong>两级只满足了第一条。</strong> 这就是 §6.4 那个公式的来源：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">S ≥ L / t_c + 1</span><br></pre></td></tr></table></figure>
+
+<p>代入 §1、§2 的实测值：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">H20   : L = 675 cycle,  t_c = 4681 cycle  →  S ≥ 1.14  →  2 级够</span><br><span class="line">GB200 : L = 826 cycle,  t_c =  575 cycle  →  S ≥ 2.44  →  要 3 级</span><br></pre></td></tr></table></figure>
+
+<p><strong>所以你的直觉在 H20 上是对的</strong>——一次 MMA 的时间是 HBM 延迟的 7 倍，两级绰绰有<br>余。到了 GB200 就不成立了，单个 tile 的计算连一次 HBM 往返都盖不住。这也再次印证<br>§2 那个结论：真正变化的不是「要不要流水线」，而是「要多深」。</p>
+<h3 id="6-2-除了平均延迟，多级还买到什么"><a href="#6-2-除了平均延迟，多级还买到什么" class="headerlink" title="6.2 除了平均延迟，多级还买到什么"></a>6.2 除了平均延迟，多级还买到什么</h3><p>即使平均延迟能被两级盖住，实践中仍然要开更多：</p>
+<ol>
+<li><strong>延迟有长尾。</strong> L2 命中/未命中、DRAM page 开关、bank 冲突、TLB miss、其他 CTA<br>争用——尾部延迟远高于均值。按均值配级数，意味着相当比例的加载仍会停顿。多出来<br>的级数是给方差留的缓冲垫。</li>
+<li><strong>请求要排队。</strong> 一个 SM 上有多个 CTA，整卡上百个 SM 共享内存系统。stage buffer<br>实质上是队列槽位：前面的请求还堵着，你也能继续发射后面的，不必空转。</li>
+<li><strong>发射记账是成组的。</strong> <code>cp.async.commit_group</code> / <code>wait_group N</code> 以组为单位，<br>级数多才有腾挪空间，否则会因为记账粒度粗而提前等待。</li>
+<li><strong>Hopper 上决定 producer 能领先多远。</strong> warp specialization 之后，producer warp<br>领先 consumer 越多，抗抖动能力越强——级数就是这个领先距离的上限。</li>
+</ol>
+<h3 id="6-3-什么时候加级数没有用"><a href="#6-3-什么时候加级数没有用" class="headerlink" title="6.3 什么时候加级数没有用"></a>6.3 什么时候加级数没有用</h3><p>多级买的是<strong>延迟容忍度，不是带宽</strong>。三种情况加了也白加：</p>
+<ul>
+<li><strong>已经带宽受限</strong>（<code>t_m &gt; t_c</code>）：再多级只是让更多数据同时在途排队，稳态时间仍是<br><code>T · t_m</code>。§10 的 GEMV 是极端情形，<code>t_c ≈ 0</code>，任何级数都救不回来；</li>
+<li><strong>T 太小</strong>（K 维短）：级数越多 prologue <code>(S-1)·t_m</code> 越长，反而更亏，见 §9；</li>
+<li><strong>SMEM 被吃光</strong>：resident CTA 数下降，跨 CTA 的相互掩盖减弱，可能净亏。</li>
+</ul>
+<h3 id="6-4-容量约束：级数的上界"><a href="#6-4-容量约束：级数的上界" class="headerlink" title="6.4 容量约束：级数的上界"></a>6.4 容量约束：级数的上界</h3><p>需要多少级（下界）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">S ≥ ⌈ L / t_c ⌉ + 1</span><br></pre></td></tr></table></figure>
+
+<p>能开多少级（上界）由 SMEM 卡死。同样 <code>128×256×64</code> tile：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">每 stage = (128·64 + 256·64) · 2B = 48 KiB</span><br><span class="line">两卡每 SM 可用 SMEM 均为 228 KB</span><br><span class="line">→ 最多 4 stage</span><br></pre></td></tr></table></figure>
+
+<p><strong>这就是 tile 大小和 stage 数必须联合调优的原因</strong>：tile 开大，<code>t_c</code> 变长（好，下界<br>降低），但每 stage 的 SMEM 占用也变大（坏，上界降低），同时累加器变大压低<br>occupancy。CUTLASS 的 tile/stage 组合表就是在扫这个多维权衡面。</p>
+<p>FP8/FP4 在这里有个二阶好处：元素更小 → 每 stage 的 SMEM 占用更小 → 同样容量能开更<br>多 stage，或者同样级数能用更大 tile。</p>
+<h2 id="7-还有嵌套的第二层流水"><a href="#7-还有嵌套的第二层流水" class="headerlink" title="7. 还有嵌套的第二层流水"></a>7. 还有嵌套的第二层流水</h2><p>上面讲的是 GMEM→SMEM 那一级。在 Ampere 上 SMEM→RF 这一级同样要双缓冲，粒度是<br>k_tile 内部的 MMA atom：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">LDSM:  [ld frag0][ld frag1][ld frag2][ld frag3]</span><br><span class="line">HMMA:            [mma f0  ][mma f1  ][mma f2  ]</span><br></pre></td></tr></table></figure>
+
+<p>所以一个高性能 GEMM kernel 里<strong>嵌套着两层软件流水线</strong>：外层藏 HBM 延迟（几百<br>cycle），内层藏 SMEM 延迟（几十 cycle，见 §1 的 L1 数据 38.9 cycle）。Hopper 的<br>wgmma 直读 SMEM 让内层在很多配置下不再必要。</p>
+<h2 id="8-实测一：算术强度-≈-token-数"><a href="#8-实测一：算术强度-≈-token-数" class="headerlink" title="8. 实测一：算术强度 ≈ token 数"></a>8. 实测一：算术强度 ≈ token 数</h2><p>对一个权重矩阵 <code>[K, N]</code> 喂进 M 个 token：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">FLOPs = 2 · M · K · N</span><br><span class="line">Bytes = 2 · K · N        (BF16 权重，读一次)</span><br><span class="line">强度  = FLOPs / Bytes ≈ M</span><br></pre></td></tr></table></figure>
+
+<p><strong>权重 GEMM 的算术强度约等于参与这次 GEMM 的 token 数</strong>（即 §3.3 里的 M 维）。<br>超过机器平衡点（peak FLOPS ÷ HBM 带宽）才进入算力受限区。</p>
+<p>实测（K=N=12288，BF16，cuBLAS）：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>实测峰值</th>
+<th>实测 HBM 读带宽</th>
+<th>机器平衡点</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>H20</td>
+<td>138.4 TFLOP/s</td>
+<td>3646 GB/s</td>
+<td><strong>38 FLOP/B</strong></td>
+</tr>
+<tr>
+<td>GB200</td>
+<td>2284.6 TFLOP/s</td>
+<td>7138 GB/s</td>
+<td><strong>320 FLOP/B</strong></td>
+</tr>
+</tbody></table>
+<p><img src="/notes/imgs/cuda-cute-intensity-tokens.svg" alt="算术强度 ≈ token 数：实测 M 扫描"></p>
+<table>
+<thead>
+<tr>
+<th align="right">M</th>
+<th align="right">H20 %峰值</th>
+<th align="right">H20 耗时</th>
+<th align="right">GB200 %峰值</th>
+<th align="right">GB200 耗时</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="right">1</td>
+<td align="right">2.3%</td>
+<td align="right">93 μs</td>
+<td align="right">0.3%</td>
+<td align="right">49 μs</td>
+</tr>
+<tr>
+<td align="right">8</td>
+<td align="right">17.2%</td>
+<td align="right">101 μs</td>
+<td align="right">1.9%</td>
+<td align="right">56 μs</td>
+</tr>
+<tr>
+<td align="right">16</td>
+<td align="right">34.5%</td>
+<td align="right">101 μs</td>
+<td align="right">3.7%</td>
+<td align="right">57 μs</td>
+</tr>
+<tr>
+<td align="right">32</td>
+<td align="right">68.3%</td>
+<td align="right">102 μs</td>
+<td align="right">8.3%</td>
+<td align="right">51 μs</td>
+</tr>
+<tr>
+<td align="right">64</td>
+<td align="right"><strong>97.1%</strong></td>
+<td align="right">144 μs</td>
+<td align="right">17.6%</td>
+<td align="right">48 μs</td>
+</tr>
+<tr>
+<td align="right">128</td>
+<td align="right">99.1%</td>
+<td align="right">282 μs</td>
+<td align="right">34.2%</td>
+<td align="right">49 μs</td>
+</tr>
+<tr>
+<td align="right">256</td>
+<td align="right">100.4%</td>
+<td align="right">556 μs</td>
+<td align="right">57.3%</td>
+<td align="right">59 μs</td>
+</tr>
+<tr>
+<td align="right">384</td>
+<td align="right">100.7%</td>
+<td align="right">832 μs</td>
+<td align="right">74.4%</td>
+<td align="right">68 μs</td>
+</tr>
+<tr>
+<td align="right">768</td>
+<td align="right">100.7%</td>
+<td align="right">1663 μs</td>
+<td align="right"><strong>90.8%</strong></td>
+<td align="right">112 μs</td>
+</tr>
+<tr>
+<td align="right">4096</td>
+<td align="right">101.3%</td>
+<td align="right">8823 μs</td>
+<td align="right">97.8%</td>
+<td align="right">554 μs</td>
+</tr>
+</tbody></table>
+<p>三个可以直接拿去用的读数：</p>
+<p><strong>（1）拐点精确落在平衡点上。</strong> H20 平衡点 38，M=32 时 68%、M=64 时 97%；GB200<br>平衡点 320，M=256 时 57%、M=384 时 74%、M=768 时 91%。模型和实测对上了。</p>
+<p><strong>（2）「前 N 个 token 是白送的」。</strong> H20 上 M=8→32 耗时几乎不变（101→102 μs），<br>GB200 上 M=1→128 耗时几乎不变（49→49 μs）。在带宽受限区，权重已经读进来了，多喂<br>token 不额外花时间。<strong>这就是 continuous batching 全部收益的来源。</strong></p>
+<p><strong>（3）同一个 batch size 在两张卡上是完全不同的世界。</strong> batch=64：H20 已达 97%<br>峰值，GB200 只有 17.6%——浪费掉 82% 的张量核。<strong>decode batch 的最优值不可跨卡搬运。</strong></p>
+<p>一个反直觉的观察：H20 上 M=2、M=4 反而比 M=1 和 M=8 慢一倍（250 μs vs 93/101 μs），<br>有效带宽只有 1200 GB/s。cuBLAS 在这些形状上选了不合适的 kernel。<strong>小 M 区间不是<br>平滑退化的</strong>，做 batch=1~4 的延迟优化时要实测而不是外推。</p>
+<h2 id="9-实测二：K-太短时流水线填不满"><a href="#9-实测二：K-太短时流水线填不满" class="headerlink" title="9. 实测二：K 太短时流水线填不满"></a>9. 实测二：K 太短时流水线填不满</h2><p>固定 M=N=4096 扫 K，先算出每个点的 roofline 上界，再看实测偏离多少。<strong>必须先确认<br>自己在哪个受限区，否则会把带宽瓶颈误判成流水线问题</strong>——这一步很容易被跳过。</p>
+<p><strong>H20（平衡点 38）：</strong></p>
+<table>
+<thead>
+<tr>
+<th align="right">K</th>
+<th align="right">强度</th>
+<th>受限于</th>
+<th align="right">roofline</th>
+<th align="right">实测</th>
+<th align="right">达成率</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="right">64</td>
+<td align="right">32</td>
+<td>带宽</td>
+<td align="right">18.7 μs</td>
+<td align="right">28.0 μs</td>
+<td align="right">67%</td>
+</tr>
+<tr>
+<td align="right">128</td>
+<td align="right">62</td>
+<td>算力</td>
+<td align="right">31.0 μs</td>
+<td align="right">40.4 μs</td>
+<td align="right">77%</td>
+</tr>
+<tr>
+<td align="right">512</td>
+<td align="right">228</td>
+<td>算力</td>
+<td align="right">124.1 μs</td>
+<td align="right">139.6 μs</td>
+<td align="right">89%</td>
+</tr>
+<tr>
+<td align="right">2048</td>
+<td align="right">683</td>
+<td>算力</td>
+<td align="right">496.5 μs</td>
+<td align="right">524.4 μs</td>
+<td align="right">95%</td>
+</tr>
+<tr>
+<td align="right">32768</td>
+<td align="right">1820</td>
+<td>算力</td>
+<td align="right">7944 μs</td>
+<td align="right">8216 μs</td>
+<td align="right"><strong>97%</strong></td>
+</tr>
+</tbody></table>
+<p><strong>GB200（平衡点 320）：</strong></p>
+<table>
+<thead>
+<tr>
+<th align="right">K</th>
+<th align="right">强度</th>
+<th>受限于</th>
+<th align="right">roofline</th>
+<th align="right">实测</th>
+<th align="right">达成率</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="right">64</td>
+<td align="right">32</td>
+<td>带宽</td>
+<td align="right">9.5 μs</td>
+<td align="right">13.1 μs</td>
+<td align="right">73%</td>
+</tr>
+<tr>
+<td align="right">256</td>
+<td align="right">120</td>
+<td>带宽</td>
+<td align="right">10.0 μs</td>
+<td align="right">15.2 μs</td>
+<td align="right">66%</td>
+</tr>
+<tr>
+<td align="right">512</td>
+<td align="right">228</td>
+<td>带宽</td>
+<td align="right">10.6 μs</td>
+<td align="right">17.6 μs</td>
+<td align="right">60%</td>
+</tr>
+<tr>
+<td align="right">1024</td>
+<td align="right">410</td>
+<td>算力</td>
+<td align="right">15.0 μs</td>
+<td align="right">22.7 μs</td>
+<td align="right">66%</td>
+</tr>
+<tr>
+<td align="right">4096</td>
+<td align="right">1024</td>
+<td>算力</td>
+<td align="right">60.2 μs</td>
+<td align="right">70.0 μs</td>
+<td align="right">86%</td>
+</tr>
+<tr>
+<td align="right">32768</td>
+<td align="right">1820</td>
+<td>算力</td>
+<td align="right">481.3 μs</td>
+<td align="right">551.1 μs</td>
+<td align="right"><strong>87%</strong></td>
+</tr>
+</tbody></table>
+<p>两个结论：</p>
+<p><strong>（1）roofline 的 max 在 K 大时是好模型。</strong> H20 收敛到 97%，GB200 收敛到 87%。<br>剩下的差距是 prologue、epilogue 和 wave quantization。</p>
+<p><strong>（2）一个容易踩的坑。</strong> 同样 M=N=4096，K≤512 时 GB200 是<strong>带宽受限</strong>而 H20 是<br><strong>算力受限</strong>。原因是 FP32 的 C 矩阵写回（4096²×4B = 67 MB）在 K 小时占了主要流量，<br>把强度压到 320 以下——而 H20 的平衡点只有 38，同样的形状还在算力区。</p>
+<p>如果不做这步归因，看到「GB200 在 K=512 只有 48.7% 的相对效率、H20 有 91.9%」，很容易<br>得出「Blackwell 流水线更难填满」的结论。方向没错（§2 的确如此），但这组数据本身<br>证明不了它——这里主要是输出写回的带宽墙。<strong>换硬件时，同一段代码可能悄悄换了受限<br>维度。</strong></p>
+<h2 id="10-GEMV：流水线塌缩"><a href="#10-GEMV：流水线塌缩" class="headerlink" title="10. GEMV：流水线塌缩"></a>10. GEMV：流水线塌缩</h2><p>M=1 时每读一个权重元素只做 2 次浮点运算，<code>t_c ≈ 0</code>：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">T_total = (S-1)·t_m + T·max(t_m, 0) + 0</span><br><span class="line">        ≈ T · t_m</span><br></pre></td></tr></table></figure>
+
+<p><strong>流水线里没有任何计算可以用来遮盖访存。</strong> 再深的流水线也只是把 HBM 的数据原样<br>倒出来（§6.3 的第一种情形）。实测印证：H20 上 M=1 达到 3241 GB/s（实测读带宽的<br>89%），GB200 上达到 6197 GB/s（87%）——<strong>已经贴着带宽墙，没有优化空间</strong>。</p>
+<p>所以 decode 走到带宽 roofline 上不是实现不好，是矩阵形状决定的下界。</p>
+<h2 id="11-对-PD-分离的意义"><a href="#11-对-PD-分离的意义" class="headerlink" title="11. 对 PD 分离的意义"></a>11. 对 PD 分离的意义</h2><p>把 §8 和 §10 合起来看：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">prefill : M = 数千 token  → 强度 ≫ 平衡点 → 算力受限 → 流水线满负荷</span><br><span class="line">decode  : M = batch size  → 强度 ≪ 平衡点 → 带宽受限 → 流水线上半条线是空的</span><br></pre></td></tr></table></figure>
+
+<p>两者位于 roofline 的两个极端，对硬件、tile 配置、batch 大小的最优选择完全不同。<br>混在同一个 engine 里跑，必然有一边在浪费——这是 PD 分离的第一性依据。</p>
+<p>§8 的读数（3）还给出一个具体的运维含义：<strong>decode 节点的最优 batch 与卡型强绑定</strong>。<br>H20 上 batch 64 就够，GB200 上要 768 才接近饱和。把 H20 上调好的 serving 配置直接<br>搬到 Blackwell，会白白浪费大部分算力。</p>
+<p>相关背景见 <a href="/notes/2026/07/30/2026-07-30-vllm-blade-kvt-pd-learning-05-kv-receive-and-completion/">05 KV 接收与完成语义</a><br>所在的 PD 分离系列。</p>
+<h2 id="12-复现"><a href="#12-复现" class="headerlink" title="12. 复现"></a>12. 复现</h2><p>两个微基准（纯 CUDA + cuBLAS，不依赖 PyTorch）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">ecs      : ~/nvfix/gemm_sweep.cu   ~/nvfix/pipe_probe.cu</span><br><span class="line">target_p : /tmp/gemm_sweep.cu      /tmp/pipe_probe.cu</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># H20 (ecs)。注意 ecs 的 NVML/libcuda 默认版本与内核模块不匹配，</span></span><br><span class="line"><span class="comment"># 需要指向 570.133.20：~/nvfix 里有对应软链。</span></span><br><span class="line">nvcc -O3 -<span class="built_in">arch</span>=sm_90  gemm_sweep.cu -lcublas -o gemm_sweep</span><br><span class="line">LD_LIBRARY_PATH=<span class="variable">$HOME</span>/nvfix CUDA_VISIBLE_DEVICES=0 ./gemm_sweep</span><br><span class="line"></span><br><span class="line"><span class="comment"># GB200 (target_p)，CUDA 13.2</span></span><br><span class="line">nvcc -O3 -<span class="built_in">arch</span>=sm_100 gemm_sweep.cu -lcublas -o gemm_sweep</span><br><span class="line">CUDA_VISIBLE_DEVICES=0 ./gemm_sweep</span><br></pre></td></tr></table></figure>
+
+<p><code>gemm_sweep</code> 先测实测读带宽和实测峰值算力（因此机器平衡点是实测值而非标称值），<br>再扫 M。<code>pipe_probe</code> 做 pointer chase 延迟和 K 扫描。两者都取三轮中位数。</p>
+<p>注意 CUDA 13 移除了 <code>cudaDeviceProp::clockRate</code>，要改用<br><code>cudaDeviceGetAttribute(&amp;v, cudaDevAttrClockRate, dev)</code>，否则在 GB200 上编不过。</p>
+<p>想看真实指令序列，用 <code>cuobjdump -sass</code> 观察 §3.1 那张表里的 SASS 助记符：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">nvcc -<span class="built_in">arch</span>=sm_90 -cubin -o k.cubin your_kernel.cu &amp;&amp; cuobjdump -sass k.cubin | less</span><br></pre></td></tr></table></figure>
+
+<h2 id="13-自检"><a href="#13-自检" class="headerlink" title="13. 自检"></a>13. 自检</h2><ol>
+<li><code>LDG</code>、<code>STS</code>、<code>LDS</code>、<code>HMMA</code> 各自把数据从哪搬到哪？PTX 层对应什么？</li>
+<li>累加器为什么必须待在寄存器里？这是硬件、编译器还是算法决定的？Blackwell 改了<br>哪一层？</li>
+<li><code>LDG frag &lt;- gmem[k+1]</code> 只是「发起」读取，为什么仍然占着寄存器？</li>
+<li>为什么 Volta/Turing 的 stage 数上限约为 2，而 Ampere 可以到 4？约束换成了什么？</li>
+<li>QKV 投影里，token 维对应 GEMM 的哪个维？它是被并行切分还是被主循环串行切分？<br>k_tile 切的是什么？</li>
+<li>「计算比访存慢，两级缓冲就够了」——这句话在什么前提下成立？H20 和 GB200 上分别<br>成立吗？</li>
+<li>为什么 roofline 写 max 而不是 sum？这个近似在什么条件下成立？</li>
+<li>同样 <code>128×256×64</code> tile、同样 228 KB SMEM，为什么两张卡需要的 stage 数不同？</li>
+<li>为什么说「前 N 个 token 是白送的」？N 由什么决定？</li>
+<li>一个 M=N=4096、K=512 的 GEMM，在 H20 和 GB200 上分别受限于什么？为什么不一样？</li>
+<li>decode 的 GEMV 已经跑到实测带宽的 87~89%，还有什么优化空间？（提示：不在这条<br>曲线上，见 §11）</li>
+</ol>
+<h2 id="14-官方资料"><a href="#14-官方资料" class="headerlink" title="14. 官方资料"></a>14. 官方资料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/hopper-tuning-guide/">Hopper Tuning Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/blackwell-tuning-guide/">Blackwell Tuning Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/parallel-thread-execution/">PTX ISA：<code>cp.async</code> / <code>cp.async.bulk.tensor</code> / <code>wgmma</code> / <code>tcgen05</code></a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/contents.html">CUDA C++ Programming Guide：Asynchronous Data Copies</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-binary-utilities/">CUDA Binary Utilities（<code>cuobjdump</code> / <code>nvdisasm</code>，SASS 指令集参考）</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/">CUTLASS Efficient GEMM / Pipelining</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/mma_docs/tcgen05_programming.html">tcgen05 MMA Programming Guide</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max</p><p><a href="https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/">https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-08-26</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-08-26</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUDA/">CUDA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CuTe-DSL/">CuTe DSL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUTLASS/">CUTLASS</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/GPU/">GPU</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Tensor-Core/">Tensor Core</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NVIDIA/">NVIDIA</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/"><span class="level-item">12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">102</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">5</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">28</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/"><span class="level-start"><span class="level-item">Mooncake Store 与 cache-aware 调度</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">17</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/"><span class="level-start"><span class="level-item">vllm、Blade-kvt与PD分离</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/">11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/">12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/">13. CUDA context 与 stream：执行模型的进程视角</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-07-partitioning-measured/">07 · 多 master 分区：从设计到实测</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-08-internal-mooncake-rldev-alignment/">从统一内存池到多 Master：内部 Mooncake rldev 对我们的启示</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/08/"><span class="level-start"><span class="level-item">八月 2026</span></span><span class="level-end"><span class="level-item tag">20</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">54</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Attention/"><span class="tag">Attention</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">30</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Blade-KVT/"><span class="tag">Blade-KVT</span><span class="tag">13</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/DCP/"><span class="tag">DCP</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Hybrid-Connector/"><span class="tag">Hybrid Connector</span><span class="tag">13</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/KV-Cache/"><span class="tag">KV Cache</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MLA/"><span class="tag">MLA</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Mooncake/"><span class="tag">Mooncake</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/"><span class="tag">PD 分离</span><span class="tag">23</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/cache-aware-%E8%B0%83%E5%BA%A6/"><span class="tag">cache-aware 调度</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">28</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">67</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%A9%B1%E9%80%90%E7%AD%96%E7%95%A5/"><span class="tag">驱逐策略</span><span class="tag">10</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>

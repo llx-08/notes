@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>13. CUDA context 与 stream：执行模型的进程视角 - Notes</title><link rel="manifest" href="/notes/manifest.json"><meta name="application-name" content="Notes"><meta name="msapplication-TileImage" content="/img/favicon.svg"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Notes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="13. CUDA context 与 stream：执行模型的进程视角 第 12 章 讲的是 同一条 stream 上相邻两个 kernel 之间的缝隙怎么压。这一章往外扩两层： 不同 stream 之间 怎么并发，以及 不同进程之间 为什么不能并发。 三层是正交的，机制完全不同： 本章要回答的具体问题： 1 2 3 4 5 CUDA context 到底是什么？和 UVA 是一回事吗？ stre"><meta property="og:type" content="blog"><meta property="og:title" content="13. CUDA context 与 stream：执行模型的进程视角"><meta property="og:url" content="https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/"><meta property="og:site_name" content="Notes"><meta property="og:description" content="13. CUDA context 与 stream：执行模型的进程视角 第 12 章 讲的是 同一条 stream 上相邻两个 kernel 之间的缝隙怎么压。这一章往外扩两层： 不同 stream 之间 怎么并发，以及 不同进程之间 为什么不能并发。 三层是正交的，机制完全不同： 本章要回答的具体问题： 1 2 3 4 5 CUDA context 到底是什么？和 UVA 是一回事吗？ stre"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-ctx-three-layers.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-ctx-context-uva.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-ctx-stream-hw-queue.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-ctx-leftover.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-ctx-null-stream.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-ctx-ipc.svg"><meta property="og:image" content="https://llx-08.github.io/notes/imgs/cuda-cute-ctx-method.svg"><meta property="article:published_time" content="2026-08-26T00:00:00.000Z"><meta property="article:modified_time" content="2026-08-26T14:17:26.964Z"><meta property="article:author" content="llx-08"><meta property="article:tag" content="学习笔记"><meta property="article:tag" content="CUDA"><meta property="article:tag" content="CuTe DSL"><meta property="article:tag" content="CUTLASS"><meta property="article:tag" content="GPU"><meta property="article:tag" content="Tensor Core"><meta property="article:tag" content="NVIDIA"><meta property="twitter:card" content="summary"><meta property="twitter:image:src" content="https://llx-08.github.io/notes/imgs/cuda-cute-ctx-three-layers.svg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/"},"headline":"13. CUDA context 与 stream：执行模型的进程视角","image":[],"datePublished":"2026-08-26T00:00:00.000Z","dateModified":"2026-08-26T14:17:26.964Z","author":{"@type":"Person","name":"llx-08"},"publisher":{"@type":"Organization","name":"Notes","logo":{"@type":"ImageObject","url":"https://llx-08.github.io/img/logo.svg"}},"description":"13. CUDA context 与 stream：执行模型的进程视角 第 12 章 讲的是 同一条 stream 上相邻两个 kernel 之间的缝隙怎么压。这一章往外扩两层： 不同 stream 之间 怎么并发，以及 不同进程之间 为什么不能并发。 三层是正交的，机制完全不同： 本章要回答的具体问题： 1 2 3 4 5 CUDA context 到底是什么？和 UVA 是一回事吗？ stre"}</script><link rel="canonical" href="https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/"><link rel="icon" href="/notes/img/favicon.svg"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.0.0/css/all.css"><link data-pjax rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link data-pjax rel="stylesheet" href="/notes/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><!--!--><!--!--><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><!-- hexo injector head_end start --><script>
+  (function () {
+      function switchTab() {
+          if (!location.hash) {
+            return;
+          }
+
+          const id = '#' + CSS.escape(location.hash.substring(1));
+          const $tabMenu = document.querySelector(`.tabs a[href="${id}"]`);
+          if (!$tabMenu) {
+            return;
+          }
+
+          const $tabMenuContainer = $tabMenu.parentElement.parentElement;
+          Array.from($tabMenuContainer.children).forEach($menu => $menu.classList.remove('is-active'));
+          Array.from($tabMenuContainer.querySelectorAll('a'))
+              .map($menu => document.getElementById($menu.getAttribute("href").substring(1)))
+              .forEach($content => $content.classList.add('is-hidden'));
+
+          if ($tabMenu) {
+              $tabMenu.parentElement.classList.add('is-active');
+          }
+          const $activeTab = document.querySelector(id);
+          if ($activeTab) {
+              $activeTab.classList.remove('is-hidden');
+          }
+      }
+      switchTab();
+      window.addEventListener('hashchange', switchTab, false);
+  })();
+  </script><!-- hexo injector head_end end --><meta name="generator" content="Hexo 7.3.0"><style>mjx-container[jax="SVG"] {
+  direction: ltr;
+}
+
+mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+}
+
+mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  text-align: center;
+  margin: 1em 0;
+}
+
+mjx-container[jax="SVG"][justify="left"] {
+  text-align: left;
+}
+
+mjx-container[jax="SVG"][justify="right"] {
+  text-align: right;
+}
+
+g[data-mml-node="merror"] > g {
+  fill: red;
+  stroke: red;
+}
+
+g[data-mml-node="merror"] > rect[data-background] {
+  fill: yellow;
+  stroke: none;
+}
+
+g[data-mml-node="mtable"] > line[data-line] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > rect[data-frame] {
+  stroke-width: 70px;
+  fill: none;
+}
+
+g[data-mml-node="mtable"] > .mjx-dashed {
+  stroke-dasharray: 140;
+}
+
+g[data-mml-node="mtable"] > .mjx-dotted {
+  stroke-linecap: round;
+  stroke-dasharray: 0,140;
+}
+
+g[data-mml-node="mtable"] > svg {
+  overflow: visible;
+}
+
+[jax="SVG"] mjx-tool {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+[jax="SVG"] mjx-tool > mjx-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+mjx-tool > mjx-tip {
+  display: inline-block;
+  padding: .2em;
+  border: 1px solid #888;
+  font-size: 70%;
+  background-color: #F8F8F8;
+  color: black;
+  box-shadow: 2px 2px 5px #AAAAAA;
+}
+
+g[data-mml-node="maction"][data-toggle] {
+  cursor: pointer;
+}
+
+mjx-status {
+  display: block;
+  position: fixed;
+  left: 1em;
+  bottom: 1em;
+  min-width: 25%;
+  padding: .2em .4em;
+  border: 1px solid #888;
+  font-size: 90%;
+  background-color: #F8F8F8;
+  color: black;
+}
+
+foreignObject[data-mjx-xml] {
+  font-family: initial;
+  line-height: normal;
+  overflow: visible;
+}
+
+.MathJax path {
+  stroke-width: 3;
+}
+
+mjx-container[display="true"] {
+  overflow: auto hidden;
+}
+
+mjx-container[display="true"] + br {
+  display: none;
+}
+</style>    <link data-site-custom-styles rel="stylesheet" href="/notes/css/custom.css">
+</head><body class="is-2-column"><nav class="navbar navbar-main"><div class="container navbar-container"><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/notes/">Home</a><a class="navbar-item" href="/notes/archives">Archives</a><a class="navbar-item" href="/notes/categories">Categories</a><a class="navbar-item" href="/notes/tags">Tags</a></div><div class="navbar-end"><a class="navbar-item" target="_blank" rel="noopener" title="GitHub" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-8-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2026-08-26T00:00:00.000Z" title="8/26/2026, 12:00:00 AM">2026-08-26</time>发表</span><span class="level-item"><time dateTime="2026-08-26T14:17:26.964Z" title="8/26/2026, 2:17:26 PM">2026-08-26</time>更新</span><span class="level-item"><a class="link-muted" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></span><span class="level-item">38 分钟读完 (大约5690个字)</span></div></div><h1 class="title is-3 is-size-4-mobile">13. CUDA context 与 stream：执行模型的进程视角</h1><div class="content"><h1 id="13-CUDA-context-与-stream：执行模型的进程视角"><a href="#13-CUDA-context-与-stream：执行模型的进程视角" class="headerlink" title="13. CUDA context 与 stream：执行模型的进程视角"></a>13. CUDA context 与 stream：执行模型的进程视角</h1><p><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/">第 12 章</a> 讲的是<strong>同一条 stream 上相邻两个<br>kernel</strong> 之间的缝隙怎么压。这一章往外扩两层：<strong>不同 stream 之间</strong>怎么并发，以及<br><strong>不同进程之间</strong>为什么不能并发。</p>
+<p>三层是正交的，机制完全不同：</p>
+<p><img src="/notes/imgs/cuda-cute-ctx-three-layers.svg" alt="三层并发"></p>
+<p>本章要回答的具体问题：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">CUDA context 到底是什么？和 UVA 是一回事吗？</span><br><span class="line">stream 怎么实现的？两个 kernel 放在不同 stream 上会怎么执行？</span><br><span class="line">blocking 和 non-blocking stream 差在哪？</span><br><span class="line">kernel 优先级怎么设？真的能插队吗？</span><br><span class="line">另一个进程能访问我这个进程的显存地址吗？</span><br></pre></td></tr></table></figure>
+
+<p>所有性能数字都在 <code>target_p</code>（4×GB200，SM100，CUDA 13.2）和 <code>ecs</code>（8×H20，SM90，<br>CUDA 12.8）上实测，基准源码与复现命令见 §8。文档引文出处见 §10。</p>
+<hr>
+<h2 id="1-CUDA-context-GPU-上的「进程」"><a href="#1-CUDA-context-GPU-上的「进程」" class="headerlink" title="1. CUDA context = GPU 上的「进程」"></a>1. CUDA context = GPU 上的「进程」</h2><p>CUDA context 可以理解成 GPU 侧的进程。它拥有：</p>
+<ul>
+<li>一套 GPU 虚拟地址空间和页表</li>
+<li>该 context 内的所有显存分配</li>
+<li>加载进来的 module / cubin（kernel 代码）</li>
+<li>stream、event 等对象</li>
+</ul>
+<p><strong>粒度是「每进程 × 每设备一个」。</strong> 用 Runtime API 时它叫 <em>primary context</em>，懒创建 ——<br>第一次调用任何 CUDA API 时才建立。</p>
+<p>实测建立代价（GB200）：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">首次调用建 context (device 0)  : 208.5 ms      # cudaSetDevice(0) + cudaFree(0)</span><br><span class="line">再建 device 1 的 context        : +288.0 ms</span><br></pre></td></tr></table></figure>
+
+<p><strong>每张卡各付一次两三百毫秒。</strong> 这就是多卡程序启动慢的直接原因，也是框架都要做 context<br>预热的原因 —— 你不希望第一个请求进来时才付这笔钱。</p>
+<p>Driver API 还可以用 <code>cuCtxCreate</code> 在同一个设备上建<strong>多个</strong> context，但它们之间只能时间片<br>轮转，切换很贵，一般没有理由这么做。</p>
+<hr>
+<h2 id="2-UVA-不是-context-的一部分"><a href="#2-UVA-不是-context-的一部分" class="headerlink" title="2. UVA 不是 context 的一部分"></a>2. UVA 不是 context 的一部分</h2><p>很多入门材料把这两件事混在一起讲，实际上层级不同：</p>
+<ul>
+<li>**context 是 per-(进程, 设备)**：4 张卡就是 4 个 context，各有独立页表</li>
+<li><strong>UVA（Unified Virtual Addressing）是 per-进程</strong>，横跨主机和所有设备，整个进程只有一个</li>
+</ul>
+<p><img src="/notes/imgs/cuda-cute-ctx-context-uva.svg" alt="context 与 UVA"></p>
+<p>实测把这个关系照了出来（同一个进程内的四个指针）：</p>
+<table>
+<thead>
+<tr>
+<th>指针来源</th>
+<th>地址</th>
+<th><code>cudaPointerGetAttributes</code></th>
+</tr>
+</thead>
+<tbody><tr>
+<td>普通 <code>malloc</code></td>
+<td><code>0xaaaae69de7b0</code></td>
+<td><strong>unregistered</strong>, device = -1</td>
+</tr>
+<tr>
+<td><code>cudaHostAlloc</code></td>
+<td><code>0xfffce0000000</code></td>
+<td>host, device = 0</td>
+</tr>
+<tr>
+<td><code>cudaMalloc</code> dev0</td>
+<td><code>0xfffd1dc00000</code></td>
+<td>device, device = 0</td>
+</tr>
+<tr>
+<td><code>cudaMalloc</code> dev1</td>
+<td><code>0xfffcbde00000</code></td>
+<td>device, device = 1</td>
+</tr>
+</tbody></table>
+<p>两个观察：</p>
+<p><strong>(a) 后三者落在 <code>0xfffc~0xfffd</code> 同一段连续区间。</strong> pinned 主机内存和<strong>两张不同卡</strong>的<br>显存共享同一个虚拟地址空间 —— 这就是「统一虚拟地址」的直观样子。</p>
+<p><strong>(b) 普通 <code>malloc</code> 的内存不在 UVA 里。</strong> 常见的说法「UVA 把所有系统内存都映射进来」是<br>不准确的：只有<strong>注册过的</strong>主机内存（<code>cudaHostAlloc</code> / <code>cudaHostRegister</code>）才进 UVA。</p>
+<p>这个区别是实际的。能不能给 kernel 直接传一个主机指针、<code>cudaMemcpy</code> 能不能用<br><code>cudaMemcpyDefault</code> 自动推断方向，都取决于地址在不在 UVA 表里。而这张表本身的存在也说明<br>runtime 确实在维护「地址 → 属于哪个设备」的映射 —— 否则 <code>cudaPointerGetAttributes</code> 无从<br>判断。</p>
+<hr>
+<h2 id="3-stream-的实现"><a href="#3-stream-的实现" class="headerlink" title="3. stream 的实现"></a>3. stream 的实现</h2><h3 id="3-1-软件层：一条有序队列"><a href="#3-1-软件层：一条有序队列" class="headerlink" title="3.1 软件层：一条有序队列"></a>3.1 软件层：一条有序队列</h3><p>Stream 就是一个<strong>命令 FIFO 队列</strong>：</p>
+<ul>
+<li>同一 stream 内<strong>严格按提交顺序</strong>执行</li>
+<li>不同 stream 之间<strong>没有任何顺序保证</strong> —— 这就是并发的来源</li>
+</ul>
+<p>对应到硬件通讯路径，命令被写进 pinned memory 里的 ring buffer，再通过 MMIO 写 doorbell<br>寄存器通知 GPU，GPU 的 DMA 引擎取走并由命令处理器解码派发。</p>
+<h3 id="3-2-硬件层：有限条工作队列"><a href="#3-2-硬件层：有限条工作队列" class="headerlink" title="3.2 硬件层：有限条工作队列"></a>3.2 硬件层：有限条工作队列</h3><p>关键在于 <strong>软件 stream 数量不限，硬件工作队列是有限的</strong>。官方文档：</p>
+<blockquote>
+<p><strong><code>CUDA_DEVICE_MAX_CONNECTIONS</code></strong> — 1 to 32 (default is 8)<br>Sets the number of compute and copy engine <strong>concurrent connections (work queues)</strong><br>from the host to each device of compute capability 3.5 and above.</p>
+</blockquote>
+<p><img src="/notes/imgs/cuda-cute-ctx-stream-hw-queue.svg" alt="stream 到硬件队列"></p>
+<p><strong>默认只有 8 条。</strong> 超过就要共享队列，于是可能出现<strong>假依赖</strong>：单队列是 FIFO，<code>A2</code> 等<br><code>A1</code> 是对的（同 stream），但排在 <code>A2</code> 后面的 <code>B1</code> 会被连坐堵住。</p>
+<p>这个效应只在<strong>同一个 stream 内有多个 kernel</strong> 时才会触发 —— 如果每个 stream 只放一个<br>kernel，提交顺序 <code>K1 K2 K3 K4</code> 彼此无依赖，单条队列照样能连续发射。这一点我最初测错了，<br>见 §8.2。</p>
+<h3 id="3-3-实测：同-stream-vs-不同-stream"><a href="#3-3-实测：同-stream-vs-不同-stream" class="headerlink" title="3.3 实测：同 stream vs 不同 stream"></a>3.3 实测：同 stream vs 不同 stream</h3><p>GB200，4 个 kernel 各占 1/4 GPU（grid = 38，1 CTA/SM）：</p>
+<table>
+<thead>
+<tr>
+<th>stream 配置</th>
+<th>跨度 ms</th>
+<th>Σ时长 ms</th>
+<th>并发度</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>全部在 NULL stream (stream 0)</td>
+<td>2.01</td>
+<td>2.01</td>
+<td><strong>1.00</strong></td>
+</tr>
+<tr>
+<td>全部在同一个自建 stream</td>
+<td>2.01</td>
+<td>2.01</td>
+<td><strong>1.00</strong></td>
+</tr>
+<tr>
+<td>4 个不同 stream (blocking)</td>
+<td>0.52</td>
+<td>2.01</td>
+<td><strong>3.90</strong></td>
+</tr>
+<tr>
+<td>4 个不同 stream (nonBlocking)</td>
+<td>0.51</td>
+<td>2.01</td>
+<td><strong>3.92</strong></td>
+</tr>
+</tbody></table>
+<p><strong>同 stream = 严格串行，不同 stream = 真并发。</strong> 四个 kernel 的活在 1/4 的时间里干完。</p>
+<p>并发度略低于 4.00（3.90）的那 2.5% 是四个 kernel 的启动错峰 —— 它们不是同一纳秒开始的。</p>
+<hr>
+<h2 id="4-并发的三个前提"><a href="#4-并发的三个前提" class="headerlink" title="4. 并发的三个前提"></a>4. 并发的三个前提</h2><p>放在不同 stream 只是<strong>允许</strong>并发，不<strong>保证</strong>并发。实际能不能并发取决于三件事，按重要性<br>排序。</p>
+<h3 id="4-1-前提一：有剩余-SM-资源（最主要）"><a href="#4-1-前提一：有剩余-SM-资源（最主要）" class="headerlink" title="4.1 前提一：有剩余 SM 资源（最主要）"></a>4.1 前提一：有剩余 SM 资源（最主要）</h3><p><img src="/notes/imgs/cuda-cute-ctx-leftover.svg" alt="leftover policy"></p>
+<p>2 个 kernel 放 2 个 non-blocking stream，扫它们各自占多少 SM（GB200，152 SM）：</p>
+<table>
+<thead>
+<tr>
+<th>grid / kernel</th>
+<th>占 GPU</th>
+<th>跨度 ms</th>
+<th>Σ时长 ms</th>
+<th>并发度</th>
+<th>判定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>19</td>
+<td>12%</td>
+<td>0.50</td>
+<td>1.00</td>
+<td>1.99</td>
+<td>并发</td>
+</tr>
+<tr>
+<td>38</td>
+<td>25%</td>
+<td>0.51</td>
+<td>1.01</td>
+<td>1.99</td>
+<td>并发</td>
+</tr>
+<tr>
+<td>76</td>
+<td>50%</td>
+<td>0.51</td>
+<td>1.01</td>
+<td>1.99</td>
+<td>并发</td>
+</tr>
+<tr>
+<td>114</td>
+<td>75%</td>
+<td>1.00</td>
+<td>1.50</td>
+<td><strong>1.50</strong></td>
+<td>部分并发</td>
+</tr>
+<tr>
+<td>152</td>
+<td>100%</td>
+<td>1.01</td>
+<td>1.01</td>
+<td><strong>1.00</strong></td>
+<td>串行</td>
+</tr>
+<tr>
+<td>304</td>
+<td>200%</td>
+<td>2.01</td>
+<td>2.01</td>
+<td><strong>1.00</strong></td>
+<td>串行</td>
+</tr>
+</tbody></table>
+<p>硬件按「先来的先铺满，后来的捡剩下的」分配（leftover policy）。75% 那行最能说明问题：<br>两个各要 114 个 SM 但总共只有 152，于是 K1 全速跑，K2 先拿到 38 个 SM，随着 K1 的 CTA<br>陆续退出再补上，得到 1.50 的部分并发。</p>
+<blockquote>
+<p><strong>推论：如果 kernel 本来就能打满 GPU（大 batch 的 GEMM），多开 stream 一点用都没有。</strong><br>stream 并发的价值只在小 kernel 场景 —— 也就是 bs=1 decode 那种，和第 12 章 PDL 的适用<br>场景重合。</p>
+</blockquote>
+<h3 id="4-2-前提二：中间没有-NULL-stream-操作"><a href="#4-2-前提二：中间没有-NULL-stream-操作" class="headerlink" title="4.2 前提二：中间没有 NULL stream 操作"></a>4.2 前提二：中间没有 NULL stream 操作</h3><p><img src="/notes/imgs/cuda-cute-ctx-null-stream.svg" alt="NULL stream"></p>
+<p>官方文档：</p>
+<blockquote>
+<p>For code that is compiled using the <code>--default-stream legacy</code> compilation flag, the<br>default stream is a special stream called <strong>the NULL stream</strong> and each device has a<br>single NULL stream used for all host threads. <strong>The NULL stream is special as it causes<br>implicit synchronization.</strong></p>
+</blockquote>
+<blockquote>
+<p><strong>Two operations from different streams cannot run concurrently if any CUDA operation<br>on the NULL stream is submitted in-between them</strong>, unless the streams are non-blocking<br>streams (created with the <code>cudaStreamNonBlocking</code> flag).</p>
+</blockquote>
+<p>实测（GB200，在两次 launch 之间插一个提交到 stream 0 的 kernel）：</p>
+<table>
+<thead>
+<tr>
+<th>stream 配置</th>
+<th>跨度 ms</th>
+<th>并发度</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>blocking stream，中间不插</td>
+<td>0.52</td>
+<td>3.90</td>
+</tr>
+<tr>
+<td>blocking stream，<strong>中间插一个 NULL 操作</strong></td>
+<td>2.04</td>
+<td><strong>0.99</strong></td>
+</tr>
+<tr>
+<td>nonBlocking stream，中间插一个 NULL 操作</td>
+<td>0.52</td>
+<td><strong>3.90</strong></td>
+</tr>
+</tbody></table>
+<p><strong>一个提交到 stream 0 的操作，就能把整批并发拍平。</strong></p>
+<h4 id="blocking-vs-non-blocking：先破除一个望文生义"><a href="#blocking-vs-non-blocking：先破除一个望文生义" class="headerlink" title="blocking vs non-blocking：先破除一个望文生义"></a>blocking vs non-blocking：先破除一个望文生义</h4><p>这个名字和「主机调用会不会阻塞」<strong>毫无关系</strong>。两种 stream 对主机都是异步的。它指的是：<br><strong>这个 stream 会不会和 NULL stream 互相同步。</strong></p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">cudaStreamCreate</span>(&amp;s);                                    <span class="comment">// blocking（默认）</span></span><br><span class="line"><span class="built_in">cudaStreamCreateWithFlags</span>(&amp;s, cudaStreamNonBlocking);    <span class="comment">// non-blocking</span></span><br></pre></td></tr></table></figure>
+
+<p>危险在于它<strong>看不见</strong>：你自己某处 <code>cudaMemcpy</code> 忘了写 stream 参数、某个第三方库内部用了<br>默认流、某段调试代码顺手加了同步 —— 都会让精心设计的多流并发悄悄退化成串行，而且从代码<br>上完全看不出来，只在 profile 里表现为「莫名其妙串行了」。</p>
+<p>实测你手上环境的实际情况：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">torch 2.11.0a0+...</span><br><span class="line">torch.cuda.Stream()  →  cuStreamGetFlags = 1  →  NON-BLOCKING</span><br><span class="line">                        cuStreamGetPriority = 0（最低优先级）</span><br></pre></td></tr></table></figure>
+
+<p><strong>PyTorch 建的是 non-blocking stream。</strong> 好消息是不会被默认流拖累；代价是<strong>你不能指望<br>默认流帮你做隐式同步</strong>，该 <code>record_stream()</code> / <code>wait_stream()</code> 的地方一个都不能省。</p>
+<p>另外还有编译期开关 <code>nvcc --default-stream per-thread</code>，它把默认流变成每个主机线程一条<br>独立的普通流，也就没有 NULL stream 的隐式同步了。</p>
+<h3 id="4-3-前提三：硬件工作队列够（Hopper-上要注意，Blackwell-上似乎已无所谓）"><a href="#4-3-前提三：硬件工作队列够（Hopper-上要注意，Blackwell-上似乎已无所谓）" class="headerlink" title="4.3 前提三：硬件工作队列够（Hopper 上要注意，Blackwell 上似乎已无所谓）"></a>4.3 前提三：硬件工作队列够（Hopper 上要注意，Blackwell 上似乎已无所谓）</h3><p>8 streams × 6 kernels，各占 1/8 GPU，对比深度优先（<code>A1A2A3|B1B2B3</code>）和广度优先<br>（<code>A1B1C1|A2B2C2</code>）两种提交顺序：</p>
+<p><strong>H20 (SM90, CUDA 12.8) —— 教科书式复现：</strong></p>
+<table>
+<thead>
+<tr>
+<th>CONN</th>
+<th>提交顺序</th>
+<th>跨度 ms</th>
+<th>并发度</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>深度优先</td>
+<td>20.58</td>
+<td><strong>1.17</strong> ← 假串行</td>
+</tr>
+<tr>
+<td>1</td>
+<td>广度优先</td>
+<td>3.02</td>
+<td>7.94 ← 免疫</td>
+</tr>
+<tr>
+<td>2</td>
+<td>深度优先</td>
+<td>10.56</td>
+<td><strong>2.27</strong> ← ≈ 队列数</td>
+</tr>
+<tr>
+<td>2</td>
+<td>广度优先</td>
+<td>3.03</td>
+<td>7.94</td>
+</tr>
+<tr>
+<td>8</td>
+<td>深度优先</td>
+<td>3.11</td>
+<td>7.73</td>
+</tr>
+<tr>
+<td>32</td>
+<td>深度优先</td>
+<td>3.11</td>
+<td>7.72</td>
+</tr>
+</tbody></table>
+<p>深度优先的并发度<strong>精确等于工作队列数</strong>（1→1.17，2→2.27，8→7.73）。这就是 Hyper-Q 当年<br>要解决的问题。</p>
+<p><strong>GB200 (SM100, CUDA 13.2) —— 完全没有这个现象：</strong></p>
+<table>
+<thead>
+<tr>
+<th>CONN</th>
+<th>深度优先</th>
+<th>广度优先</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>7.81</td>
+<td>7.94</td>
+</tr>
+<tr>
+<td>2</td>
+<td>7.79</td>
+<td>7.96</td>
+</tr>
+<tr>
+<td>8</td>
+<td>7.79</td>
+<td>7.94</td>
+</tr>
+<tr>
+<td>32</td>
+<td>7.79</td>
+<td>7.94</td>
+</tr>
+</tbody></table>
+<p><code>CONN=1</code> 照样 7.8 路并发，两种提交顺序没有区别。看起来 Blackwell 的前端不再因为队列头部<br>阻塞就停止向后派发。</p>
+<blockquote>
+<p><strong>但两个数据点没法区分这是架构（SM90 vs SM100）、CUDA 版本（12.8 vs 13.2）还是驱动<br>版本导致的</strong>，这点不装懂。</p>
+<p><strong>实践含义</strong>：「用广度优先提交顺序」「调大 <code>CUDA_DEVICE_MAX_CONNECTIONS</code>」这两条流传<br>很广的调优建议，在 Hopper 上仍然有效且效果巨大（1.17 → 7.94，差 6.8 倍），在 Blackwell<br>上似乎已经过时。如果代码里有为此做的 workaround，换到 GB200 上可以考虑去掉。</p>
+</blockquote>
+<hr>
+<h2 id="5-stream-优先级：实测几乎无效"><a href="#5-stream-优先级：实测几乎无效" class="headerlink" title="5. stream 优先级：实测几乎无效"></a>5. stream 优先级：实测几乎无效</h2><h3 id="5-1-怎么设"><a href="#5-1-怎么设" class="headerlink" title="5.1 怎么设"></a>5.1 怎么设</h3><p><strong>没有「kernel 优先级」，只有 stream 优先级。</strong></p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">int</span> least, greatest;</span><br><span class="line"><span class="built_in">cudaDeviceGetStreamPriorityRange</span>(&amp;least, &amp;greatest);</span><br><span class="line"><span class="comment">// GB200 与 H20 实测均为: least = 0, greatest = -5</span></span><br><span class="line"></span><br><span class="line">cudaStream_t s;</span><br><span class="line"><span class="built_in">cudaStreamCreateWithPriority</span>(&amp;s, cudaStreamNonBlocking, greatest);  <span class="comment">// 最高优先级</span></span><br><span class="line"><span class="type">int</span> p; <span class="built_in">cudaStreamGetPriority</span>(s, &amp;p);                                <span class="comment">// 可以查回来</span></span><br></pre></td></tr></table></figure>
+
+<p><strong>数值越小优先级越高</strong>（-5 最高，0 最低），这点反直觉。创建后不能改。</p>
+<h3 id="5-2-实测：它什么都没做"><a href="#5-2-实测：它什么都没做" class="headerlink" title="5.2 实测：它什么都没做"></a>5.2 实测：它什么都没做</h3><p>设计一个能直接看出调度顺序的实验：两个 stream，<strong>每个 kernel 都占满整个 GPU</strong><br>（grid = SM 数，1 CTA/SM），于是 8 个 kernel 必须严格串行，「实际执行顺序」就直接暴露了<br>调度器的选择。</p>
+<p>先提交 4 个到 A 流，再提交 4 个到 B 流。若优先级有效、B 为高优先级，应该是<br><code>A0 B0 B1 B2 B3 A1 A2 A3</code>（A0 已在跑抢不掉，其余 B 插队）。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">GB200:</span><br><span class="line">对照组: A=B=最低(0)                  提交 A0..A3 然后 B0..B3   执行: A0 B0 A1 B1 A2 B2 A3 B3</span><br><span class="line">实验组: A=最低(0)  B=最高(-5)         提交 A0..A3 然后 B0..B3   执行: A0 B0 A1 B1 A2 B2 A3 B3</span><br><span class="line">实验组: A=最低(0)  B=最高(-5) 先提交B  提交 B0..B3 然后 A0..A3   执行: B0 A0 B1 A1 B2 A2 B3 A3</span><br><span class="line">反向:   A=最高(-5) B=最低(0)          提交 A0..A3 然后 B0..B3   执行: A0 B0 A1 B1 A2 B2 A3 B3</span><br><span class="line"></span><br><span class="line">H20: 四组结果完全一样</span><br></pre></td></tr></table></figure>
+
+<p><strong>四种配置执行顺序完全相同，只取决于哪个 stream 先提交。两个 stream 严格轮转，优先级零<br>影响。</strong> 而且两代架构一致，不是架构差异。</p>
+<p>另一组测的是抢占：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">低优先级 kernel 占满 GPU 跑 2.01 ms</span><br><span class="line">高优先级 kernel 在其开始后 2.00 ms 才启动   ← 一直等到低优先级跑完</span><br></pre></td></tr></table></figure>
+
+<p>文档其实说清楚了，只是措辞客气：</p>
+<blockquote>
+<p>these priorities serve as <strong>hints rather than guarantees</strong> … <strong>Higher-priority tasks<br>do not preempt already running lower-priority tasks.</strong> The GPU does not reassess work<br>queues during task execution, and increasing a stream’s priority will not interrupt<br>ongoing work.</p>
+</blockquote>
+<blockquote>
+<p><strong>不要指望用 stream 优先级做 QoS。</strong> 想给低延迟请求插队，靠优先级是不行的 —— 正在跑的<br>CTA 不会被踢下来，而且本测试里连待派发队列都没重排。</p>
+<p>真要做资源隔离，现在的手段是 <strong>Green Contexts</strong>（CUDA 12.4+），它是真的把 SM 划分给<br>不同执行上下文，是资源保证而非提示。</p>
+</blockquote>
+<hr>
+<h2 id="6-跨进程：地址隔离与-CUDA-IPC"><a href="#6-跨进程：地址隔离与-CUDA-IPC" class="headerlink" title="6. 跨进程：地址隔离与 CUDA IPC"></a>6. 跨进程：地址隔离与 CUDA IPC</h2><h3 id="6-1-结论：不能访问，而且失败方式比报错更危险"><a href="#6-1-结论：不能访问，而且失败方式比报错更危险" class="headerlink" title="6.1 结论：不能访问，而且失败方式比报错更危险"></a>6.1 结论：不能访问，而且失败方式比报错更危险</h3><p><img src="/notes/imgs/cuda-cute-ctx-ipc.svg" alt="跨进程隔离与 IPC"></p>
+<p>实验设计：</p>
+<ul>
+<li><strong>producer 进程</strong>：<code>cudaMalloc</code> 一块显存，填入 pattern <code>0xAA00, 0xAA01, ...</code>，<br>打印裸指针，导出 IPC handle 到文件</li>
+<li><strong>consumer 进程</strong>（独立进程）：自己也 <code>cudaMalloc</code> 一块，填入<strong>不同的</strong> pattern<br><code>0xBB00</code>，然后拿 producer 的裸地址值去解引用</li>
+</ul>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">[producer] 显存裸指针 = 0xfffcfdc00000   (pattern 0xAA00)</span><br><span class="line"></span><br><span class="line">[consumer] 从 producer 拿到的裸指针值 = 0xfffcfdc00000</span><br><span class="line">[consumer] cudaPointerGetAttributes -&gt; type=0 (Unregistered), device=-1</span><br><span class="line">[consumer] 本进程自己的 cudaMalloc  = 0xfffcfdc00000   (填入 pattern 0xBB00)</span><br><span class="line">[consumer] 两者数值完全相同！</span><br><span class="line">[consumer] kernel 解引用那个地址: no error</span><br><span class="line">[consumer] 读到的值 = 0xBB00        ← 不是 0xAA00</span><br></pre></td></tr></table></figure>
+
+<p>三个要点：</p>
+<ol>
+<li><strong>两个进程的指针数值完全一样</strong> —— CUDA 的虚拟地址分配是确定性的，两个进程都从同一个<br>基址开始分配。</li>
+<li><strong>解引用不报错</strong> —— 那个地址在 consumer 自己的 context 里确实是有效映射。</li>
+<li><strong>但读到的是 <code>0xBB00</code>，是 consumer 自己的数据。</strong></li>
+</ol>
+<p><strong>同一个数值地址，在两个进程里指向完全不同的物理显存。</strong> GPU 的 MMU 和页表提供的隔离，<br>和 CPU 上的进程隔离是一回事 —— context 就是 GPU 上的进程。</p>
+<blockquote>
+<p>危险之处：如果误以为可以跨进程传指针（比如通过共享内存传了个 <code>cudaMalloc</code> 的地址），<br><strong>你不会得到崩溃，你会静默地读到错误数据。</strong></p>
+</blockquote>
+<h3 id="6-2-要共享就用-CUDA-IPC"><a href="#6-2-要共享就用-CUDA-IPC" class="headerlink" title="6.2 要共享就用 CUDA IPC"></a>6.2 要共享就用 CUDA IPC</h3><p>同一实验的第二部分：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">[consumer] cudaIpcOpenMemHandle 成功，本进程内的指针 = 0xfffcfdc00000</span><br><span class="line">[consumer] 读到 host[0]=0xAA00 host[1]=0xAA01 host[255]=0xAAFF</span><br><span class="line">[consumer] ✓ 正确——确实是同一块物理显存</span><br></pre></td></tr></table></figure>
+
+<p>用法：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 进程 A</span></span><br><span class="line">cudaIpcMemHandle_t h;</span><br><span class="line"><span class="built_in">cudaIpcGetMemHandle</span>(&amp;h, dev_ptr);</span><br><span class="line"><span class="comment">// 把 h 这 64 字节通过任意 IPC 通道(socket / 文件 / 共享内存)传给 B</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 进程 B</span></span><br><span class="line"><span class="type">void</span> *p;</span><br><span class="line"><span class="built_in">cudaIpcOpenMemHandle</span>(&amp;p, h, cudaIpcMemLazyEnablePeerAccess);</span><br><span class="line"><span class="comment">// p 是 B 自己地址空间里的一个新映射，指向 A 的那块物理显存</span></span><br><span class="line"><span class="built_in">cudaIpcCloseMemHandle</span>(p);</span><br></pre></td></tr></table></figure>
+
+<p><strong>传的是那个 64 字节的不透明 handle，不是指针值。</strong> B 拿到的是自己 VA 空间里的新映射<br>（本次恰好数值相同，那是确定性分配的巧合，不是保证）。</p>
+<p>限制：仅 Linux；同一台机器同一张卡（或已建立 peer access 的卡）；不支持 managed memory。<br><strong>NCCL、vLLM 的跨进程 KV cache 共享走的都是这条路。</strong></p>
+<p>更现代的通用机制是 VMM API 的 <code>cuMemExportToShareableHandle</code>（支持 POSIX fd，配 MNNVL<br>还能跨节点用 fabric handle）。</p>
+<h3 id="6-3-即使共享了内存，kernel-也不能跨-context-真并发"><a href="#6-3-即使共享了内存，kernel-也不能跨-context-真并发" class="headerlink" title="6.3 即使共享了内存，kernel 也不能跨 context 真并发"></a>6.3 即使共享了内存，kernel 也不能跨 context 真并发</h3><blockquote>
+<p><strong>A kernel from one CUDA context cannot execute concurrently with a kernel from another<br>CUDA context.</strong> The GPU may time slice to provide forward progress to each context.<br>If a user wants to run kernels from multiple process simultaneously <strong>on the SM</strong>, one<br>must enable <strong>MPS</strong>.</p>
+</blockquote>
+<p>两个进程各跑 kernel，GPU 只能<strong>时间片轮转</strong>，不是真并发。要让多进程的 kernel 真正同时<br>占用 SM，必须开 <strong>MPS</strong>（它让多个进程共享一个 GPU 侧 context）。</p>
+<p>这也是为什么推理框架普遍是<strong>一张卡一个进程</strong>：多进程共享一张卡，既有 IPC 的麻烦，又有<br>时间片轮转的开销。</p>
+<p><strong>顺带订正一个流传很广的说法</strong>：「一个 SM 在同一时刻只能为一个 kernel 服务」——这是错的，<br>它把 context 级的限制误写成了 kernel 级。准确的版本是上面那句文档：<strong>同 context 内的多个<br>kernel 可以并发，甚至可以共驻同一个 SM</strong>（第 12 章的 PDL 收益完全建立在这个能力上）；<br><strong>不同 context</strong> 之间才不行。</p>
+<hr>
+<h2 id="7-三层放在一起"><a href="#7-三层放在一起" class="headerlink" title="7. 三层放在一起"></a>7. 三层放在一起</h2><table>
+<thead>
+<tr>
+<th></th>
+<th>作用尺度</th>
+<th>机制</th>
+<th>能否共驻同一个 SM</th>
+<th>主要限制</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>PDL</strong></td>
+<td>同一 stream 上相邻 kernel</td>
+<td><code>griddepcontrol</code></td>
+<td>✅ 可以（收益就来自这里）</td>
+<td>smem 之和 ≤ 228KB、carveout 要一致</td>
+</tr>
+<tr>
+<td><strong>Stream</strong></td>
+<td>不同 stream 之间</td>
+<td>软件 FIFO + 硬件工作队列</td>
+<td>✅ 可以</td>
+<td>剩余 SM 资源、NULL stream、队列数</td>
+</tr>
+<tr>
+<td><strong>跨进程</strong></td>
+<td>不同 CUDA context</td>
+<td>MPS（否则时间片轮转）</td>
+<td>❌ 默认不行</td>
+<td>地址空间隔离，共享要走 IPC</td>
+</tr>
+</tbody></table>
+<p><strong>先确认瓶颈在哪一层，再选机制。</strong> 三者不叠加也不互斥：</p>
+<ul>
+<li>kernel 太小、一个 step 几百个 kernel 排着队 → 看 PDL（第 12 章）</li>
+<li>有多路独立的小工作流、GPU 没被打满 → 看 stream</li>
+<li>多个服务进程要挤一张卡 → 只有 MPS，且要接受它的代价</li>
+</ul>
+<hr>
+<h2 id="8-微基准设计"><a href="#8-微基准设计" class="headerlink" title="8. 微基准设计"></a>8. 微基准设计</h2><p>源码：<code>target_p:/tmp/{stream_probe,prio_probe,ipc_probe}.cu</code>，<br><code>ecs:~/nvfix/{stream_probe,prio_probe}.cu</code>（同一份）。</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># GB200</span></span><br><span class="line">ssh target_p &amp;&amp; <span class="built_in">cd</span> /tmp</span><br><span class="line">/usr/local/cuda/bin/nvcc -O3 -<span class="built_in">arch</span>=sm_100 -o stream_probe stream_probe.cu</span><br><span class="line">./stream_probe                                   <span class="comment"># 实验 0/A/B/C/D/E</span></span><br><span class="line">NSTREAM=8 KPS=6 CUDA_DEVICE_MAX_CONNECTIONS=1 ./stream_probe    <span class="comment"># 工作队列扫描</span></span><br><span class="line">./prio_probe                                     <span class="comment"># 优先级四组对照</span></span><br><span class="line"><span class="built_in">rm</span> -f ipc_handle.bin; (setsid ./ipc_probe producer &amp;); <span class="built_in">sleep</span> 5</span><br><span class="line">./ipc_probe consumer_raw; ./ipc_probe consumer_ipc</span><br><span class="line"></span><br><span class="line"><span class="comment"># H20 —— 注意 PATH 上的 nvcc 是 12.0，且需要驱动 workaround</span></span><br><span class="line">ssh ecs &amp;&amp; <span class="built_in">cd</span> ~/nvfix</span><br><span class="line">/usr/local/cuda/bin/nvcc -O3 -<span class="built_in">arch</span>=sm_90 -o stream_probe stream_probe.cu</span><br><span class="line">LD_LIBRARY_PATH=<span class="variable">$HOME</span>/nvfix ./stream_probe</span><br></pre></td></tr></table></figure>
+
+<h3 id="8-1-三个设计点"><a href="#8-1-三个设计点" class="headerlink" title="8.1 三个设计点"></a>8.1 三个设计点</h3><p><img src="/notes/imgs/cuda-cute-ctx-method.svg" alt="实验方法"></p>
+<p><strong>① 用 dynamic smem 钉住 1 CTA/SM。</strong> 要回答「两个 kernel 能不能同时占用 GPU」，需要一个<br>能精确控制「这个 kernel 占多少个 SM」的旋钮。正常情况下这很难数清：GB200 每 SM 能放 2048<br>线程，block 是 256 线程，理论上一个 SM 能塞 8 个 CTA，那 <code>grid=38</code> 到底占了 5 个 SM 还是<br>38 个？取决于调度器。</p>
+<p>用 shared memory 锁死：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">GB200 每 SM 有 228KB smem</span><br><span class="line">给每个 CTA 申请  228/2 + 4 = 118KB</span><br><span class="line">118 × 2 = 236KB &gt; 228KB  →  一个 SM 最多只放得下 1 个 CTA</span><br></pre></td></tr></table></figure>
+
+<p>程序里用 <code>cudaOccupancyMaxActiveBlocksPerMultiprocessor</code> 确认输出 <code>occupancy=1 CTA/SM</code>。<br>于是得到干净的等价关系：**<code>grid = N</code> ⟺ 占用 N 个 SM**。（256 个线程在这里是无关变量 ——<br>smem 才是卡住的约束。）</p>
+<p><strong>② 用纯自旋 kernel。</strong></p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">long</span> <span class="type">long</span> t0 = <span class="built_in">clock64</span>();</span><br><span class="line"><span class="keyword">while</span> (<span class="built_in">clock64</span>() - t0 &lt; cyc) { }</span><br></pre></td></tr></table></figure>
+
+<p>三个好处：时长完全可预测（不受缓存命中率、访存排队影响）；<strong>不消耗 HBM 带宽</strong>，于是把<br>「调度问题」和「带宽争用问题」彻底解耦 —— 变慢就只可能是没并发；<code>cyc</code> 按时钟频率折算成<br>0.5 ms，跨机器可比。</p>
+<p>对比第 12 章测 PDL 时反而<strong>故意</strong>让 prolog 吃满 HBM —— <strong>测什么就让什么成为唯一变量。</strong></p>
+<p><strong>③ 并发度指标。</strong></p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">sum   = Σ(每个 kernel 自己的时长)        ← 总"kernel 工时"</span><br><span class="line">span  = max(所有结束) - min(所有开始)     ← 这批活的墙上跨度</span><br><span class="line">并发度 = sum / span</span><br></pre></td></tr></table></figure>
+
+<p>完全串行时 <code>span = sum</code> → 1.0；N 个完全重叠时 <code>span = dur, sum = N·dur</code> → N。</p>
+<p>不用墙上时间是因为它包含 CPU 提交与同步开销；<code>span</code> 在<strong>设备上</strong>用 <code>%globaltimer</code> 测。<br><code>clock64()</code> 是每个 SM 各自的计数器，跨 SM / 跨 kernel 不可比，只能用于 CTA 内的时长测量<br>（自旋循环）。</p>
+<h3 id="8-2-踩过的四个坑"><a href="#8-2-踩过的四个坑" class="headerlink" title="8.2 踩过的四个坑"></a>8.2 踩过的四个坑</h3><ol>
+<li><p><strong>每个 stream 只放 1 个 kernel，测不出工作队列不足的假依赖。</strong> 第一次做 §4.3 的实验，<br><code>CONN=1</code> 下 4 个 stream 仍然 3.94 路并发，我一度以为这个机制不存在。原因是假依赖需要<br><strong>同一 stream 内有多个 kernel</strong>：单队列里 <code>A2</code> 等 <code>A1</code>，排在后面的 <code>B1</code> 才会被连坐。<br>4 个 stream 各 1 个 kernel，提交顺序彼此无依赖，单条队列照样连续发射。改成<br>8 streams × 6 kernels 并区分深度/广度优先提交，效应立刻出来了。</p>
+</li>
+<li><p><strong>给 NULL stream 的填充 kernel 传了 0 字节 dynamic smem</strong>，而 kernel 里要写<br><code>extern __shared__</code> → 越界，<code>illegal memory access</code>。改用一个不带 smem 的独立小 kernel。</p>
+</li>
+<li><p><strong>跨进程裸地址实验里 kernel 解引用「成功」了，差点误判成可以跨进程访问。</strong> 必须让<br>consumer 先用<strong>不同的 pattern</strong> 填自己的显存，再去读那个地址，读到 <code>0xBB00</code> 才能证明<br>「同一数值地址指向本进程自己的内存」。<strong>一个不报错的结果比报错的结果更需要追问。</strong></p>
+</li>
+<li><p><strong><code>cudaFuncSetAttribute</code> 设的 carveout 是持久函数属性，会跨实验泄漏。</strong> 前一组实验的<br>MISMATCH 配置泄漏进后一组，导致同样参数测出 12914ns vs 16070ns。每个配置都要显式设。</p>
+</li>
+</ol>
+<hr>
+<h2 id="9-实践清单"><a href="#9-实践清单" class="headerlink" title="9. 实践清单"></a>9. 实践清单</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">想让两个 kernel 并发：</span><br><span class="line">  1. 它们加起来占的 SM 有没有超？   → 超了就没戏，多开 stream 无用</span><br><span class="line">  2. 中间有没有 NULL stream 操作？   → 用 cudaStreamNonBlocking 建流</span><br><span class="line">  3. 同一 stream 内有多个 kernel 吗？→ Hopper 上注意提交顺序与 CONN，Blackwell 上可忽略</span><br><span class="line">  4. 需要 QoS 插队？                → 优先级没用，考虑 Green Contexts</span><br><span class="line"></span><br><span class="line">跨进程共享显存：</span><br><span class="line">  · 绝不要传裸指针值 —— 不会崩，会静默读错</span><br><span class="line">  · 用 cudaIpcGetMemHandle / cudaIpcOpenMemHandle 传 handle</span><br><span class="line">  · kernel 仍不能跨 context 并发，要真并发得开 MPS</span><br><span class="line"></span><br><span class="line">启动开销：</span><br><span class="line">  · 每设备一个 context，各要两三百毫秒 → 服务启动时预热，别让首个请求付</span><br></pre></td></tr></table></figure>
+
+<hr>
+<h2 id="10-引用与核实状态"><a href="#10-引用与核实状态" class="headerlink" title="10. 引用与核实状态"></a>10. 引用与核实状态</h2><table>
+<thead>
+<tr>
+<th>内容</th>
+<th>状态</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>§3.2 / §4.2 / §5.2 / §6.3 的文档引文</td>
+<td>✅ 逐句取自 CUDA C++ Programming Guide <strong>13.0</strong> 归档单页版</td>
+</tr>
+<tr>
+<td>§1–§6 全部性能数字</td>
+<td>✅ <strong>本文实测</strong>，<code>stream_probe.cu</code> / <code>prio_probe.cu</code> / <code>ipc_probe.cu</code> 可复现</td>
+</tr>
+<tr>
+<td>PyTorch stream 为 non-blocking</td>
+<td>✅ 实测 <code>cuStreamGetFlags</code> = 1（torch 2.11.0a0，target_p）</td>
+</tr>
+<tr>
+<td>§4.3 两代架构差异的<strong>归因</strong></td>
+<td>⚠ 只有两个数据点，无法区分架构 / CUDA 版本 / 驱动版本</td>
+</tr>
+<tr>
+<td>§5.2「优先级完全无效」</td>
+<td>⚠ 仅覆盖「每个 kernel 占满 GPU」这一情形；其他资源配比下未测</td>
+</tr>
+<tr>
+<td>Green Contexts 作为替代方案</td>
+<td>⚠ 未实测，仅据文档</td>
+</tr>
+</tbody></table>
+<p>参考资料：</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html">CUDA C++ Programming Guide 13.0（归档单页版）</a><br>—— 现行版拆成了多页，<code>02-basics/asynchronous-execution.html</code> 等路径当前 404，归档单页版<br>更适合全文检索</li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html">CUDA Runtime API — Stream Management</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#env-vars">CUDA 环境变量</a></li>
+<li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/deploy/mps/index.html">Multi-Process Service (MPS)</a></li>
+<li>本系列 <a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/">第 12 章：PDL</a>、<br><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-01-cuda-execution-model/">第 1 章：CUDA 执行模型</a>、<br><a href="/notes/2026/07/29/2026-07-29-cuda-cute-nvidia-learning-02-sm-cuda-core-tensor-core/">第 2 章：SM / CUDA Core / Tensor Core</a></li>
+</ul>
+</div><div class="article-licensing box"><div class="licensing-title"><p>13. CUDA context 与 stream：执行模型的进程视角</p><p><a href="https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/">https://llx-08.github.io/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>llx-08</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2026-08-26</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2026-08-26</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">学习笔记</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUDA/">CUDA</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CuTe-DSL/">CuTe DSL</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/CUTLASS/">CUTLASS</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/GPU/">GPU</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/Tensor-Core/">Tensor Core</a><a class="link-muted mr-2" rel="tag" href="/notes/tags/NVIDIA/">NVIDIA</a></div><!--!--></article></div><!--!--><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-07-partitioning-measured/"><span class="level-item">07 · 多 master 分区：从设计到实测</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><!--!--></div><div class="column column-left is-4-tablet is-4-desktop is-4-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="https://github.com/llx-08.png" alt="llx-08"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">llx-08</p><p class="is-size-6 is-block">学习笔记</p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/notes/archives/"><p class="title">102</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/notes/categories/"><p class="title">5</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/notes/tags/"><p class="title">28</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="https://github.com/llx-08" target="_blank" rel="me noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="Github" href="https://github.com/llx-08"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="me noopener" title="RSS" href="/notes/notes/atom.xml"><i class="fas fa-rss"></i></a></div></div></div><!--!--><div class="card widget" data-type="links"><div class="card-content"><div class="menu"><h3 class="menu-label">链接</h3><ul class="menu-list"><li><a class="level is-mobile" href="https://hexo.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Hexo</span></span><span class="level-right"><span class="level-item tag">hexo.io</span></span></a></li><li><a class="level is-mobile" href="https://bulma.io" target="_blank" rel="noopener"><span class="level-left"><span class="level-item">Bulma</span></span><span class="level-right"><span class="level-item tag">bulma.io</span></span></a></li></ul></div></div></div><div class="card widget" data-type="categories"><div class="card-content"><div class="menu"><h3 class="menu-label">分类</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/EP-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">EP 学习笔记</span></span><span class="level-end"><span class="level-item tag">11</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/"><span class="level-start"><span class="level-item">Mooncake Store 与 cache-aware 调度</span></span><span class="level-end"><span class="level-item tag">10</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/NCCL%E3%80%81PCIe-%E4%B8%8E-Barex-%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="level-start"><span class="level-item">NCCL、PCIe 与 Barex 学习笔记</span></span><span class="level-end"><span class="level-item tag">17</span></span></a></li><li><a class="level is-mobile" href="/notes/categories/vllm%E3%80%81Blade-kvt%E4%B8%8EPD%E5%88%86%E7%A6%BB/"><span class="level-start"><span class="level-item">vllm、Blade-kvt与PD分离</span></span><span class="level-end"><span class="level-item tag">13</span></span></a></li></ul></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-11-gemm-pipeline-deep-dive/">11. GEMM 软件流水线：从延迟隐藏到 roofline 里的那个 max</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-12-pdl-programmatic-dependent-launch/">12. PDL（Programmatic Dependent Launch）：把 kernel 之间的缝隙压掉</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-cuda-cute-nvidia-learning-13-context-stream-concurrency/">13. CUDA context 与 stream：执行模型的进程视角</a></p><p class="categories"><a href="/notes/categories/CUDA%E3%80%81CuTe-DSL-%E4%B8%8E-NVIDIA-GPU-%E6%9E%B6%E6%9E%84%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/">CUDA、CuTe DSL 与 NVIDIA GPU 架构学习笔记</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-07-partitioning-measured/">07 · 多 master 分区：从设计到实测</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2026-08-26T00:00:00.000Z">2026-08-26</time></p><p class="title"><a href="/notes/2026/08/26/2026-08-26-mooncake-store-kv-scheduling-08-internal-mooncake-rldev-alignment/">从统一内存池到多 Master：内部 Mooncake rldev 对我们的启示</a></p><p class="categories"><a href="/notes/categories/Mooncake-Store-%E4%B8%8E-cache-aware-%E8%B0%83%E5%BA%A6/">Mooncake Store 与 cache-aware 调度</a></p></div></article></div></div><div class="card widget" data-type="archives"><div class="card-content"><div class="menu"><h3 class="menu-label">归档</h3><ul class="menu-list"><li><a class="level is-mobile" href="/notes/archives/2026/08/"><span class="level-start"><span class="level-item">八月 2026</span></span><span class="level-end"><span class="level-item tag">20</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/07/"><span class="level-start"><span class="level-item">七月 2026</span></span><span class="level-end"><span class="level-item tag">54</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/06/"><span class="level-start"><span class="level-item">六月 2026</span></span><span class="level-end"><span class="level-item tag">15</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/05/"><span class="level-start"><span class="level-item">五月 2026</span></span><span class="level-end"><span class="level-item tag">5</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/04/"><span class="level-start"><span class="level-item">四月 2026</span></span><span class="level-end"><span class="level-item tag">2</span></span></a></li><li><a class="level is-mobile" href="/notes/archives/2026/03/"><span class="level-start"><span class="level-item">三月 2026</span></span><span class="level-end"><span class="level-item tag">6</span></span></a></li></ul></div></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/notes/tags/Attention/"><span class="tag">Attention</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Barex/"><span class="tag">Barex</span><span class="tag">30</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Blade-KVT/"><span class="tag">Blade-KVT</span><span class="tag">13</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUDA/"><span class="tag">CUDA</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CUTLASS/"><span class="tag">CUTLASS</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/CuTe-DSL/"><span class="tag">CuTe DSL</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/DCP/"><span class="tag">DCP</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/EP/"><span class="tag">EP</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/GPU/"><span class="tag">GPU</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Hybrid-Connector/"><span class="tag">Hybrid Connector</span><span class="tag">13</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/KV-Cache/"><span class="tag">KV Cache</span><span class="tag">24</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MLA/"><span class="tag">MLA</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/MoE/"><span class="tag">MoE</span><span class="tag">11</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Mooncake/"><span class="tag">Mooncake</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NCCL/"><span class="tag">NCCL</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/NVIDIA/"><span class="tag">NVIDIA</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PCIe/"><span class="tag">PCIe</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/PD-%E5%88%86%E7%A6%BB/"><span class="tag">PD 分离</span><span class="tag">23</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RDMA/"><span class="tag">RDMA</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/RL/"><span class="tag">RL</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/Tensor-Core/"><span class="tag">Tensor Core</span><span class="tag">15</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/blade-kvt/"><span class="tag">blade-kvt</span><span class="tag">17</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/cache-aware-%E8%B0%83%E5%BA%A6/"><span class="tag">cache-aware 调度</span><span class="tag">10</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/vLLM/"><span class="tag">vLLM</span><span class="tag">28</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/"><span class="tag">学习笔记</span><span class="tag">67</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E6%95%B0%E5%AD%A6/"><span class="tag">数学</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%87%8F%E5%8C%96/"><span class="tag">量化</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/notes/tags/%E9%A9%B1%E9%80%90%E7%AD%96%E7%95%A5/"><span class="tag">驱逐策略</span><span class="tag">10</span></a></div></div></div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">订阅更新</h3><form action="https://feedburner.google.com/fb/a/mailverify" method="post" target="popupwindow" onsubmit="window.open(&#039;https://feedburner.google.com/fb/a/mailverify?uri=&#039;,&#039;popupwindow&#039;,&#039;scrollbars=yes,width=550,height=520&#039;);return true"><input type="hidden" value="" name="uri"><input type="hidden" name="loc" value="en_US"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div><div class="card widget"><div class="card-content"><div class="notification is-danger">You need to set <code>client_id</code> and <code>slot_id</code> to show this AD unit. Please set it in <code>_config.yml</code>.</div></div></div><div class="card widget" data-type="subscribe-email"><div class="card-content"><div class="menu"><h3 class="menu-label">follow.it</h3><form action="" method="post" target="_blank"><div class="field has-addons"><div class="control has-icons-left is-expanded"><input class="input" name="email" type="email" placeholder="Email"><span class="icon is-small is-left"><i class="fas fa-envelope"></i></span></div><div class="control"><input class="button" type="submit" value="订阅"></div></div></form></div></div></div></div><!--!--></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/notes/"><img src="/notes/img/logo.svg" alt="Notes" height="28"></a><p class="is-size-7"><span>&copy; 2026 llx-08</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a></p><p class="is-size-7">© 2026 llx-08</p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Source" href="https://github.com/llx-08/notes"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-cn");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script data-pjax src="/notes/js/column.js"></script><script src="/notes/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script data-pjax src="/notes/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/pjax@0.2.8/pjax.min.js"></script><script src="/notes/js/pjax.js"></script><!--!--><!--!--><!--!--><script data-pjax src="/notes/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script data-pjax src="/notes/js/insight.js" defer></script><script data-pjax>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/notes/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script><!-- hexo injector body_end start -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    mermaid.initialize({"startOnLoad":true,"theme":"default"});
+  });
+</script>
+<!-- hexo injector body_end end --></body></html>
