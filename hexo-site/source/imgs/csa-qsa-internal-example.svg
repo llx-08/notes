@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <style>
+      .title { font: 700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif; fill: #172033; }
+      .head { font: 700 23px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif; fill: #172033; }
+      .body { font: 500 19px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif; fill: #344054; }
+      .mono { font: 600 17px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #344054; }
+      .white { font: 700 17px ui-monospace, SFMono-Regular, Menlo, monospace; fill: white; }
+      .arrow { stroke: #667085; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#667085"/></marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-opacity="0.12"/></filter>
+  </defs>
+  <rect width="1600" height="900" fill="#f7f9fc"/>
+  <text x="800" y="55" text-anchor="middle" class="title">内部 csa-qsa：R=4、K=8 时，一次 selection 如何完成</text>
+
+  <g filter="url(#shadow)">
+    <rect x="45" y="92" width="1510" height="155" rx="22" fill="white"/>
+    <rect x="45" y="285" width="1510" height="190" rx="22" fill="white"/>
+    <rect x="45" y="515" width="1510" height="150" rx="22" fill="white"/>
+    <rect x="45" y="705" width="1510" height="145" rx="22" fill="white"/>
+  </g>
+
+  <text x="75" y="128" class="head">1. 16 个 raw index keys，按 KV sequence 每 4 个分一组</text>
+  <g>
+    <rect x="90" y="158" width="72" height="48" rx="9" fill="#19a974"/><text x="126" y="188" text-anchor="middle" class="white">k0</text>
+    <rect x="168" y="158" width="72" height="48" rx="9" fill="#19a974"/><text x="204" y="188" text-anchor="middle" class="white">k1</text>
+    <rect x="246" y="158" width="72" height="48" rx="9" fill="#19a974"/><text x="282" y="188" text-anchor="middle" class="white">k2</text>
+    <rect x="324" y="158" width="72" height="48" rx="9" fill="#19a974"/><text x="360" y="188" text-anchor="middle" class="white">k3</text>
+    <rect x="415" y="158" width="72" height="48" rx="9" fill="#39a0ed"/><text x="451" y="188" text-anchor="middle" class="white">k4</text>
+    <rect x="493" y="158" width="72" height="48" rx="9" fill="#39a0ed"/><text x="529" y="188" text-anchor="middle" class="white">k5</text>
+    <rect x="571" y="158" width="72" height="48" rx="9" fill="#39a0ed"/><text x="607" y="188" text-anchor="middle" class="white">k6</text>
+    <rect x="649" y="158" width="72" height="48" rx="9" fill="#39a0ed"/><text x="685" y="188" text-anchor="middle" class="white">k7</text>
+    <rect x="740" y="158" width="72" height="48" rx="9" fill="#f5a623"/><text x="776" y="188" text-anchor="middle" class="white">k8</text>
+    <rect x="818" y="158" width="72" height="48" rx="9" fill="#f5a623"/><text x="854" y="188" text-anchor="middle" class="white">k9</text>
+    <rect x="896" y="158" width="72" height="48" rx="9" fill="#f5a623"/><text x="932" y="188" text-anchor="middle" class="white">k10</text>
+    <rect x="974" y="158" width="72" height="48" rx="9" fill="#f5a623"/><text x="1010" y="188" text-anchor="middle" class="white">k11</text>
+    <rect x="1065" y="158" width="72" height="48" rx="9" fill="#7656d8"/><text x="1101" y="188" text-anchor="middle" class="white">k12</text>
+    <rect x="1143" y="158" width="72" height="48" rx="9" fill="#7656d8"/><text x="1179" y="188" text-anchor="middle" class="white">k13</text>
+    <rect x="1221" y="158" width="72" height="48" rx="9" fill="#7656d8"/><text x="1257" y="188" text-anchor="middle" class="white">k14</text>
+    <rect x="1299" y="158" width="72" height="48" rx="9" fill="#7656d8"/><text x="1335" y="188" text-anchor="middle" class="white">k15</text>
+    <text x="243" y="232" text-anchor="middle" class="mono">G0</text><text x="568" y="232" text-anchor="middle" class="mono">G1</text><text x="893" y="232" text-anchor="middle" class="mono">G2</text><text x="1218" y="232" text-anchor="middle" class="mono">G3</text>
+  </g>
+
+  <text x="75" y="322" class="head">2. 每组平均成一张 compressed 目录卡；每个 Query 独立打分</text>
+  <rect x="95" y="355" width="150" height="65" rx="13" fill="#dff6ec" stroke="#19a974" stroke-width="2"/><text x="170" y="395" text-anchor="middle" class="mono">mean(G0)</text>
+  <rect x="270" y="355" width="150" height="65" rx="13" fill="#e5f4ff" stroke="#39a0ed" stroke-width="2"/><text x="345" y="395" text-anchor="middle" class="mono">mean(G1)</text>
+  <rect x="445" y="355" width="150" height="65" rx="13" fill="#fff2d9" stroke="#f5a623" stroke-width="2"/><text x="520" y="395" text-anchor="middle" class="mono">mean(G2)</text>
+  <rect x="620" y="355" width="150" height="65" rx="13" fill="#eee9ff" stroke="#7656d8" stroke-width="2"/><text x="695" y="395" text-anchor="middle" class="mono">mean(G3)</text>
+  <rect x="870" y="337" width="92" height="52" rx="12" fill="#5b7cfa"/><text x="916" y="369" text-anchor="middle" class="white">qA</text>
+  <text x="990" y="368" class="mono">scores = [0.90, 0.10, 0.75, 0.30]</text>
+  <rect x="870" y="402" width="92" height="52" rx="12" fill="#7656d8"/><text x="916" y="434" text-anchor="middle" class="white">qB</text>
+  <text x="990" y="433" class="mono">scores = [0.20, 0.95, 0.15, 0.80]</text>
+
+  <text x="75" y="552" class="head">3. K=8、R=4，所以每个 Query 只选 B=K/R=2 个 groups</text>
+  <rect x="115" y="582" width="92" height="52" rx="12" fill="#5b7cfa"/><text x="161" y="614" text-anchor="middle" class="white">qA</text>
+  <path d="M220 608 H285" class="arrow"/>
+  <rect x="300" y="580" width="215" height="56" rx="13" fill="#eaf8f1"/><text x="407" y="615" text-anchor="middle" class="mono">Top-2 = [G0,G2]</text>
+  <rect x="790" y="582" width="92" height="52" rx="12" fill="#7656d8"/><text x="836" y="614" text-anchor="middle" class="white">qB</text>
+  <path d="M895 608 H960" class="arrow"/>
+  <rect x="975" y="580" width="215" height="56" rx="13" fill="#f1edff"/><text x="1082" y="615" text-anchor="middle" class="mono">Top-2 = [G1,G3]</text>
+
+  <text x="75" y="742" class="head">4. 展开 group，Main Attention 读取 raw BF16 K/V</text>
+  <text x="105" y="790" class="mono">qA → [0,1,2,3, 8,9,10,11]</text>
+  <text x="650" y="790" class="mono">qB → [4,5,6,7, 12,13,14,15]</text>
+  <rect x="1165" y="755" width="315" height="62" rx="15" fill="#fff4e5" stroke="#f5a623"/>
+  <text x="1322" y="783" text-anchor="middle" class="body">compressed key 只负责导航</text>
+  <text x="1322" y="807" text-anchor="middle" class="body">不直接作为 main K/V</text>
+</svg>

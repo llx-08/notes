@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="840" viewBox="0 0 1500 840">
+  <defs>
+    <style>
+      .title { font: 700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif; fill: #172033; }
+      .head { font: 700 27px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif; fill: #172033; }
+      .body { font: 500 19px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif; fill: #344054; }
+      .box { font: 700 19px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif; fill: #172033; }
+      .small { font: 500 16px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #475467; }
+      .arrow { stroke: #667085; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#667085"/></marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-opacity="0.12"/></filter>
+  </defs>
+  <rect width="1500" height="840" fill="#f7f9fc"/>
+  <text x="750" y="58" text-anchor="middle" class="title">同样叫 CSA，Top-K 之后走向不同</text>
+
+  <g filter="url(#shadow)">
+    <rect x="45" y="95" width="680" height="685" rx="24" fill="white" stroke="#91c9f7" stroke-width="3"/>
+    <rect x="775" y="95" width="680" height="685" rx="24" fill="white" stroke="#9bd5b5" stroke-width="3"/>
+  </g>
+  <text x="385" y="143" text-anchor="middle" class="head">内部 vLLM csa-qsa</text>
+  <text x="1115" y="143" text-anchor="middle" class="head">DeepSeek-V4 报告 CSA</text>
+
+  <g>
+    <rect x="135" y="185" width="500" height="72" rx="16" fill="#e5f4ff" stroke="#39a0ed"/><text x="385" y="216" text-anchor="middle" class="box">Raw index keys</text><text x="385" y="241" text-anchor="middle" class="small">每 R 个做 FP32 average pooling</text>
+    <path d="M385 258 V301" class="arrow"/>
+    <rect x="135" y="315" width="500" height="72" rx="16" fill="#eaf8f1" stroke="#19a974"/><text x="385" y="346" text-anchor="middle" class="box">Compressed indexer cache</text><text x="385" y="371" text-anchor="middle" class="small">长度约 N/R</text>
+    <path d="M385 388 V431" class="arrow"/>
+    <rect x="135" y="445" width="500" height="72" rx="16" fill="#fff2d9" stroke="#f5a623"/><text x="385" y="476" text-anchor="middle" class="box">每 Query 选择 K/R 个 groups</text><text x="385" y="501" text-anchor="middle" class="small">Top-K rows 彼此独立</text>
+    <path d="M385 518 V561" class="arrow"/>
+    <rect x="135" y="575" width="500" height="72" rx="16" fill="#f1edff" stroke="#7656d8"/><text x="385" y="606" text-anchor="middle" class="box">展开为约 K 个 raw token indices</text><text x="385" y="631" text-anchor="middle" class="small">selected group → R 个 positions</text>
+    <path d="M385 648 V691" class="arrow"/>
+    <rect x="135" y="705" width="500" height="48" rx="14" fill="#dce8ff" stroke="#5b7cfa"/><text x="385" y="736" text-anchor="middle" class="box">Attention 读取原始 main K/V</text>
+  </g>
+
+  <g>
+    <rect x="865" y="185" width="500" height="72" rx="16" fill="#e5f4ff" stroke="#39a0ed"/><text x="1115" y="216" text-anchor="middle" class="box">Raw main KV + raw indexer keys</text><text x="1115" y="241" text-anchor="middle" class="small">两条路径都做 learned compression</text>
+    <path d="M1115 258 V301" class="arrow"/>
+    <rect x="865" y="315" width="500" height="72" rx="16" fill="#eaf8f1" stroke="#19a974"/><text x="1115" y="346" text-anchor="middle" class="box">Compressed KV + compressed indexer keys</text><text x="1115" y="371" text-anchor="middle" class="small">weighted、overlapped，长度约 N/m</text>
+    <path d="M1115 388 V431" class="arrow"/>
+    <rect x="865" y="445" width="500" height="72" rx="16" fill="#fff2d9" stroke="#f5a623"/><text x="1115" y="476" text-anchor="middle" class="box">每 Query 选择 K 个 compressed entries</text><text x="1115" y="501" text-anchor="middle" class="small">Top-K rows 彼此独立</text>
+    <path d="M1115 518 V561" class="arrow"/>
+    <rect x="865" y="575" width="500" height="72" rx="16" fill="#f1edff" stroke="#7656d8"/><text x="1115" y="606" text-anchor="middle" class="box">不展开：selected entry 就是 K/V</text><text x="1115" y="631" text-anchor="middle" class="small">Shared Key-Value MQA</text>
+    <path d="M1115 648 V691" class="arrow"/>
+    <rect x="865" y="705" width="500" height="48" rx="14" fill="#dff6ec" stroke="#19a974"/><text x="1115" y="736" text-anchor="middle" class="box">Compressed MQA + 128-token SWA</text>
+  </g>
+</svg>
