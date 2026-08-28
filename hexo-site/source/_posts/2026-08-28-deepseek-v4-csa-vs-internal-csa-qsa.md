@@ -503,36 +503,292 @@ csa_sparse_paged_attention(
 
 DeepSeek-V4 报告 Section 2.3.1、Figure 3 和公式 (9)-(19) 描述的是另一种更彻底的 compression。
 
-### 8.1 Main KV 本身就被压缩
+### 8.1 它不是“先生成普通 K/V，再把四个 K/V 求平均”
 
-报告先从 hidden states 产生两套 KV entries：
+最先要纠正的直觉是：DeepSeek-V4 的 compressed KV 不是由普通 attention 的 raw K/V 做 post-processing 得到的。
 
-```text
-C^a, C^b
+对于每个 hidden state `h_j`，Compressor 直接学习四种 projection：
+
+$$
+C^a_j=h_jW^a_{KV},\qquad C^b_j=h_jW^b_{KV}
+$$
+
+$$
+Z^a_j=h_jW^a_Z,\qquad Z^b_j=h_jW^b_Z
+$$
+
+可以把它们分成两类：
+
+- `C^a/C^b` 是 **content candidates**：如果某个位置被选中，要从它拿走什么内容；
+- `Z^a/Z^b` 是 **gate logits**：这个位置的内容应该被采用多少。
+
+两套 `a/b` projection 不是复制数据。即使输入是同一个 `h_j`，`W^a` 和 `W^b` 也可以学习出不同的表示：一套更适合总结当前 block，另一套更适合作为下一个 compressed entry 的左侧上下文。
+
+官方 inference code 中，当 CSA 的 `m=4` 时：
+
+```python
+coff = 2
+self.wkv   = Linear(hidden_dim, 2 * head_dim)
+self.wgate = Linear(hidden_dim, 2 * head_dim)
 ```
 
-同时产生对应的 compression logits/weights：
+也就是一次 projection 得到两个 `head_dim` 大小的分支，再通过 `overlap_transform` 把“前一组的一条分支”和“当前组的另一条分支”拼成 compression candidates。
+
+### 8.2 用 `m=4` 看清两个分支和 overlap
+
+把原始 token 分成连续 groups：
 
 ```text
-Z^a, Z^b
+G0 = [h0,  h1,  h2,  h3 ]
+G1 = [h4,  h5,  h6,  h7 ]
+G2 = [h8,  h9,  h10, h11]
 ```
 
-对每个 compressed entry，模型不是简单求平均，而是：
+每完成一个 group，输出一个 compressed entry：
 
-1. 使用 trainable compression projections 生成内容和权重；
-2. 加上 learnable positional biases；
-3. 对来自两个相邻分组、总计 `2m` 个候选做 row-wise softmax；
-4. 用 softmax 权重对 entries 做逐维 weighted sum。
+| Compressed entry | 当前分支 | 前一组的 overlap 分支 | 有效 raw positions |
+|---|---|---|---|
+| `Ccomp[0]` | `C^a(G0)` | padding | `h0...h3` |
+| `Ccomp[1]` | `C^a(G1)` | `C^b(G0)` | `h0...h7` |
+| `Ccomp[2]` | `C^a(G2)` | `C^b(G1)` | `h4...h11` |
 
-它可以类比成：内部实现只是把四张目录卡片做算术平均；报告实现则训练了一个“摘要编辑器”，针对每个特征维度学习应该从哪些 token 提取多少信息。
+所以中间的 compressed entry 都有 `2m=8` 个 content candidates。例如：
 
-报告还使用 overlapped compression：一个 compressed entry 会结合当前 `C^a` block 和前一个 `C^b` block，总共涉及 `2m` 个 entries；相邻 compressed entries 的来源存在重叠。尽管感受野覆盖 `2m`，输出序列长度仍约为原来的 `1/m`。
+```text
+Ccomp[1] 的候选：
 
-### 8.2 Indexer keys 使用同类 learned compression
+来自前一组 G0 的 b 分支：C^b_0, C^b_1, C^b_2, C^b_3
+来自当前组 G1 的 a 分支：C^a_4, C^a_5, C^a_6, C^a_7
+```
 
-Lightning Indexer 并不是对 raw index keys 简单平均，而是使用与 main compressed KV 相同类型的 compression operation，产生 compressed indexer keys。
+第一个 compressed entry 没有前一组。报告把不存在的 gate logits 塓为 `-∞`，content 填为 0。softmax 后 padding 权重严格为 0，因此 `Ccomp[0]` 实际只汇总 `G0`。
 
-### 8.3 仍然是每个 Query 独立 Top-K
+![DeepSeek-V4 CSA 的 m=4 overlap compression](/imgs/deepseek-v4-csa-compressor-m4.svg)
+
+### 8.3 Softmaxrow 最容易被误解：它是 per-channel 的 8-way softmax
+
+设 main compressed entry 的维度 `c=512`。那么：
+
+```text
+C candidates 的 shape = [2m, c] = [8, 512]
+Z logits     的 shape = [2m, c] = [8, 512]
+```
+
+`Softmaxrow` 沿 `2m` 个 candidate positions 做，但 **512 个 feature channels 分别归一化**。可以把它写成：
+
+$$
+\sum_{r=1}^{2m}S_{r,\ell}=1,
+\qquad \ell=1,2,\ldots,c
+$$
+
+这里 `r` 是 8 个候选位置之一，`ℓ` 是第几个 feature channel。
+
+这意味着它不是下面这种粗粒度权重：
+
+```text
+错误直觉：
+token 0 整体权重 0.1
+token 1 整体权重 0.7
+...
+```
+
+而更像：
+
+```text
+feature 0：主要从 token 1 取
+feature 1：主要从 token 6 取
+feature 2：混合 token 2 和 token 5
+...
+feature 511：主要从 token 4 取
+```
+
+因此，一个 compressed entry 可以在不同维度上保留不同 token 的特征。这比“8 个向量各乘一个标量后相加”更灵活。
+
+另外，gate logits 还要加 learnable positional bias `B^a/B^b`。对于 group 内相对位置 `0,1,2,3`，模型可以学习稳定的位置偏好。例如某些 channel 可能偏好 block 尾部，因为那里通常包含更新的信息；另一些 channel 可能偏好 block 开头或前一组。
+
+对第 `i` 个 compressed entry 的第 `ℓ` 个 channel，可以直观地写成：
+
+$$
+C^{\mathrm{Comp}}_{i,\ell}
+=\sum_{r=0}^{m-1}\alpha_{i,r,\ell}C^a_{mi+r,\ell}
++\sum_{r=0}^{m-1}\beta_{i,r,\ell}C^b_{m(i-1)+r,\ell}
+$$
+
+其中 `α` 和 `β` 来自同一个 `2m`-way softmax，所以对每个 channel 来说，它们的总和为 1。
+
+官方实现把 compression 计算提升到 FP32，再执行：
+
+```python
+kv = (kv_candidates * gate_logits.softmax(dim=candidate_axis)).sum(
+    dim=candidate_axis
+)
+```
+
+使用 FP32 的原因很直观：softmax 要比较多个 logits，随后还要做 weighted reduction；过早使用低精度会放大归一化和累加误差。压缩完成后才转回模型 dtype。
+
+### 8.4 为什么每个 entry 看了 `2m` 个 token，长度却仍然是 `N/m`
+
+这是第二个最容易绕晕的地方。
+
+关键在于：**感受野大小和输出步长不是一回事。**
+
+- 感受野：一个普通 compressed entry 汇总 `2m=8` 个 raw positions；
+- 输出步长：每新完成 `m=4` 个 token，才产生一个新 entry。
+
+对于 12 个 raw tokens：
+
+```text
+输入 groups：G0, G1, G2          共 3 组
+输出 entries：Ccomp0,Ccomp1,Ccomp2 共 3 个
+```
+
+输出数量仍是 `12/4=3`，因此 sequence length 缩短到 `1/m`。Overlap 只让相邻 summaries 的信息来源交叠，并没有在 group 之间额外插入输出。
+
+从 raw token 角度看，一个完整 group 会参与两个相邻 summaries：
+
+```text
+G0 → 通过 a 分支参与 Ccomp0
+G0 → 通过 b 分支参与 Ccomp1
+```
+
+这能缓解硬边界问题。假如一句话刚好横跨 `G0/G1` 边界，`Ccomp1` 同时看到两侧，不必强迫模型把跨边界关系塞进两个互不相干的平均值。
+
+### 8.5 为什么要同时学习 content 和 gate
+
+可以把普通 average pooling 写成：
+
+```text
+每个位置权重固定为 1/m
+每个 feature channel 使用同一套固定权重
+```
+
+DeepSeek-V4 的 Compressor 则允许：
+
+1. `W_KV` 改写内容表示，使其更适合被压缩和复用；
+2. `W_Z` 根据 token 内容动态决定保留程度；
+3. positional bias 表达 group 内相对位置先验；
+4. 每个 channel 使用不同的 selection/mixing pattern；
+5. overlap 让边界两侧一起竞争。
+
+这更像一位训练出来的摘要编辑器，而不是做算术平均：
+
+```text
+average pooling：每句话等长摘抄一点
+learned compression：不同主题分别挑选最有代表性的句子片段
+```
+
+代价是 Compressor 需要额外的 projections，并且 pooling 本身用 FP32；但它把随后长期存在的 KV cache 和 attention sequence length 都缩短了。
+
+### 8.6 Prefill 与逐 token decode 怎样维护 compression state
+
+#### Prefill
+
+Prefill 一次拿到很多 token。官方实现先计算全部 `kv` 和 `gate logits`，再把 sequence reshape 成：
+
+```text
+[batch, number_of_groups, m, 2c]
+```
+
+经过 `overlap_transform` 后变成：
+
+```text
+[batch, number_of_groups, 2m, c]
+```
+
+随后沿 `2m` 维做 softmax 和 reduction，一次得到所有完整 groups 的 compressed entries。
+
+如果 prefill 长度不是 `m` 的整数倍，末尾不足 `m` 的 token 不会被丢弃。它们会进入 state buffer，等待后续 decode token 把当前 group 补完整。
+
+#### Decode
+
+Decode 每次只有一个新 token。对于 overlap CSA，官方 `Compressor` 维护两类 FP32 state：
+
+```text
+previous window：上一组的 overlap 分支，共 m 个位置
+current window ：当前尚在积累的 normal 分支，共 m 个位置
+```
+
+以 `m=4` 为例：
+
+```text
+收到 h4：current = [h4, -,  -,  - ]，不输出 compressed entry
+收到 h5：current = [h4, h5, -,  - ]，不输出
+收到 h6：current = [h4, h5, h6, - ]，不输出
+收到 h7：current = [h4, h5, h6, h7]，group 完成
+         previous G0 + current G1 → 生成 Ccomp1
+         current G1 随后移动为下一轮 previous
+```
+
+代码中的 boundary 条件就是：
+
+```python
+should_compress = (start_pos + 1) % compress_ratio == 0
+```
+
+所以 compressed KV cache 是 append-only 地每 `m` 个 raw tokens 增加一个 entry。未完成 group 只存在于小型 state buffer，不会占一个正式 compressed slot。
+
+### 8.7 Compressed entry 使用哪个位置做 RoPE
+
+Weighted pooling 完成后，官方实现先做 RMSNorm，然后只对最后 `rope_head_dim=64` 个维度施加 RoPE。
+
+`m=4` 时，`Ccomp[i]` 使用当前 group 第一个 token 的 position：
+
+```text
+Ccomp0 → position 0
+Ccomp1 → position 4
+Ccomp2 → position 8
+```
+
+decode 代码对应：
+
+```python
+position = start_pos + 1 - compress_ratio
+```
+
+当 `h7` 到达并生成 `Ccomp1` 时，position 是 `7+1-4=4`。
+
+这一步发生在 pooling **之后**。也就是说，先在未施加这些 output positions 的空间里做 learned mixing，再给最终 compressed entry 一个确定的位置锚点。
+
+报告还规定：
+
+- compressed KV 和 Query 在 core attention 前做 per-head RMSNorm；
+- 仅最后 64 维携带 RoPE；
+- attention 输出的最后 64 维再施加反向 RoPE，抵消 Value 同时携带 absolute position 的副作用。
+
+在部署存储设计中，RoPE 维度保持 BF16，其他维度使用 FP8，以兼顾位置精度和 cache 容量。官方简化 inference code 对 non-RoPE dims 执行量化模拟，但注释说明当前 reference cache 仍可用 BF16 表示；这要和报告描述的生产部署格式区分开。
+
+### 8.8 Indexer keys 也压缩，但使用独立的 Compressor
+
+CSA 同时存在两份 compressed cache：
+
+```text
+Main compressed KV：head_dim = 512，供最终 MQA 使用
+Compressed indexer keys：index_head_dim = 128，只负责检索
+```
+
+二者都从 hidden states 经过 learned gated overlap compression 得到，但 projections 和 cache 是分开的。Indexer Compressor 不是简单复用 main compressed KV。
+
+官方 `Indexer` 中：
+
+```python
+self.compressor = Compressor(
+    args,
+    compress_ratio=4,
+    head_dim=index_head_dim,
+    rotate=True,
+)
+```
+
+`rotate=True` 表示 indexer compressed keys 在 normalization 和 RoPE 后还会做 Hadamard rotation，再进入 FP4 QK path。Main compressed KV 不走这条 Hadamard/FP4 index path。
+
+因此 compression 同时带来两类收益：
+
+- Indexer 扫描的 candidates 从 `N` 变成约 `N/4`；
+- Main KV cache 的 sequence entries 也从 `N` 变成约 `N/4`。
+
+这正是它和内部 `csa-qsa` 的根本区别：内部 branch 只压缩目录，DeepSeek-V4 连最终被阅读的“内容摘要”也压缩了。
+
+### 8.9 仍然是每个 Query 独立 Top-K
 
 报告公式 (16) 对 Query token `t` 与 compressed block `s` 计算 score：
 
@@ -546,7 +802,11 @@ $$
 
 与内部实现相比，还有一个区别：报告使用 query-dependent、learnable 的 head weights `w^I_{t,h}`。可以理解成 Query 会判断“这次应该更相信哪个检索员”。内部 branch 则把各 head 的正分数等权相加。
 
-### 8.4 被选中的 compressed entry 直接作为 K 和 V
+DeepSeek-V4-Pro 的 `m=4`、`index_topk=1024`，因此每个 Query 最多选择 1024 个 compressed entries。每个普通 entry 的信息感受野覆盖 8 个 raw positions，但不能把它机械理解为“精确保留 8192 个 token”：8 个位置已经通过 per-channel weighted sum 融合成一个 512 维表示。
+
+DeepSeek-V4-Flash 同样使用 `m=4`，但 attention top-k 是 512。
+
+### 8.10 被选中的 compressed entry 直接作为 K 和 V
 
 这是与内部实现最重要的差别。
 
@@ -567,7 +827,9 @@ value = selected compressed entries
 
 因此报告中的 `attention top-k=1024` 表示每个 Query 最多选择 1024 个 compressed KV entries，而不是先选择 `1024/m` groups 再展开为 1024 个 raw tokens。
 
-### 8.5 为什么还需要 Sliding Window Attention
+这里也解释了为什么报告称其为 Shared Key-Value MQA：同一个 `Ccomp[s]` 向量同时扮演 attention key 和 value。它不是传统 GQA 中分开的 K projection 与 V projection。
+
+### 8.11 Causality、未完成 group 与 Sliding Window Attention
 
 严格 causal compression 只允许 Query 访问此前已经完成的 compressed blocks，因此 Query 无法通过 compressed branch 看到自己所在的未完成 block。
 
@@ -581,6 +843,54 @@ value = selected compressed entries
 这既补足 causal tail，也保留局部 fine-grained dependencies。
 
 内部 `csa-qsa` 没有同样的 SWA branch；它通过在 expanded indices 后追加最多 `R-1` 个 incomplete tail tokens，解决“当前 compression group 尚未完成”的可见性问题。两者不能简单视为同一种 tail 处理。
+
+对于 Query position `t`，报告和官方代码只允许它看到：
+
+```text
+compressed index < floor((t + 1) / m)
+```
+
+因此任何 visible compressed entry 都已经由完整 group 生成，不会偷看未来 token。最近 128 个 raw KV 则由独立 circular SWA cache 提供；main cache 的逻辑大小可以理解为：
+
+```text
+128 个 raw sliding-window entries
++ 最多 N/m 个 compressed entries
+```
+
+### 8.12 把整个 Compressor 压缩成一段伪代码
+
+```python
+def compress_one_complete_group(previous_group, current_group):
+    # 每个 token 同时产生两个 content 分支和两个 gate 分支
+    prev_content, prev_gate = project_overlap_branch(previous_group)
+    curr_content, curr_gate = project_current_branch(current_group)
+
+    # shape: [2m, c]；每个 channel 独立在 2m 个位置上竞争
+    content = concat(prev_content, curr_content, axis=token_candidate_axis)
+    logits = concat(prev_gate, curr_gate, axis=token_candidate_axis)
+    logits += learnable_relative_position_bias
+
+    weights = softmax_fp32(logits, axis=token_candidate_axis)
+    compressed = sum(weights * content, axis=token_candidate_axis)
+
+    compressed = rms_norm(compressed)
+    compressed[-64:] = rope(compressed[-64:], position=current_group.start)
+    return compressed
+```
+
+最终可以把 DeepSeek-V4 CSA 的 main 数据流记成：
+
+```text
+Hidden states
+   ↓ two-branch content/gate projections
+Learned per-channel overlap compression：每 4 token 输出 1 entry
+   ↓
+Main compressed KV cache：N/4 × 512
+   ├─ compressed indexer cache：N/4 × 128 → per-query Top-K
+   └─ selected main entries + 128 raw SWA entries
+                                      ↓
+                         Shared Key-Value MQA
+```
 
 ---
 
@@ -745,6 +1055,7 @@ DeepSeek-V4 CSA
 
 - DeepSeek-AI, *DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence*, Section 2.3.1, Figure 3, Equations (9)-(19)。
 - DeepSeek-V4 官方 inference implementation：<https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/tree/main/inference>
+- 本文复核的官方 `Compressor/Indexer/Attention` 代码版本：<https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/292e68aa01e9d6089f015fdfd876e5178ebbacf2/inference/model.py>
 - 内部 vLLM `csa-qsa` commit：`b6c180faefebe30e5be4bd63aa6e710d64956c0c`
 - `vllm/model_executor/layers/qwen4_exp_csa_indexer.py`
 - `vllm/model_executor/layers/qwen4_exp_csa.py`
